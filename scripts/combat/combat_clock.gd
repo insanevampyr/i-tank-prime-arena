@@ -16,7 +16,8 @@ func get_round_index() -> int:
 
 func get_round_index_at(timestamp_us: int) -> int:
 	assert(timestamp_us >= 0, "Combat timestamps cannot be negative.")
-	return floori(float(timestamp_us) / float(ROUND_DURATION_US))
+	@warning_ignore("integer_division")
+	return timestamp_us / ROUND_DURATION_US
 
 
 func get_round_offset_us_at(timestamp_us: int) -> int:

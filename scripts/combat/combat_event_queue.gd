@@ -5,12 +5,13 @@ var _events: Array = []
 var _event_ids: Dictionary = {}
 
 
-func enqueue(event: CombatEvent) -> void:
-	assert(event != null, "Cannot enqueue a null combat event.")
-	assert(not _event_ids.has(event.event_id), "Combat event identifiers must be unique within a queue.")
+func enqueue(event: CombatEvent) -> bool:
+	if event == null or _event_ids.has(event.event_id):
+		return false
 	_events.append(event)
 	_event_ids[event.event_id] = true
 	_events.sort_custom(_event_precedes)
+	return true
 
 
 func pop_next() -> CombatEvent:
@@ -45,6 +46,14 @@ func drain() -> Array:
 	_events.clear()
 	_event_ids.clear()
 	return ordered_events
+
+
+func pop_due(up_to_timestamp_us: int) -> Array:
+	assert(up_to_timestamp_us >= 0, "Due-event timestamps cannot be negative.")
+	var due_events: Array = []
+	while not _events.is_empty() and (_events.front() as CombatEvent).timestamp_us <= up_to_timestamp_us:
+		due_events.append(pop_next())
+	return due_events
 
 
 func snapshot() -> Array:

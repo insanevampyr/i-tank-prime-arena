@@ -8,6 +8,7 @@ func run() -> Array[String]:
 	_test_deterministic_replay()
 	_test_round_boundaries()
 	_test_timestamp_ties()
+	_test_duplicate_event_rejection()
 	_test_event_schema_reserves_future_fields()
 	return _failures
 
@@ -55,6 +56,14 @@ func _test_timestamp_ties() -> void:
 	_expect_equal(ordered[1].event_id, first_created.event_id, "Stable creation order must break a remaining timestamp and INIT tie.")
 	_expect_equal(ordered[2].event_id, second_created.event_id, "The stable fallback must not reorder equal-priority events.")
 	_expect_true(first_created.event_id != second_created.event_id, "Every scheduled event must receive a unique identifier.")
+
+
+func _test_duplicate_event_rejection() -> void:
+	var queue := CombatEventQueue.new()
+	var event := CombatEvent.new("duplicate_fixture", 1_000_000, 5, 0, &"fixture")
+	_expect_true(queue.enqueue(event), "The first delivery of a valid event must be accepted.")
+	_expect_true(not queue.enqueue(event), "A duplicate event identifier must be rejected while preserving the original event.")
+	_expect_equal(queue.size(), 1, "Duplicate delivery must not add a second queued effect.")
 
 
 func _test_event_schema_reserves_future_fields() -> void:

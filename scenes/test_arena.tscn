@@ -20,7 +20,7 @@ offset_right = 420.0
 offset_bottom = 56.0
 theme_override_colors/font_color = Color(0.88, 0.91, 0.95, 1)
 theme_override_font_sizes/font_size = 22
-text = "ITank Prime Arena - Phase 0"
+text = "ITank Prime Arena - Phase 1 Movement"
 
 [node name="Instructions" type="Label" parent="."]
 offset_left = 34.0
@@ -29,11 +29,21 @@ offset_right = 475.0
 offset_bottom = 88.0
 theme_override_colors/font_color = Color(0.62, 0.69, 0.76, 1)
 theme_override_font_sizes/font_size = 16
-text = "WASD moves the temporary placeholder"
+text = "WASD moves; hold Shift to test verified automatic Running"
+
+[node name="MovementDebug" type="Label" parent="."]
+offset_left = 34.0
+offset_top = 102.0
+offset_right = 510.0
+offset_bottom = 320.0
+theme_override_colors/font_color = Color(0.74, 0.82, 0.9, 1)
+theme_override_font_sizes/font_size = 15
+text = "Movement state initializing..."
 
 [node name="PlaceholderPlayer" type="CharacterBody2D" parent="."]
 position = Vector2(576, 324)
 script = ExtResource("1_player")
+movement_debug_label_path = NodePath("../MovementDebug")
 
 [node name="Visual" type="Polygon2D" parent="PlaceholderPlayer"]
 polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)

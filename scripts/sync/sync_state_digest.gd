@@ -19,7 +19,7 @@ static func canonicalize(value: Variant) -> String:
 		TYPE_INT:
 			return "int:%d" % value
 		TYPE_FLOAT:
-			return "float:%.17g" % value
+			return "float:%s" % String.num(value, 17)
 		TYPE_STRING, TYPE_STRING_NAME:
 			return "string:%s" % JSON.stringify(String(value))
 		TYPE_ARRAY:

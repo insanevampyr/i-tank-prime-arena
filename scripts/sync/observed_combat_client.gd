@@ -8,6 +8,7 @@ var _pending_by_sequence: Dictionary = {}
 var _applied_by_sequence: Dictionary = {}
 var _transcript: Array = []
 var _failures: Array[String] = []
+var _state_snapshot: Dictionary = {}
 
 
 func _init(p_client_id: String) -> void:
@@ -38,7 +39,14 @@ func get_transcript() -> Array:
 
 
 func get_state_digest() -> String:
-	return SyncStateDigest.compute(_transcript)
+	return SyncStateDigest.compute({
+		"transcript": _transcript,
+		"state_snapshot": _state_snapshot,
+	})
+
+
+func get_state_snapshot() -> Dictionary:
+	return _state_snapshot.duplicate(true)
 
 
 func get_applied_event_count() -> int:
@@ -59,6 +67,7 @@ func _apply_contiguous_events() -> void:
 		_pending_by_sequence.erase(_expected_sequence)
 		_applied_by_sequence[_expected_sequence] = serialized.duplicate(true)
 		_transcript.append(serialized.duplicate(true))
+		_state_snapshot = (serialized.get("state_snapshot", {}) as Dictionary).duplicate(true)
 		_expected_sequence += 1
 
 
