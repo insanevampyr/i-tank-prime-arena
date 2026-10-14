@@ -4,7 +4,8 @@
 /android/
 
 # Local export and test output.
-/builds/
+/builds/*
+!/builds/.gdignore
 /test-results/
 *.pck
 

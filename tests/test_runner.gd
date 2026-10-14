@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CombatFoundationTests = preload("res://tests/test_combat_foundation.gd")
+const SyncFoundationTests = preload("res://tests/test_sync_foundation.gd")
 
 
 func _initialize() -> void:
@@ -8,14 +9,24 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	var suite := CombatFoundationTests.new()
-	var failures := suite.run()
-	if failures.is_empty():
-		print("PASS: combat foundation tests")
+	var suites := [
+		{"name": "combat foundation", "instance": CombatFoundationTests.new()},
+		{"name": "two-client synchronization", "instance": SyncFoundationTests.new()},
+	]
+	var failure_count := 0
+	for suite: Dictionary in suites:
+		var failures: Array[String] = suite["instance"].run()
+		if failures.is_empty():
+			print("PASS: %s tests" % suite["name"])
+			continue
+		for failure: String in failures:
+			push_error("%s: %s" % [suite["name"], failure])
+		failure_count += failures.size()
+
+	if failure_count == 0:
+		print("PASS: all test suites")
 		quit(0)
 		return
 
-	for failure: String in failures:
-		push_error(failure)
-	print("FAIL: %d combat foundation test(s)" % failures.size())
+	print("FAIL: %d test assertion(s)" % failure_count)
 	quit(1)

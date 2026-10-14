@@ -33,6 +33,7 @@ Legacy creature records and older Special sheets remain historical references. T
 | EVENT-001 | ARENA LOCK | Authoritative actions are timestamped and ordered. Resolution success and finalization are distinct concepts. | ARENA-COMBAT-1.0 section 3 | Foundation event fields exist; action mechanics are not implemented |
 | EVENT-002 | ARENA LOCK | Events at the same effect timestamp use higher INIT first, then a deterministic server tie-breaker. | ARENA-COMBAT-1.0 sections 2 and 3; ARENA-ROADMAP-1.2 section 3 | Implemented as descending INIT followed by stable creation sequence and event identifier |
 | EVENT-003 | ARCHITECTURE LOCK | Combat simulation and authoritative event production remain independent of rendering, input, audio, saves, and network transport. | ARENA-ROADMAP-1.2 sections 1 and 7 | Implemented in the Phase 0 module boundary |
+| SYNC-001 | ARCHITECTURE LOCK | A future host or server owns authoritative combat state and resolved event ordering; clients observe validated results rather than deciding them. | ARENA-COMBAT-1.0 section 10; ARENA-ROADMAP-1.2 sections 1 and 7 | In-process sequence, duplicate-delivery, ordering, and digest harness implemented; no transport exists |
 | RNG-001 | ARCHITECTURE LOCK | Random choices used by rules must be seedable so tests and event replays are reproducible. | ARENA-COMBAT-1.0 section 10; ARENA-ROADMAP-1.2 section 7 | Seeded RNG wrapper implemented; no rule rolls implemented |
 | ACC-001 | ARENA LOCK | ACC is checked for every valid attack; sprite contact is not an automatic hit. | ARENA-COMBAT-1.0 section 3 | Not implemented in Task 1 |
 | HIT-001 | ARENA LOCK | Ordinary attacks target the torso; optional aimed locations use applicable Prime modifiers and armor coverage. | ARENA-COMBAT-1.0 section 3 | Not implemented in Task 1 |
@@ -67,3 +68,7 @@ Legacy creature records and older Special sheets remain historical references. T
 ## Task 1 implementation boundary
 
 Task 1 implements only neutral infrastructure: integer timestamps, five-second boundary calculation, seeded random generation, deterministic event identifiers, dependency and resource-commitment fields, and queue ordering. It does not interpret payloads or implement attacks, defenses, Specials, NAC resolution, interruptions, damage, character progression, loot, creatures, AI, saves, or networking.
+
+## Task 2 implementation boundary
+
+Task 2 wraps authoritative simulation output in a sequence-numbered, transport-neutral protocol and verifies that two passive observers converge after duplicate and out-of-order delivery. State digests cover the canonical observed event transcript. This is not network transport, rollback, prediction, matchmaking, account state, or gameplay resolution.
