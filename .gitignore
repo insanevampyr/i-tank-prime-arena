@@ -1,0 +1,16 @@
+# Godot-generated state and imports.
+.godot/
+.import/
+/android/
+
+# Local export and test output.
+/builds/
+/test-results/
+*.pck
+
+# Editor and operating-system metadata.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
