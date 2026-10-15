@@ -22,6 +22,7 @@ var damage_types: PackedStringArray
 var physical_soak_eligible: Variant
 var ducking_policy: StringName
 var physical_damage: CombatPhysicalDamageDefinition
+var critical_trigger_policy: CombatCriticalTriggerPolicy
 
 
 func _init(
@@ -41,7 +42,8 @@ func _init(
 	p_damage_types: PackedStringArray = PackedStringArray(),
 	p_physical_soak_eligible: Variant = null,
 	p_ducking_policy: StringName = DUCKING_UNRESOLVED,
-	p_physical_damage: CombatPhysicalDamageDefinition = null
+	p_physical_damage: CombatPhysicalDamageDefinition = null,
+	p_critical_trigger_policy: CombatCriticalTriggerPolicy = null
 ) -> void:
 	assert(not String(p_attack_definition_id).is_empty(), "Physical attack definitions require a stable identifier.")
 	assert(not String(p_weapon_ref).is_empty(), "Physical attack definitions require an equipment reference.")
@@ -84,6 +86,9 @@ func _init(
 	physical_soak_eligible = p_physical_soak_eligible
 	ducking_policy = p_ducking_policy
 	physical_damage = p_physical_damage
+	critical_trigger_policy = p_critical_trigger_policy
+	if critical_trigger_policy == null:
+		critical_trigger_policy = CombatCriticalTriggerPolicy.new()
 
 
 func has_resolved_range() -> bool:
@@ -132,4 +137,5 @@ func to_dictionary() -> Dictionary:
 		"physical_soak_eligible": physical_soak_eligible,
 		"ducking_policy": String(ducking_policy),
 		"physical_damage": null if physical_damage == null else physical_damage.to_dictionary(),
+		"critical_trigger_policy": critical_trigger_policy.to_dictionary(),
 	}

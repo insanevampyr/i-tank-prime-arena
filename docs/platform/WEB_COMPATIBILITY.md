@@ -33,6 +33,40 @@ The exported `index.html` returned HTTP 200 from a local loopback HTTP server. M
 - Low-level networking is unavailable. Browser clients are limited to supported HTTP, WebSocket client, and WebRTC paths.
 - If threading is enabled later, deployment requires HTTPS plus cross-origin isolation headers or the documented PWA workaround. That change requires a measured need and approval.
 
+## Phase 1 Task 13 mobile input baseline
+
+The temporary arena now uses one shared player-input boundary:
+
+- Desktop: WASD movement and Shift Running remain unchanged.
+- Touch: a fixed lower-left joystick provides movement direction and a separate lower-right RUN target supplies the same Running hold intent as Shift.
+- Multitouch: joystick and RUN track independent touch indexes, so movement and Running can be held simultaneously.
+- Safety: touch release, browser-canceled touches, viewport resize/rotation, application pause and application focus loss clear captured touch state. The following physics tick observes released intent and follows the existing Running stop behavior.
+- Presentation: controls appear when a touchscreen is detected and on narrow Web viewports used for mobile-browser testing. The responsive layout keeps status text above the lower control zone and recommends landscape orientation when portrait is detected.
+
+Only movement and Running are connected. Attack, defense, critical, Special and NAC buttons are intentionally not shown because the current test scene does not yet provide approved player targeting or action-declaration integration. The underlying deterministic combat tests remain headless and input-independent.
+
+Android-sized layout tests cover `800 x 360`, `915 x 412`, `1280 x 720`, and portrait rotation at `360 x 800`. These are simulated viewport and input-state tests, not evidence from a physical Android device.
+
+## Test the Web build on an Android phone
+
+1. Export the existing `Web` preset from the project root:
+
+   `Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-release Web builds/web/index.html`
+
+2. In PowerShell, serve the generated files on the local network:
+
+   `Set-Location builds/web`
+
+   `python -m http.server 8060 --bind 0.0.0.0`
+
+3. Find the Windows computer's local IPv4 address with `ipconfig`. Keep the phone and computer on the same trusted Wi-Fi network and allow the Python process through Windows Firewall only for that trusted/private network if prompted.
+
+4. In Chrome on Android, open `http://<computer-ipv4>:8060/`, rotate to landscape, and wait for the Godot canvas to load.
+
+5. Verify the lower-left joystick moves the placeholder, RUN can be held with a second finger, releasing either finger clears only its control, rotating/resizing does not leave movement stuck, and returning after switching apps does not leave RUN or movement held.
+
+6. Open Chrome remote debugging from a desktop Chrome instance (`chrome://inspect`) if console or WebAssembly diagnostics are needed. Do not treat a desktop emulated viewport as a physical-device pass.
+
 ## Official references
 
 - https://docs.godotengine.org/en/4.7/tutorials/export/exporting_for_web.html

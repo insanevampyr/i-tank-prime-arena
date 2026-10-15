@@ -17,6 +17,7 @@ var opening_initiative_total: Variant = null
 var opening_order_rank: Variant = null
 var opening_action_declared: bool = false
 var current_action_instance_id: String = ""
+var critical_stagger_until_us: int = 0
 var action_timing_anchor_us: int = 0
 var action_timing_cursor_us: int = 0
 var next_action_interval_index: int = 0
@@ -53,6 +54,7 @@ func to_dictionary() -> Dictionary:
 		"opening_order_rank": opening_order_rank,
 		"opening_action_declared": opening_action_declared,
 		"current_action_instance_id": current_action_instance_id,
+		"critical_stagger_until_us": critical_stagger_until_us,
 		"action_timing_anchor_us": action_timing_anchor_us,
 		"action_timing_cursor_us": action_timing_cursor_us,
 		"next_action_interval_index": next_action_interval_index,

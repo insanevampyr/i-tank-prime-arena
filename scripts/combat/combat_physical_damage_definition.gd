@@ -37,9 +37,8 @@ func _init(
 		assert(typeof(p_minimum_one_applies) == TYPE_BOOL, "Minimum-one eligibility must be boolean or unresolved.")
 	assert(
 		p_rounding_policy == ROUNDING_UNRESOLVED
-		or p_rounding_policy == ROUNDING_FLOOR
-		or p_rounding_policy == ROUNDING_CEIL,
-		"Unsupported damage multiplier rounding policy."
+		or p_rounding_policy == ROUNDING_FLOOR,
+		"Arena v1.6 requires floor-once damage multiplier rounding."
 	)
 	for location: Variant in p_location_multipliers:
 		_validate_multiplier(p_location_multipliers[location])
@@ -52,8 +51,11 @@ func _init(
 	minimum_one_applies = p_minimum_one_applies
 	location_multipliers = p_location_multipliers.duplicate(true)
 	critical_multiplier = null if p_critical_multiplier == null else (p_critical_multiplier as Dictionary).duplicate(true)
-	multiplier_stacking_resolved = p_multiplier_stacking_resolved
-	rounding_policy = p_rounding_policy
+	# v1.6 globally resolves legitimate multiplier composition and rounding.
+	# Retain the constructor arguments for serialized fixture compatibility, but
+	# normalize every definition to the controlling Arena rule.
+	multiplier_stacking_resolved = true
+	rounding_policy = ROUNDING_FLOOR
 	source_refs = p_source_refs.duplicate()
 
 

@@ -20,18 +20,20 @@ Only an attack in `defenses_exhausted` may enter damage resolution. The authorit
 
 1. roll each weapon die from the seeded RNG;
 2. add the explicit flat bonus and eligible SB;
-3. apply explicit type, location and critical multipliers in the approved stage/order;
+3. reduce and combine every legitimate pre-protection type, location and critical multiplier as one exact rational product, multiply the subtotal, and round down exactly once;
 4. select armor covering the struck location and subtract the lowest TAL for combined physical types;
 5. subtract NAL;
-6. apply an explicit immunity or post-protection weakness when applicable;
+6. apply an explicit source-specific post-protection response when applicable;
 7. enforce the approved minimum-one policy unless an explicit immunity/exception overrides it;
 8. reduce authoritative HPC once and record the complete causal result.
 
-The record contains all weapon rolls and RNG draw indexes, components, applied multipliers, selected armor/slot/TAL, NAL, type response, minimum-one flag, HPC before/after and event identity. The attack becomes `damage_resolved`, preventing a second application. A successful Dodge, Block or Physical Soak remains `defended` and is never damage eligible.
+The record contains all weapon rolls and RNG draw indexes, components, applied multipliers, the exact combined numerator/denominator, the once-rounded multiplied total, selected armor/slot/TAL, NAL, type response, minimum-one flag, HPC before/after and event identity. The attack becomes `damage_resolved`, preventing a second application. A successful Dodge, Block or Physical Soak remains `defended` and is never damage eligible.
 
-## Fail-closed multiplier boundary
+## Exact multiplier and fail-closed eligibility boundary
 
-A natural ACC 1 remains a recorded critical trigger, but physical damage does not invent its consequence. If no source-driven critical multiplier/effect exists, resolution returns `critical_damage_effect_unresolved` before damage RNG. A fractional multiplier with no approved rounding rule returns `damage_multiplier_rounding_unresolved`. More than one non-unit multiplier with no approved stacking rule returns `damage_multiplier_stacking_unresolved`.
+A natural or source-expanded ACC critical remains a recorded trigger, but physical damage does not invent its consequence. If no source-driven critical multiplier/effect exists, resolution returns `critical_damage_effect_unresolved` before damage RNG. When every factor is legitimate, Task #11 uses exact integer numerator/denominator composition with cross-cancellation and one floor before TAL and NAL. The old intermediate-rounding and unresolved-stacking paths are superseded by Combat Specification v1.6; unsupported factor eligibility still fails closed.
+
+Head and neck use Prime's `3/2` (`x1.5`) location factor. The prior `x2 head` example was illustrative and is not production data.
 
 These boundaries deliberately permit the verified ordinary subset while preventing an implementation convenience from becoming a rule.
 
@@ -51,8 +53,7 @@ Damage definitions, protection profiles, resolutions, HPC, SHP and sequence coun
 
 ## Remaining designer/source gates
 
-- Approve fractional multiplier rounding.
-- Approve stacking order when critical, location and weakness multipliers coexist.
+- Verify the protection-order stage for each source-specific weakness whose source does not state one.
 - Author physical critical-success/failure consequences and item-specific expanded critical effects.
 - Transcribe production weapons, armor, immunities, weaknesses and Prime-specific exceptions to minimum-one damage.
 - Assign source-backed duck policies to production attacks and Specials individually.

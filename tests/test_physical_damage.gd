@@ -7,7 +7,7 @@ func run() -> Array[String]:
 	_test_weapon_damage_sb_armor_nal_and_minimum()
 	_test_damage_types_locations_and_type_responses()
 	_test_defense_damage_gating_and_shield_destruction()
-	_test_multiplier_pending_boundaries()
+	_test_multiplier_precision_and_critical_boundary()
 	_test_ducking_eligibility_policies()
 	_test_timing_replay_and_two_client_convergence()
 	return _failures
@@ -171,36 +171,63 @@ func _test_defense_damage_gating_and_shield_destruction() -> void:
 	_expect_true(not shield_fixture["simulation"].get_actor_state(&"target").equipment_refs.has("shield"), "A zero-SHP shield must be removed from authoritative equipped-item references.")
 
 
-func _test_multiplier_pending_boundaries() -> void:
+func _test_multiplier_precision_and_critical_boundary() -> void:
 	var critical := _build_damage_fixture(
 		_find_seed_for_d20_sequence([1]), _damage_definition(1, 6, false, true), PackedStringArray(["bashing"])
 	)
 	critical["simulation"].resolve_pending_defense(critical["attack_id"], "critical_defense")
 	var critical_before: int = critical["simulation"].random.get_draw_count()
 	var critical_result: Dictionary = critical["simulation"].resolve_physical_damage(critical["attack_id"], "critical_damage")
-	_expect_equal(critical_result["reason"], "critical_damage_effect_unresolved", "Unauthored critical damage must remain pending instead of inventing a multiplier.")
-	_expect_equal(critical["simulation"].random.get_draw_count(), critical_before, "An unresolved critical must fail before consuming damage RNG.")
+	_expect_true(critical_result["success"], "An approved critical consequence must no longer hit the former unassigned-effect gate.")
+	_expect_equal(critical["simulation"].random.get_draw_count(), critical_before + 1, "Resolved approved critical damage must consume exactly the configured weapon-damage roll.")
 
-	var fractional_locations := _unit_locations()
-	fractional_locations["head"] = {"numerator": 3, "denominator": 2, "source_ref": "PRIME-V3 p.95"}
-	var fractional := _build_damage_fixture(
-		_find_seed_for_d20_sequence([5]), _damage_definition(1, 6, false, true, fractional_locations), PackedStringArray(["bashing"]), &"head"
+	var prime_locations := _unit_locations()
+	prime_locations["head"] = {"numerator": 3, "denominator": 2, "source_ref": "PRIME-V3 p.98"}
+	prime_locations["neck"] = {"numerator": 3, "denominator": 2, "source_ref": "PRIME-V3 p.98"}
+	for location: String in ["head", "neck"]:
+		var fractional := _build_damage_fixture(
+			_find_seed_for_rolls(5, [5], 6),
+			_damage_definition(1, 6, false, true, prime_locations),
+			PackedStringArray(["bashing"]),
+			StringName(location)
+		)
+		var fractional_resolution := _resolve_fixture_damage(fractional, "fractional_%s" % location)
+		_expect_equal(fractional_resolution.multiplied_total, 7, "Prime head/neck x1.5 must floor 7.5 to 7 exactly once.")
+		_expect_equal(fractional_resolution.final_damage, 6, "NAL must subtract after the head/neck product is floored.")
+		_expect_equal(fractional_resolution.combined_multiplier_numerator, 3, "Head/neck multiplier numerator must remain exact.")
+		_expect_equal(fractional_resolution.combined_multiplier_denominator, 2, "Head/neck multiplier denominator must remain exact.")
+
+	var combined_locations := _unit_locations()
+	combined_locations["head"] = {"numerator": 3, "denominator": 2, "source_ref": "PRIME-V3 p.98"}
+	var combined_damage := CombatPhysicalDamageDefinition.new(
+		1,
+		6,
+		0,
+		false,
+		true,
+		combined_locations,
+		{"numerator": 2, "denominator": 1, "source_ref": "TEST-FIXTURE: source-valid critical multiplier"},
+		true,
+		CombatPhysicalDamageDefinition.ROUNDING_FLOOR,
+		PackedStringArray(["TEST-FIXTURE: exact multiplier composition"])
 	)
-	fractional["simulation"].resolve_pending_defense(fractional["attack_id"], "fractional_defense")
-	_expect_equal(fractional["simulation"].resolve_physical_damage(fractional["attack_id"], "fractional_damage")["reason"], "damage_multiplier_rounding_unresolved", "Fractional location damage must fail closed until its rounding rule is approved.")
-
-	var stacking_locations := _unit_locations()
-	stacking_locations["head"] = {"numerator": 2, "denominator": 1, "source_ref": "TEST-FIXTURE"}
-	var stacking := _build_damage_fixture(
-		_find_seed_for_d20_sequence([5]),
-		_damage_definition(1, 6, false, true, stacking_locations),
+	var combined_armor := _armor(&"head_armor", &"head", PackedStringArray(["head"]), {"bashing": 2})
+	var combined := _build_damage_fixture(
+		_find_seed_for_critical_damage(1, 5, 6),
+		combined_damage,
 		PackedStringArray(["bashing"]),
 		&"head",
-		[],
-		{"bashing": {"kind": CombatDamageProtectionProfile.RESPONSE_MULTIPLIER, "numerator": 2, "denominator": 1, "stage": CombatDamageProtectionProfile.STAGE_PRE_PROTECTION, "source_ref": "TEST-FIXTURE"}}
+		[combined_armor],
+		{"bashing": {"kind": CombatDamageProtectionProfile.RESPONSE_MULTIPLIER, "numerator": 3, "denominator": 2, "stage": CombatDamageProtectionProfile.STAGE_PRE_PROTECTION, "source_ref": "TEST-FIXTURE: source-valid weakness"}}
 	)
-	stacking["simulation"].resolve_pending_defense(stacking["attack_id"], "stacking_defense")
-	_expect_equal(stacking["simulation"].resolve_physical_damage(stacking["attack_id"], "stacking_damage")["reason"], "damage_multiplier_stacking_unresolved", "Multiple damage multipliers must fail closed until stacking order is approved.")
+	var combined_resolution := _resolve_fixture_damage(combined, "combined_fractional")
+	_expect_equal(combined_resolution.weapon_dice_total, 5, "Combined multiplier fixture must retain its verified weapon roll.")
+	_expect_equal(combined_resolution.combined_multiplier_numerator, 9, "Critical x2, location x1.5 and weakness x1.5 must combine to an exact 9/2 product.")
+	_expect_equal(combined_resolution.combined_multiplier_denominator, 2, "Combined fractional factors must retain one exact denominator.")
+	_expect_equal(combined_resolution.multiplied_total, 22, "5 x 2 x 1.5 x 1.5 must floor once from 22.5 to 22.")
+	_expect_equal(combined_resolution.armor_tal, 2, "TAL must subtract only after the complete product is floored.")
+	_expect_equal(combined_resolution.natural_armor_level, 1, "NAL must subtract after TAL.")
+	_expect_equal(combined_resolution.final_damage, 19, "Combined fractional damage must be floor-once, then TAL, then NAL.")
 
 
 func _test_ducking_eligibility_policies() -> void:
@@ -449,6 +476,20 @@ func _find_seed_for_defense_and_damage(acc_roll: int, defense_roll: int, damage_
 		and preview.next_int(1, die_sides) == damage_roll:
 			return seed_value
 	assert(false, "Unable to find deterministic defense/damage seed.")
+	return 0
+
+
+func _find_seed_for_critical_damage(acc_roll: int, damage_roll: int, die_sides: int) -> int:
+	for seed_value in range(1, 500_000):
+		var preview := DeterministicCombatRng.new(seed_value)
+		preview.next_int(1, 10)
+		preview.next_int(1, 10)
+		if preview.next_int(1, 20) != acc_roll:
+			continue
+		preview.next_int(1, 100)
+		if preview.next_int(1, die_sides) == damage_roll:
+			return seed_value
+	assert(false, "Unable to find deterministic critical damage seed.")
 	return 0
 
 

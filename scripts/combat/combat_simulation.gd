@@ -1,6 +1,9 @@
 class_name CombatSimulation
 extends RefCounted
 
+const CriticalConsequenceCatalog = preload("res://scripts/combat/combat_critical_consequence_catalog.gd")
+const MAX_SIGNED_INT_64 := 9_223_372_036_854_775_807
+
 var clock: CombatClock
 var event_queue: CombatEventQueue
 var random: DeterministicCombatRng
@@ -10,6 +13,7 @@ var _next_action_sequence: int = 0
 var _next_attack_sequence: int = 0
 var _next_defense_sequence: int = 0
 var _next_damage_sequence: int = 0
+var _next_critical_sequence: int = 0
 var _state_revision: int = 0
 var _actor_definitions: Dictionary = {}
 var _actor_states: Dictionary = {}
@@ -24,6 +28,10 @@ var _defense_by_attack_id: Dictionary = {}
 var _damage_protection_profiles: Dictionary = {}
 var _damage_resolutions: Dictionary = {}
 var _damage_by_attack_id: Dictionary = {}
+var _critical_records: Dictionary = {}
+var _critical_record_by_roll_id: Dictionary = {}
+var _critical_reaction_definitions: Dictionary = {}
+var _deferred_critical_records_by_attack: Dictionary = {}
 var _accepted_request_ids: Dictionary = {}
 var _accepted_defense_request_ids: Dictionary = {}
 var _accepted_damage_request_ids: Dictionary = {}
@@ -63,7 +71,9 @@ func schedule_event(
 		payload,
 		resource_commitments
 	)
-	assert(event_queue.enqueue(event), "Internally generated combat event identifiers must be unique.")
+	# Keep the mutation outside assert: release exports strip assertion expressions.
+	var queued := event_queue.enqueue(event)
+	assert(queued, "Internally generated combat event identifiers must be unique.")
 	return event
 
 
@@ -218,6 +228,32 @@ func register_damage_protection_profile(actor_id: StringName, profile: CombatDam
 	return _success({"actor_id": actor_key, "profile_id": String(profile.profile_id)})
 
 
+func register_critical_reaction_attack(actor_id: StringName, definition: CombatAttackDefinition, authoritative_line_of_sight: bool) -> Dictionary:
+	var actor_key := String(actor_id)
+	if not _actor_states.has(actor_key):
+		return _failure("unknown_actor")
+	if definition == null:
+		return _failure("invalid_attack_definition")
+	if _combat_started:
+		return _failure("combat_already_started")
+	if not (_actor_states[actor_key] as CombatActorState).equipment_refs.has(String(definition.weapon_ref)):
+		return _failure("weapon_not_equipped")
+	var definition_key := String(definition.attack_definition_id)
+	if _attack_definitions.has(definition_key) and (_attack_definitions[definition_key] as CombatAttackDefinition).to_dictionary() != definition.to_dictionary():
+		return _failure("conflicting_attack_definition")
+	_attack_definitions[definition_key] = definition
+	_critical_reaction_definitions[actor_key] = {
+		"attack_definition_id": definition_key,
+		"authoritative_line_of_sight": authoritative_line_of_sight,
+	}
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"critical_reaction_attack_registered", _get_actor_initiative(actor_key), actor_id, &"", {
+		"attack_definition_id": definition_key,
+		"authoritative_line_of_sight": authoritative_line_of_sight,
+	})
+	return _success({"actor_id": actor_key, "attack_definition_id": definition_key})
+
+
 func set_actor_defense_state(actor_id: StringName, awareness: StringName, conditions: PackedStringArray) -> Dictionary:
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
@@ -262,6 +298,11 @@ func start_action(
 	if at_value == null or int(at_value) <= 0:
 		return _failure("unresolved_actor_at")
 	var actor_state: CombatActorState = _actor_states[actor_key]
+	_refresh_actor_timed_conditions(actor_state)
+	if _is_actor_critically_staggered(actor_state):
+		return _failure("actor_critically_staggered")
+	if actor_state.conditions.has("prone") and not bool(definition.extension_metadata.get("stands_from_prone", false)):
+		return _failure("actor_prone")
 	if not actor_state.current_action_instance_id.is_empty():
 		return _failure("actor_action_in_progress")
 	if not _can_begin_opening_action(actor_state):
@@ -359,6 +400,24 @@ func start_action(
 	)
 	_mark_opening_action_declared(actor_state, action_instance_id)
 	return _success({"action_instance_id": action_instance_id})
+
+
+func start_stand_action(actor_id: StringName, request_id: String) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if not actor_state.conditions.has("prone"):
+		return _failure("actor_not_prone")
+	var definition := CombatActionDefinition.new(
+		&"stand_from_prone",
+		1,
+		false,
+		true,
+		{},
+		{"stands_from_prone": true},
+		PackedStringArray(["ARENA-COMBAT-1.7 section 18: standing costs one Act"])
+	)
+	return start_action(actor_id, definition, request_id)
 
 
 func start_physical_attack(
@@ -533,6 +592,7 @@ func resolve_pending_defense(
 	var previous_event_id := started.event_id
 	var dodge_or_soak_attempted := false
 	var resolution_locked := false
+	var generic_critical_policy := CombatCriticalTriggerPolicy.new()
 
 	for defense_key: String in profile.priority:
 		var defense_type := StringName(defense_key)
@@ -572,12 +632,14 @@ func resolve_pending_defense(
 			continue
 
 		attempt.eligibility = CombatDefenseAttempt.ATTEMPTED
+		attempt.roll_id = "defense:%s:%d:%s" % [defense_resolution_id, resolution.attempts.size(), String(defense_type)]
 		attempt.roll_bonus = _get_actor_roll_bonus(defender_definition)
 		attempt.natural_roll = roll_int(1, 20)
 		attempt.rng_draw_index = random.get_draw_count()
 		attempt.adjusted_roll = int(attempt.natural_roll) - attempt.roll_bonus
-		attempt.critical_success = int(attempt.natural_roll) == 1
-		attempt.critical_failure = int(attempt.natural_roll) == 20
+		var critical_result := generic_critical_policy.classify(int(attempt.natural_roll))
+		attempt.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
+		attempt.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
 		if attempt.critical_success:
 			attempt.success = true
 		elif attempt.critical_failure:
@@ -608,6 +670,23 @@ func resolve_pending_defense(
 		var attempt_event := _record_defense_attempt_event(attack, resolution, attempt, &"physical_defense_attempted")
 		attempt.result_event_id = attempt_event.event_id
 		previous_event_id = attempt_event.event_id
+		if critical_result != CombatCriticalTriggerPolicy.RESULT_NONE:
+			var critical_record := _record_critical_trigger(
+				attempt.roll_id,
+				defense_type,
+				critical_result,
+				int(attempt.natural_roll),
+				generic_critical_policy,
+				attack.target_id,
+				attack.attacker_id,
+				attempt_event.event_id,
+				PackedStringArray(),
+				attempt.resources_spent
+			)
+			attempt.critical_record_id = critical_record.critical_record_id
+			attempt.result_event_id = critical_record.event_id
+			previous_event_id = critical_record.event_id
+			_apply_critical_consequence(critical_record, attack, attempt, profile)
 		resolution.attempts.append(attempt)
 
 	if resolution.status == CombatDefenseResolution.STATUS_RESOLVING:
@@ -633,6 +712,8 @@ func resolve_pending_defense(
 		previous_event_id
 	)
 	resolution.final_event_id = resolved.event_id
+	if resolution.status == CombatDefenseResolution.STATUS_DEFENDED:
+		_finalize_deferred_critical_consequences(attack)
 	return _success({"defense_resolution_id": defense_resolution_id, "status": resolution.status})
 
 
@@ -697,6 +778,7 @@ func complete_pending_dodge_displacement(
 	assert(successful_attempt != null, "Pending Dodge displacement requires a successful Dodge attempt.")
 	successful_attempt.resolution_context = dodge_context.to_dictionary()
 	_apply_successful_dodge(defender_state, dodge_context, successful_attempt)
+	_complete_pending_dodge_critical_effect(successful_attempt)
 	resolution.status = CombatDefenseResolution.STATUS_DEFENDED
 	resolution.pending_dodge_context = {}
 	resolution.resolved_at_us = clock.get_elapsed_us()
@@ -725,6 +807,7 @@ func complete_pending_dodge_displacement(
 		successful_attempt.resources_spent
 	)
 	resolution.final_event_id = event.event_id
+	_finalize_deferred_critical_consequences(attack)
 	return _success({"defense_resolution_id": resolution.defense_resolution_id, "status": resolution.status})
 
 
@@ -763,20 +846,18 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		resolution.weapon_dice_total += die_result
 	resolution.pre_multiplier_total = resolution.weapon_dice_total + resolution.flat_bonus + resolution.strength_bonus
 
-	var running_total := resolution.pre_multiplier_total
+	var running_total: int
 	var type_response: Dictionary = preparation["type_response"]
 	resolution.type_response = type_response.duplicate(true)
-	if String(type_response.get("kind", "")) == CombatDamageProtectionProfile.RESPONSE_MULTIPLIER \
-	and String(type_response.get("stage", "")) == CombatDamageProtectionProfile.STAGE_PRE_PROTECTION:
-		var pre_response_result := _apply_damage_multiplier(running_total, type_response, definition.rounding_policy)
-		assert(pre_response_result["success"], "Preflight must reject unresolved damage multiplier rounding.")
-		running_total = pre_response_result["value"]
-		resolution.applied_multipliers.append(_recorded_multiplier("type_response_pre_protection", type_response))
-	for multiplier_entry: Dictionary in preparation["core_multipliers"]:
-		var multiplier_result := _apply_damage_multiplier(running_total, multiplier_entry["multiplier"], definition.rounding_policy)
-		assert(multiplier_result["success"], "Preflight must reject unresolved damage multiplier rounding.")
-		running_total = multiplier_result["value"]
+	for multiplier_entry: Dictionary in preparation["pre_protection_multipliers"]:
 		resolution.applied_multipliers.append(_recorded_multiplier(multiplier_entry["kind"], multiplier_entry["multiplier"]))
+	resolution.combined_multiplier_numerator = int(preparation["pre_multiplier_product"]["numerator"])
+	resolution.combined_multiplier_denominator = int(preparation["pre_multiplier_product"]["denominator"])
+	running_total = _apply_multiplier_product_once(
+		resolution.pre_multiplier_total,
+		resolution.combined_multiplier_numerator,
+		resolution.combined_multiplier_denominator
+	)
 	resolution.multiplied_total = running_total
 	resolution.armor_equipment_ref = preparation["armor_equipment_ref"]
 	resolution.armor_slot = preparation["armor_slot"]
@@ -787,9 +868,8 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 
 	if String(type_response.get("kind", "")) == CombatDamageProtectionProfile.RESPONSE_MULTIPLIER \
 	and String(type_response.get("stage", "")) == CombatDamageProtectionProfile.STAGE_POST_PROTECTION:
-		var post_response_result := _apply_damage_multiplier(running_total, type_response, definition.rounding_policy)
-		assert(post_response_result["success"], "Preflight must reject unresolved damage multiplier rounding.")
-		running_total = post_response_result["value"]
+		var post_product: Dictionary = preparation["post_multiplier_product"]
+		running_total = _apply_multiplier_product_once(running_total, int(post_product["numerator"]), int(post_product["denominator"]))
 		resolution.applied_multipliers.append(_recorded_multiplier("type_response_post_protection", type_response))
 
 	if String(type_response.get("kind", "")) == CombatDamageProtectionProfile.RESPONSE_IMMUNE:
@@ -822,6 +902,9 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 			"attack_instance_id": attack_instance_id,
 			"weapon_rolls": resolution.weapon_rolls.duplicate(),
 			"strength_bonus": resolution.strength_bonus,
+			"combined_multiplier_numerator": resolution.combined_multiplier_numerator,
+			"combined_multiplier_denominator": resolution.combined_multiplier_denominator,
+			"multiplied_total": resolution.multiplied_total,
 			"armor_tal": resolution.armor_tal,
 			"natural_armor_level": resolution.natural_armor_level,
 			"final_damage": resolution.final_damage,
@@ -834,6 +917,7 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		{"hpc": resolution.final_damage}
 	)
 	resolution.event_id = event.event_id
+	_finalize_deferred_critical_consequences(attack)
 	return _success({"damage_resolution_id": resolution_id, "final_damage": resolution.final_damage})
 
 
@@ -898,6 +982,9 @@ func apply_authoritative_position(
 		return _failure("invalid_movement_cost")
 	_refresh_actor_movement_budgets()
 	var actor_state: CombatActorState = _actor_states[actor_key]
+	_refresh_actor_timed_conditions(actor_state)
+	if _is_actor_critically_staggered(actor_state):
+		return _failure("movement_blocked_by_critical_stagger")
 	if not actor_state.current_action_instance_id.is_empty():
 		var action: CombatActionInstance = _actions[actor_state.current_action_instance_id]
 		var definition: CombatActionDefinition = _action_definitions[String(action.action_definition_id)]
@@ -945,6 +1032,19 @@ func get_defense_resolution(defense_resolution_id: String) -> CombatDefenseResol
 
 func get_damage_resolution(damage_resolution_id: String) -> CombatDamageResolution:
 	return _damage_resolutions.get(damage_resolution_id) as CombatDamageResolution
+
+
+func get_critical_record(critical_record_id: String) -> CombatCriticalRecord:
+	return _critical_records.get(critical_record_id) as CombatCriticalRecord
+
+
+func get_critical_records() -> Array:
+	var records: Array = []
+	var record_ids: Array = _critical_records.keys()
+	record_ids.sort()
+	for record_id: String in record_ids:
+		records.append(_critical_records[record_id])
+	return records
 
 
 func get_resolved_events() -> Array:
@@ -1020,8 +1120,30 @@ func get_state_snapshot() -> Dictionary:
 	for damage_key: String in damage_resolution_keys:
 		damage_resolution_snapshots.append((_damage_resolutions[damage_key] as CombatDamageResolution).to_dictionary())
 
+	var critical_record_snapshots: Array = []
+	var critical_record_keys: Array = _critical_records.keys()
+	critical_record_keys.sort()
+	for critical_key: String in critical_record_keys:
+		critical_record_snapshots.append((_critical_records[critical_key] as CombatCriticalRecord).to_dictionary())
+
+	var reaction_definition_snapshots: Array = []
+	var reaction_actor_keys: Array = _critical_reaction_definitions.keys()
+	reaction_actor_keys.sort()
+	for actor_key: String in reaction_actor_keys:
+		var registration: Dictionary = _critical_reaction_definitions[actor_key]
+		reaction_definition_snapshots.append({
+			"actor_id": actor_key,
+			"attack_definition_id": registration["attack_definition_id"],
+			"authoritative_line_of_sight": registration["authoritative_line_of_sight"],
+		})
+	var deferred_critical_snapshots: Array = []
+	var deferred_attack_keys: Array = _deferred_critical_records_by_attack.keys()
+	deferred_attack_keys.sort()
+	for attack_key: String in deferred_attack_keys:
+		deferred_critical_snapshots.append({"attack_instance_id": attack_key, "entries": (_deferred_critical_records_by_attack[attack_key] as Array).duplicate(true)})
+
 	return {
-		"schema_version": 6,
+		"schema_version": 8,
 		"timestamp_us": clock.get_elapsed_us(),
 		"round_index": clock.get_round_index(),
 		"state_revision": _state_revision,
@@ -1031,6 +1153,7 @@ func get_state_snapshot() -> Dictionary:
 		"next_attack_sequence": _next_attack_sequence,
 		"next_defense_sequence": _next_defense_sequence,
 		"next_damage_sequence": _next_damage_sequence,
+		"next_critical_sequence": _next_critical_sequence,
 		"combat_started": _combat_started,
 		"opening_sequence_complete": _opening_sequence_complete,
 		"current_opening_rank": _current_opening_rank,
@@ -1043,6 +1166,9 @@ func get_state_snapshot() -> Dictionary:
 		"defense_resolutions": defense_resolution_snapshots,
 		"damage_protection_profiles": damage_protection_snapshots,
 		"damage_resolutions": damage_resolution_snapshots,
+		"critical_records": critical_record_snapshots,
+		"critical_reaction_definitions": reaction_definition_snapshots,
+		"deferred_critical_consequences": deferred_critical_snapshots,
 		"pending_events": event_queue.snapshot(),
 	}
 
@@ -1152,6 +1278,7 @@ func _resolve_action_interrupt_due(event: CombatEvent) -> void:
 		actor_state.current_action_instance_id = ""
 		actor_state.revision += 1
 	_state_revision += 1
+	var canceled_completion_event_ids := event_queue.cancel_action_events(action_instance_id)
 	var interrupted := _record_resolved_event(
 		event.timestamp_us,
 		&"action_interrupted",
@@ -1163,6 +1290,7 @@ func _resolve_action_interrupt_due(event: CombatEvent) -> void:
 			"completed_acts": action.completed_acts,
 			"required_acts": action.required_acts,
 			"reason": action.interruption_reason,
+			"canceled_completion_event_ids": Array(canceled_completion_event_ids),
 		},
 		event.event_id
 	)
@@ -1195,6 +1323,12 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		cause_event_id
 	)
 	action.final_event_id = completed.event_id
+	var definition: CombatActionDefinition = _action_definitions[String(action.action_definition_id)]
+	if bool(definition.extension_metadata.get("stands_from_prone", false)):
+		_remove_actor_condition(actor_state, "prone")
+		_record_resolved_event(clock.get_elapsed_us(), &"actor_stood_from_prone", action.initiative, action.actor_id, &"", {
+			"action_instance_id": action.action_instance_id,
+		}, completed.event_id)
 	_resolve_linked_attack_accuracy(action, completed.event_id)
 
 
@@ -1208,8 +1342,10 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 	attack.natural_roll = roll_int(1, 20)
 	attack.rng_draw_index = random.get_draw_count()
 	attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
-	attack.critical_success = int(attack.natural_roll) == 1
-	attack.critical_failure = int(attack.natural_roll) == 20
+	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
+	var critical_result := definition.critical_trigger_policy.classify(int(attack.natural_roll))
+	attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
+	attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
 	if attack.critical_success:
 		attack.accuracy_success = true
 	elif attack.critical_failure:
@@ -1247,7 +1383,24 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 		},
 		parent_event_id
 	)
+	attack.accuracy_event_id = result.event_id
 	attack.result_event_id = result.event_id
+	if critical_result != CombatCriticalTriggerPolicy.RESULT_NONE:
+		var critical_record := _record_critical_trigger(
+			"attack:%s:acc" % attack.attack_instance_id,
+			&"physical_attack",
+			critical_result,
+			int(attack.natural_roll),
+			definition.critical_trigger_policy,
+			attack.attacker_id,
+			attack.target_id,
+			result.event_id
+		)
+		attack.critical_record_id = critical_record.critical_record_id
+		attack.result_event_id = critical_record.event_id
+		_apply_critical_consequence(critical_record, attack)
+	if attack.status == CombatAttackInstance.STATUS_MISSED:
+		_finalize_deferred_critical_consequences(attack)
 
 
 func _interrupt_linked_attack(action: CombatActionInstance, parent_event_id: String) -> void:
@@ -1629,28 +1782,34 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 	var core_multipliers: Array = []
 	if not _multiplier_is_unit(location_multiplier):
 		core_multipliers.append({"kind": "location", "multiplier": location_multiplier})
-	if attack.critical_success:
-		if damage_definition.critical_multiplier == null:
-			return _failure("critical_damage_effect_unresolved")
+	if attack.critical_success and attack.consequence_damage_multipliers.is_empty() and damage_definition.critical_multiplier != null:
 		if not _multiplier_is_unit(damage_definition.critical_multiplier):
-			core_multipliers.append({"kind": "critical", "multiplier": damage_definition.critical_multiplier})
+			core_multipliers.append({"kind": "source_specific_critical", "multiplier": damage_definition.critical_multiplier})
+	for consequence_multiplier: Dictionary in attack.consequence_damage_multipliers:
+		core_multipliers.append({
+			"kind": String(consequence_multiplier.get("kind", "critical_consequence")),
+			"multiplier": consequence_multiplier,
+		})
 
 	var type_response_value: Variant = protection_profile.get_exact_type_response(attack.damage_types)
 	var type_response: Dictionary = {} if type_response_value == null else (type_response_value as Dictionary).duplicate(true)
-	var non_unit_multiplier_count := core_multipliers.size()
-	if String(type_response.get("kind", "")) == CombatDamageProtectionProfile.RESPONSE_MULTIPLIER \
-	and not _multiplier_is_unit(type_response):
-		non_unit_multiplier_count += 1
-	if non_unit_multiplier_count > 1 and not damage_definition.multiplier_stacking_resolved:
-		return _failure("damage_multiplier_stacking_unresolved")
-	var multipliers_to_validate: Array = []
-	for entry: Dictionary in core_multipliers:
-		multipliers_to_validate.append(entry["multiplier"])
+	var pre_protection_multipliers: Array = core_multipliers.duplicate(true)
+	var post_protection_multipliers: Array = []
 	if String(type_response.get("kind", "")) == CombatDamageProtectionProfile.RESPONSE_MULTIPLIER:
-		multipliers_to_validate.append(type_response)
-	for multiplier: Dictionary in multipliers_to_validate:
-		if int(multiplier["denominator"]) != 1 and damage_definition.rounding_policy == CombatPhysicalDamageDefinition.ROUNDING_UNRESOLVED:
-			return _failure("damage_multiplier_rounding_unresolved")
+		var type_entry := {
+			"kind": "type_response_%s" % String(type_response.get("stage", "")),
+			"multiplier": type_response,
+		}
+		if String(type_response.get("stage", "")) == CombatDamageProtectionProfile.STAGE_PRE_PROTECTION:
+			pre_protection_multipliers.append(type_entry)
+		else:
+			post_protection_multipliers.append(type_entry)
+	var pre_product := _combine_multiplier_product(pre_protection_multipliers)
+	if not pre_product["success"]:
+		return pre_product
+	var post_product := _combine_multiplier_product(post_protection_multipliers)
+	if not post_product["success"]:
+		return post_product
 
 	return _success({
 		"damage_definition": damage_definition,
@@ -1659,7 +1818,9 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 		"armor_equipment_ref": armor_result["equipment_ref"],
 		"armor_slot": armor_result["armor_slot"],
 		"armor_tal": armor_result["tal"],
-		"core_multipliers": core_multipliers,
+		"pre_protection_multipliers": pre_protection_multipliers,
+		"pre_multiplier_product": pre_product,
+		"post_multiplier_product": post_product,
 		"type_response": type_response,
 	})
 
@@ -1699,19 +1860,72 @@ func _multiplier_is_unit(multiplier: Variant) -> bool:
 	return int(value["numerator"]) == int(value["denominator"])
 
 
-func _apply_damage_multiplier(value: int, multiplier: Dictionary, rounding_policy: StringName) -> Dictionary:
-	var numerator := value * int(multiplier["numerator"])
-	var denominator := int(multiplier["denominator"])
-	if numerator % denominator == 0:
+func _combine_multiplier_product(multiplier_entries: Array) -> Dictionary:
+	var product_numerator := 1
+	var product_denominator := 1
+	for entry: Dictionary in multiplier_entries:
+		var multiplier: Dictionary = entry["multiplier"]
+		var factor_numerator := int(multiplier["numerator"])
+		var factor_denominator := int(multiplier["denominator"])
+		var cross_cancel := _greatest_common_divisor(product_numerator, factor_denominator)
 		@warning_ignore("integer_division")
-		return _success({"value": numerator / denominator})
-	if rounding_policy == CombatPhysicalDamageDefinition.ROUNDING_FLOOR:
+		product_numerator /= cross_cancel
 		@warning_ignore("integer_division")
-		return _success({"value": numerator / denominator})
-	if rounding_policy == CombatPhysicalDamageDefinition.ROUNDING_CEIL:
+		factor_denominator /= cross_cancel
+		cross_cancel = _greatest_common_divisor(factor_numerator, product_denominator)
 		@warning_ignore("integer_division")
-		return _success({"value": (numerator + denominator - 1) / denominator})
-	return _failure("damage_multiplier_rounding_unresolved")
+		factor_numerator /= cross_cancel
+		@warning_ignore("integer_division")
+		product_denominator /= cross_cancel
+		if _nonnegative_multiplication_overflows(product_numerator, factor_numerator) \
+		or _nonnegative_multiplication_overflows(product_denominator, factor_denominator):
+			return _failure("damage_multiplier_product_overflow")
+		product_numerator *= factor_numerator
+		product_denominator *= factor_denominator
+	return _success({"numerator": product_numerator, "denominator": product_denominator})
+
+
+func _apply_multiplier_product_once(value: int, multiplier_numerator: int, multiplier_denominator: int) -> int:
+	assert(multiplier_numerator >= 0 and multiplier_denominator > 0, "Damage multiplier products must be non-negative rational values.")
+	var reduced_value := value
+	var reduced_denominator := multiplier_denominator
+	var cross_cancel := _greatest_common_divisor(absi(reduced_value), reduced_denominator)
+	@warning_ignore("integer_division")
+	reduced_value /= cross_cancel
+	@warning_ignore("integer_division")
+	reduced_denominator /= cross_cancel
+	assert(
+		not _signed_by_nonnegative_multiplication_overflows(reduced_value, multiplier_numerator),
+		"Damage multiplier overflow must be rejected during preflight."
+	)
+	var exact_numerator := reduced_value * multiplier_numerator
+	@warning_ignore("integer_division")
+	var floored_value := exact_numerator / reduced_denominator
+	if exact_numerator < 0 and exact_numerator % reduced_denominator != 0:
+		floored_value -= 1
+	return floored_value
+
+
+func _greatest_common_divisor(left: int, right: int) -> int:
+	var a := absi(left)
+	var b := absi(right)
+	while b != 0:
+		var remainder := a % b
+		a = b
+		b = remainder
+	return maxi(a, 1)
+
+
+func _nonnegative_multiplication_overflows(left: int, right: int) -> bool:
+	assert(left >= 0 and right >= 0, "Overflow checks require non-negative factors.")
+	return left != 0 and right > MAX_SIGNED_INT_64 / left
+
+
+func _signed_by_nonnegative_multiplication_overflows(left: int, right: int) -> bool:
+	assert(right >= 0, "Damage multiplier numerators cannot be negative.")
+	if left == 0 or right == 0:
+		return false
+	return absi(left) > MAX_SIGNED_INT_64 / right
 
 
 func _recorded_multiplier(kind: String, multiplier: Dictionary) -> Dictionary:
@@ -1776,6 +1990,408 @@ func _record_defense_attempt_event(
 		PackedStringArray(),
 		attempt.resources_spent
 	)
+
+
+func _record_critical_trigger(
+	roll_id: String,
+	roll_category: StringName,
+	result_kind: StringName,
+	natural_d20: int,
+	policy: CombatCriticalTriggerPolicy,
+	source_actor_id: StringName,
+	target_actor_id: StringName,
+	parent_event_id: String,
+	dependency_event_ids: PackedStringArray = PackedStringArray(),
+	resource_commits: Dictionary = {}
+) -> CombatCriticalRecord:
+	if _critical_record_by_roll_id.has(roll_id):
+		return _critical_records[_critical_record_by_roll_id[roll_id]] as CombatCriticalRecord
+	assert(policy.classify(natural_d20) == result_kind, "Critical record inputs must match the source trigger policy.")
+	var rarity_roll := roll_int(1, 100)
+	var record_id := _make_critical_record_id(_next_critical_sequence)
+	_next_critical_sequence += 1
+	var record := CombatCriticalRecord.new(
+		record_id,
+		roll_id,
+		roll_category,
+		result_kind,
+		natural_d20,
+		policy,
+		rarity_roll,
+		random.get_draw_count(),
+		source_actor_id,
+		target_actor_id,
+		parent_event_id,
+		dependency_event_ids,
+		resource_commits
+	)
+	var selected_outcome: Dictionary = {}
+	if policy.consequence_table_id == CriticalConsequenceCatalog.DWARVESTEK_FIREARM_TABLE or policy.consequence_table_id == CriticalConsequenceCatalog.GRENTEK_EXPLOSIVE_TABLE:
+		selected_outcome = CriticalConsequenceCatalog.get_weapon_specific_outcome(policy.consequence_table_id, record.rarity)
+	else:
+		selected_outcome = CriticalConsequenceCatalog.get_outcome(roll_category, result_kind, record.rarity)
+	if not selected_outcome.is_empty():
+		record.consequence_table_id = selected_outcome["table_id"]
+		record.outcome_id = StringName(selected_outcome["outcome_id"])
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_SELECTED
+	else:
+		record.consequence_reason = "no_approved_general_table_for_roll_category"
+	var event := _create_event(
+		clock.get_elapsed_us(),
+		&"critical_trigger_recorded",
+		_get_actor_initiative(String(source_actor_id)),
+		source_actor_id,
+		target_actor_id,
+		parent_event_id,
+		dependency_event_ids,
+		{},
+		{}
+	)
+	record.event_id = event.event_id
+	event.payload = {"critical_record": record.to_dictionary(), "consequence_applied": false}
+	_critical_records[record_id] = record
+	_critical_record_by_roll_id[roll_id] = record_id
+	_resolved_events.append(event)
+	_state_revision += 1
+	return record
+
+
+func _apply_critical_consequence(
+	record: CombatCriticalRecord,
+	attack: CombatAttackInstance,
+	attempt: CombatDefenseAttempt = null,
+	profile: CombatDefenseProfile = null
+) -> void:
+	var outcome: Dictionary = {}
+	if record.consequence_table_id == CriticalConsequenceCatalog.DWARVESTEK_FIREARM_TABLE or record.consequence_table_id == CriticalConsequenceCatalog.GRENTEK_EXPLOSIVE_TABLE:
+		outcome = CriticalConsequenceCatalog.get_weapon_specific_outcome(record.consequence_table_id, record.rarity)
+	else:
+		outcome = CriticalConsequenceCatalog.get_outcome(record.roll_category, record.result_kind, record.rarity)
+	if outcome.is_empty():
+		return
+	var pending_effect := false
+	for effect: Dictionary in outcome["effects"]:
+		var effect_id := String(effect["effect_id"])
+		var effect_type := String(effect["type"])
+		match effect_type:
+			"damage_multiplier":
+				if not _attack_has_consequence_multiplier(attack, record.critical_record_id, effect_id):
+					attack.consequence_damage_multipliers.append({
+						"numerator": int(effect["numerator"]),
+						"denominator": int(effect["denominator"]),
+						"source_ref": CriticalConsequenceCatalog.SOURCE_REF,
+						"kind": effect_id,
+						"critical_record_id": record.critical_record_id,
+					})
+					attack.revision += 1
+					_state_revision += 1
+				_record_critical_effect(record, effect, &"critical_damage_multiplier_attached", true)
+			"critical_stagger":
+				var stagger_actor_id := _critical_effect_actor_id(record, String(effect["target"]))
+				if attack.same_attack_condition_protected_actor_id == stagger_actor_id:
+					_record_critical_effect(record, effect, &"critical_effect_blocked", false, "same_attack_unshakable_protection")
+				else:
+					_apply_critical_stagger(record, stagger_actor_id, effect)
+			"prone":
+				var prone_actor_id := _critical_effect_actor_id(record, String(effect["target"]))
+				if attack.same_attack_condition_protected_actor_id == prone_actor_id:
+					_record_critical_effect(record, effect, &"critical_effect_blocked", false, "same_attack_unshakable_protection")
+				else:
+					_apply_prone(record, prone_actor_id, effect)
+			"shield_contact_prone":
+				var contact_verified: bool = profile != null and profile.shield_block != null and profile.shield_block.verified_shield_contact == true
+				if contact_verified:
+					_apply_prone(record, _critical_effect_actor_id(record, String(effect["target"])), effect)
+				else:
+					_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "shield_contact_unverified")
+			"perfect_evasion":
+				if attempt != null and attempt.success == true and String(attempt.resolution_context.get("selection_status", "")) == String(CombatDodgeContext.SELECTION_RESOLVED):
+					_record_critical_effect(record, effect, &"critical_perfect_evasion_applied", true)
+				elif attempt != null and attempt.success == true and String(attempt.resolution_context.get("selection_status", "")) == String(CombatDodgeContext.SELECTION_AMBIGUOUS):
+					var deferred := _record_resolved_event(clock.get_elapsed_us(), &"critical_effect_deferred", _get_actor_initiative(String(record.source_actor_id)), record.source_actor_id, record.target_actor_id, {
+						"critical_record_id": record.critical_record_id,
+						"outcome_id": String(record.outcome_id),
+						"effect_id": effect_id,
+						"reason": "awaiting_legal_dodge_destination",
+					}, record.event_id)
+					record.child_event_ids.append(deferred.event_id)
+					record.consequence_reason = "awaiting_legal_dodge_destination"
+					pending_effect = true
+				else:
+					_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "legal_dodge_destination_unresolved")
+			"same_attack_protection":
+				attack.same_attack_condition_protected_actor_id = record.source_actor_id
+				attack.revision += 1
+				_state_revision += 1
+				_record_critical_effect(record, effect, &"critical_same_attack_protection_applied", true)
+			"critical_reaction":
+				_defer_critical_effect(record, attack, effect)
+				pending_effect = true
+			"backfire_redirect":
+				_record_critical_effect(record, effect, &"critical_effect_blocked", false, "verified_backfire_redirection_geometry_unavailable")
+			"weapon_specific_gate":
+				_record_critical_effect(record, effect, &"critical_effect_blocked", false, String(effect.get("reason", "exact_weapon_specific_mechanics_unresolved")))
+			_:
+				_record_critical_effect(record, effect, &"critical_effect_blocked", false, "unsupported_approved_effect_type")
+	_update_critical_record_status(record, pending_effect)
+
+
+func _record_critical_effect(
+	record: CombatCriticalRecord,
+	effect: Dictionary,
+	event_type: StringName,
+	applied: bool,
+	reason: String = ""
+) -> CombatEvent:
+	var effect_id := String(effect["effect_id"])
+	if applied:
+		if not record.applied_effect_ids.has(effect_id):
+			record.applied_effect_ids.append(effect_id)
+	else:
+		if not record.blocked_effect_ids.has(effect_id):
+			record.blocked_effect_ids.append(effect_id)
+	if not reason.is_empty():
+		record.consequence_reason = reason
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), event_type, _get_actor_initiative(String(record.source_actor_id)),
+		record.source_actor_id, record.target_actor_id,
+		{
+			"critical_record_id": record.critical_record_id,
+			"outcome_id": String(record.outcome_id),
+			"effect_id": effect_id,
+			"applied": applied,
+			"reason": reason,
+		}, record.event_id
+	)
+	if not record.child_event_ids.has(event.event_id):
+		record.child_event_ids.append(event.event_id)
+	_state_revision += 1
+	return event
+
+
+func _defer_critical_effect(record: CombatCriticalRecord, attack: CombatAttackInstance, effect: Dictionary) -> void:
+	var attack_id := attack.attack_instance_id
+	if not _deferred_critical_records_by_attack.has(attack_id):
+		_deferred_critical_records_by_attack[attack_id] = []
+	var pending: Array = _deferred_critical_records_by_attack[attack_id]
+	pending.append({"critical_record_id": record.critical_record_id, "effect": effect.duplicate(true)})
+	record.consequence_status = CombatCriticalRecord.CONSEQUENCE_PENDING
+	var deferred := _record_resolved_event(clock.get_elapsed_us(), &"critical_effect_deferred", _get_actor_initiative(String(record.source_actor_id)), record.source_actor_id, record.target_actor_id, {
+		"critical_record_id": record.critical_record_id,
+		"outcome_id": String(record.outcome_id),
+		"effect_id": String(effect["effect_id"]),
+		"reason": "awaiting_parent_attack_terminal_state",
+	}, record.event_id)
+	record.child_event_ids.append(deferred.event_id)
+	_state_revision += 1
+
+
+func _finalize_deferred_critical_consequences(attack: CombatAttackInstance) -> void:
+	var attack_id := attack.attack_instance_id
+	if not _deferred_critical_records_by_attack.has(attack_id):
+		return
+	var pending: Array = _deferred_critical_records_by_attack[attack_id]
+	_deferred_critical_records_by_attack.erase(attack_id)
+	for entry: Dictionary in pending:
+		var record: CombatCriticalRecord = _critical_records[entry["critical_record_id"]]
+		var effect: Dictionary = entry["effect"]
+		_execute_critical_reaction(record, effect, attack)
+		_update_critical_record_status(record, false)
+
+
+func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary, parent_attack: CombatAttackInstance) -> void:
+	var direction := String(effect["target"])
+	var reactor_id := record.source_actor_id
+	var reaction_target_id := record.target_actor_id
+	if direction == "target_to_source":
+		reactor_id = record.target_actor_id
+		reaction_target_id = record.source_actor_id
+	var reactor_key := String(reactor_id)
+	var target_key := String(reaction_target_id)
+	if not _critical_reaction_definitions.has(reactor_key):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_attack_definition_unregistered")
+		return
+	if not _actor_states.has(reactor_key) or not _actor_states.has(target_key):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_actor_unavailable")
+		return
+	var reactor_state: CombatActorState = _actor_states[reactor_key]
+	var target_state: CombatActorState = _actor_states[target_key]
+	var registration: Dictionary = _critical_reaction_definitions[reactor_key]
+	var definition: CombatAttackDefinition = _attack_definitions[registration["attack_definition_id"]]
+	if reactor_state.current_hpc == null or int(reactor_state.current_hpc) <= 0 or target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_actor_not_eligible")
+		return
+	if _active_defenses_restricted(reactor_state):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_awareness_restricted")
+		return
+	if not reactor_state.equipment_refs.has(String(definition.weapon_ref)):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_weapon_not_equipped")
+		return
+	if definition.requires_line_of_sight and registration["authoritative_line_of_sight"] != true:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_line_of_sight_unverified")
+		return
+	var offset := target_state.position_microfeet - reactor_state.position_microfeet
+	var distance_squared := offset.x * offset.x + offset.y * offset.y
+	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
+	if not definition.has_resolved_range() or distance_squared < minimum_range * minimum_range or distance_squared > int(definition.maximum_range_microfeet) * int(definition.maximum_range_microfeet):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_target_out_of_range")
+		return
+	var acc_value: Variant = (_actor_definitions[reactor_key] as CombatActorDefinition).get_combat_stat("acc")
+	if acc_value == null:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_acc_unresolved")
+		return
+	var location_modifier: Variant = definition.get_location_acc_modifier(&"torso")
+	if location_modifier == null:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_torso_target_unresolved")
+		return
+	var attack_id := _make_attack_instance_id(_next_attack_sequence)
+	_next_attack_sequence += 1
+	var reaction := CombatAttackInstance.new(
+		attack_id, definition, "", reactor_id, reaction_target_id, &"torso", clock.get_elapsed_us(),
+		int(acc_value), int(location_modifier), _get_actor_roll_bonus(_actor_definitions[reactor_key])
+	)
+	_attacks[attack_id] = reaction
+	_state_revision += 1
+	var declared := _record_resolved_event(clock.get_elapsed_us(), &"critical_reaction_attack_declared", _get_actor_initiative(reactor_key), reactor_id, reaction_target_id, {
+		"attack_instance_id": attack_id,
+		"critical_record_id": record.critical_record_id,
+		"attack_definition_id": String(definition.attack_definition_id),
+		"ordinary_act_cost": 0,
+		"counts_as_nac": false,
+	}, record.event_id)
+	record.child_event_ids.append(declared.event_id)
+	_record_critical_effect(record, effect, &"critical_reaction_started", true)
+	_resolve_reaction_attack_accuracy(reaction, definition, declared.event_id)
+
+
+func _resolve_reaction_attack_accuracy(attack: CombatAttackInstance, definition: CombatAttackDefinition, parent_event_id: String) -> void:
+	attack.natural_roll = roll_int(1, 20)
+	attack.rng_draw_index = random.get_draw_count()
+	attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
+	var critical_result := definition.critical_trigger_policy.classify(int(attack.natural_roll))
+	attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
+	attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
+	attack.accuracy_success = attack.critical_success or (not attack.critical_failure and int(attack.adjusted_roll) <= attack.acc_target)
+	attack.status = CombatAttackInstance.STATUS_PENDING_DEFENSE if attack.accuracy_success else CombatAttackInstance.STATUS_MISSED
+	attack.resolved_at_us = clock.get_elapsed_us()
+	attack.revision += 1
+	_state_revision += 1
+	var result := _record_resolved_event(clock.get_elapsed_us(), &"physical_attack_accuracy_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+		"attack_instance_id": attack.attack_instance_id,
+		"action_instance_id": "",
+		"critical_reaction": true,
+		"natural_d20": attack.natural_roll,
+		"adjusted_roll": attack.adjusted_roll,
+		"accuracy_success": attack.accuracy_success,
+		"critical_success": attack.critical_success,
+		"critical_failure": attack.critical_failure,
+		"result_state": attack.status,
+		"damage_applied": false,
+	}, parent_event_id)
+	attack.accuracy_event_id = result.event_id
+	attack.result_event_id = result.event_id
+	if critical_result != CombatCriticalTriggerPolicy.RESULT_NONE:
+		var child_record := _record_critical_trigger("attack:%s:acc" % attack.attack_instance_id, &"physical_attack", critical_result, int(attack.natural_roll), definition.critical_trigger_policy, attack.attacker_id, attack.target_id, result.event_id)
+		attack.critical_record_id = child_record.critical_record_id
+		attack.result_event_id = child_record.event_id
+		_apply_critical_consequence(child_record, attack)
+	if attack.status == CombatAttackInstance.STATUS_MISSED:
+		_finalize_deferred_critical_consequences(attack)
+
+
+func _apply_critical_stagger(record: CombatCriticalRecord, actor_id: StringName, effect: Dictionary) -> void:
+	var actor_state: CombatActorState = _actor_states.get(String(actor_id))
+	if actor_state == null:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_stagger_actor_unavailable")
+		return
+	var until_us := clock.get_elapsed_us() + CombatCriticalEffectDefinition.CRITICAL_STAGGER_DURATION_US
+	actor_state.critical_stagger_until_us = maxi(actor_state.critical_stagger_until_us, until_us)
+	_add_actor_condition(actor_state, "critical_stagger")
+	var applied := _record_critical_effect(record, effect, &"critical_stagger_applied", true)
+	if not actor_state.current_action_instance_id.is_empty():
+		var action: CombatActionInstance = _actions[actor_state.current_action_instance_id]
+		var definition: CombatActionDefinition = _action_definitions[String(action.action_definition_id)]
+		if not action.is_terminal() and definition.interruptible:
+			var interrupt := _create_event(clock.get_elapsed_us(), &"action_interrupt_due", _get_actor_initiative(String(record.source_actor_id)), record.source_actor_id, actor_id, applied.event_id, PackedStringArray(), {
+				"action_instance_id": action.action_instance_id,
+				"reason": "critical_stagger",
+			}, {})
+			_resolved_events.append(interrupt)
+			_resolve_action_interrupt_due(interrupt)
+
+
+func _apply_prone(record: CombatCriticalRecord, actor_id: StringName, effect: Dictionary) -> void:
+	var actor_state: CombatActorState = _actor_states.get(String(actor_id))
+	if actor_state == null:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "prone_actor_unavailable")
+		return
+	var already_prone := actor_state.conditions.has("prone")
+	_add_actor_condition(actor_state, "prone")
+	_record_critical_effect(record, effect, &"critical_prone_applied", true, "already_prone_no_additional_cost" if already_prone else "")
+
+
+func _complete_pending_dodge_critical_effect(attempt: CombatDefenseAttempt) -> void:
+	if attempt == null or attempt.critical_record_id.is_empty() or not _critical_records.has(attempt.critical_record_id):
+		return
+	var record: CombatCriticalRecord = _critical_records[attempt.critical_record_id]
+	if record.outcome_id != &"perfect_evasion" or record.consequence_status != CombatCriticalRecord.CONSEQUENCE_PENDING:
+		return
+	var outcome: Dictionary = CriticalConsequenceCatalog.get_outcome(record.roll_category, record.result_kind, record.rarity)
+	for effect: Dictionary in outcome["effects"]:
+		if String(effect["type"]) == "perfect_evasion":
+			_record_critical_effect(record, effect, &"critical_perfect_evasion_applied", true)
+	_update_critical_record_status(record, false)
+
+
+func _critical_effect_actor_id(record: CombatCriticalRecord, target_selector: String) -> StringName:
+	return record.target_actor_id if target_selector == "target" else record.source_actor_id
+
+
+func _attack_has_consequence_multiplier(attack: CombatAttackInstance, record_id: String, effect_id: String) -> bool:
+	for multiplier: Dictionary in attack.consequence_damage_multipliers:
+		if multiplier.get("critical_record_id", "") == record_id and multiplier.get("kind", "") == effect_id:
+			return true
+	return false
+
+
+func _update_critical_record_status(record: CombatCriticalRecord, pending_effect: bool) -> void:
+	if pending_effect:
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_PENDING
+	elif not record.applied_effect_ids.is_empty() and not record.blocked_effect_ids.is_empty():
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_PARTIAL
+	elif not record.applied_effect_ids.is_empty():
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_APPLIED
+	else:
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_BLOCKED
+	_state_revision += 1
+
+
+func _add_actor_condition(actor_state: CombatActorState, condition: String) -> void:
+	if actor_state.conditions.has(condition):
+		return
+	actor_state.conditions.append(condition)
+	actor_state.conditions.sort()
+	actor_state.revision += 1
+	_state_revision += 1
+
+
+func _remove_actor_condition(actor_state: CombatActorState, condition: String) -> void:
+	var index := actor_state.conditions.find(condition)
+	if index < 0:
+		return
+	actor_state.conditions.remove_at(index)
+	actor_state.revision += 1
+	_state_revision += 1
+
+
+func _refresh_actor_timed_conditions(actor_state: CombatActorState) -> void:
+	if actor_state.critical_stagger_until_us > 0 and clock.get_elapsed_us() >= actor_state.critical_stagger_until_us:
+		actor_state.critical_stagger_until_us = 0
+		_remove_actor_condition(actor_state, "critical_stagger")
+
+
+func _is_actor_critically_staggered(actor_state: CombatActorState) -> bool:
+	return actor_state.critical_stagger_until_us > clock.get_elapsed_us()
 
 
 func _active_defenses_restricted(defender_state: CombatActorState) -> bool:
@@ -1955,6 +2571,10 @@ func _make_damage_resolution_id(sequence: int) -> String:
 	return "damage_%010d" % sequence
 
 
+func _make_critical_record_id(sequence: int) -> String:
+	return "critical_%010d" % sequence
+
+
 func _get_actor_initiative(actor_key: String) -> int:
 	if actor_key.is_empty() or not _actor_definitions.has(actor_key):
 		return 0
@@ -1965,6 +2585,8 @@ func _get_actor_initiative(actor_key: String) -> int:
 func _advance_clock_to(timestamp_us: int) -> void:
 	clock.advance(timestamp_us - clock.get_elapsed_us())
 	_refresh_actor_movement_budgets()
+	for actor_state: CombatActorState in _actor_states.values():
+		_refresh_actor_timed_conditions(actor_state)
 
 
 func _refresh_actor_movement_budgets() -> void:

@@ -1,37 +1,69 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/placeholder_player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/ui/arena_responsive_layout.gd" id="2_layout"]
+[ext_resource type="Script" path="res://scripts/ui/mobile_touch_controls.gd" id="3_touch"]
+[ext_resource type="Script" path="res://scripts/ui/arena_combat_controller.gd" id="4_combat"]
+[ext_resource type="Script" path="res://scripts/ui/arena_battlefield_view.gd" id="5_battlefield"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
 size = Vector2(32, 32)
 
 [node name="TestArena" type="Node2D"]
+script = ExtResource("2_layout")
+title_path = NodePath("HUD/UI/Title")
+instructions_path = NodePath("HUD/UI/Instructions")
+movement_debug_path = NodePath("HUD/UI/MovementDebug")
+orientation_warning_path = NodePath("HUD/UI/OrientationWarning")
+combat_status_path = NodePath("HUD/UI/CombatStatus")
+combat_log_path = NodePath("HUD/UI/CombatLog")
+encounter_button_path = NodePath("HUD/UI/EncounterButton")
 
 [node name="Background" type="ColorRect" parent="."]
-offset_right = 1152.0
-offset_bottom = 648.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
 color = Color(0.055, 0.071, 0.09, 1)
 
-[node name="Title" type="Label" parent="."]
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Battlefield" type="Node2D" parent="."]
+script = ExtResource("5_battlefield")
+
+[node name="UI" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="HUD/UI"]
+layout_mode = 0
 offset_left = 32.0
 offset_top = 24.0
-offset_right = 420.0
+offset_right = 500.0
 offset_bottom = 56.0
 theme_override_colors/font_color = Color(0.88, 0.91, 0.95, 1)
 theme_override_font_sizes/font_size = 22
-text = "ITank Prime Arena - Phase 1 Movement"
+text = "ITank Prime Arena - Verified Combat Fixture"
 
-[node name="Instructions" type="Label" parent="."]
+[node name="Instructions" type="Label" parent="HUD/UI"]
+layout_mode = 0
 offset_left = 34.0
 offset_top = 62.0
-offset_right = 475.0
+offset_right = 650.0
 offset_bottom = 88.0
 theme_override_colors/font_color = Color(0.62, 0.69, 0.76, 1)
 theme_override_font_sizes/font_size = 16
-text = "WASD moves; hold Shift to test verified automatic Running"
+text = "START; WASD/touch moves around walls; Shift/RUN runs; Space/ATTACK acts; R resets"
 
-[node name="MovementDebug" type="Label" parent="."]
+[node name="MovementDebug" type="Label" parent="HUD/UI"]
+layout_mode = 0
 offset_left = 34.0
 offset_top = 102.0
 offset_right = 510.0
@@ -40,10 +72,68 @@ theme_override_colors/font_color = Color(0.74, 0.82, 0.9, 1)
 theme_override_font_sizes/font_size = 15
 text = "Movement state initializing..."
 
+[node name="OrientationWarning" type="Label" parent="HUD/UI"]
+visible = false
+layout_mode = 0
+offset_left = 12.0
+offset_top = 36.0
+offset_right = 348.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(0.95, 0.8, 0.28, 1)
+theme_override_font_sizes/font_size = 14
+text = "Landscape orientation recommended"
+horizontal_alignment = 1
+
+[node name="CombatStatus" type="Label" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 650.0
+offset_top = 102.0
+offset_right = 1120.0
+offset_bottom = 220.0
+theme_override_colors/font_color = Color(0.91, 0.94, 0.98, 1)
+theme_override_font_sizes/font_size = 14
+text = "Combat fixture initializing..."
+autowrap_mode = 2
+
+[node name="CombatLog" type="RichTextLabel" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 650.0
+offset_top = 230.0
+offset_right = 1120.0
+offset_bottom = 500.0
+mouse_filter = 2
+theme_override_colors/default_color = Color(0.74, 0.82, 0.9, 1)
+theme_override_font_sizes/normal_font_size = 13
+bbcode_enabled = true
+fit_content = false
+scroll_following = true
+
+[node name="EncounterButton" type="Button" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 992.0
+offset_top = 20.0
+offset_right = 1120.0
+offset_bottom = 72.0
+mouse_default_cursor_shape = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 16
+text = "START"
+
+[node name="MobileTouchControls" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_touch")
+
 [node name="PlaceholderPlayer" type="CharacterBody2D" parent="."]
 position = Vector2(576, 324)
 script = ExtResource("1_player")
-movement_debug_label_path = NodePath("../MovementDebug")
+movement_debug_label_path = NodePath("../HUD/UI/MovementDebug")
+touch_controls_path = NodePath("../HUD/MobileTouchControls")
 
 [node name="Visual" type="Polygon2D" parent="PlaceholderPlayer"]
 polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)
@@ -55,3 +145,56 @@ color = Color(0.95, 0.8, 0.28, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="PlaceholderPlayer"]
 shape = SubResource("RectangleShape2D_player")
+
+[node name="HPC" type="Label" parent="PlaceholderPlayer"]
+offset_left = -60.0
+offset_top = -62.0
+offset_right = 60.0
+offset_bottom = -24.0
+theme_override_colors/font_color = Color(0.55, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "PLAYER\nHPC --"
+horizontal_alignment = 1
+
+[node name="Opponent" type="CharacterBody2D" parent="."]
+position = Vector2(648, 376)
+
+[node name="Visual" type="Polygon2D" parent="Opponent"]
+polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)
+color = Color(0.9, 0.3, 0.28, 1)
+
+[node name="FacingMarker" type="Polygon2D" parent="Opponent"]
+polygon = PackedVector2Array(-4, 10, 4, 10, 0, 18)
+color = Color(0.95, 0.8, 0.28, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Opponent"]
+shape = SubResource("RectangleShape2D_player")
+
+[node name="HPC" type="Label" parent="Opponent"]
+offset_left = -65.0
+offset_top = -62.0
+offset_right = 65.0
+offset_bottom = -24.0
+theme_override_colors/font_color = Color(1, 0.66, 0.62, 1)
+theme_override_font_sizes/font_size = 13
+text = "OPPONENT\nHPC --"
+horizontal_alignment = 1
+
+[node name="TargetIndicator" type="Line2D" parent="."]
+position = Vector2(648, 376)
+points = PackedVector2Array(-24, -24, 24, -24, 24, 24, -24, 24, -24, -24)
+width = 3.0
+default_color = Color(0.95, 0.8, 0.28, 0.95)
+
+[node name="CombatController" type="Node" parent="."]
+process_priority = 10
+script = ExtResource("4_combat")
+player_path = NodePath("../PlaceholderPlayer")
+opponent_path = NodePath("../Opponent")
+touch_controls_path = NodePath("../HUD/MobileTouchControls")
+player_hpc_label_path = NodePath("../PlaceholderPlayer/HPC")
+opponent_hpc_label_path = NodePath("../Opponent/HPC")
+combat_status_path = NodePath("../HUD/UI/CombatStatus")
+event_log_path = NodePath("../HUD/UI/CombatLog")
+target_indicator_path = NodePath("../TargetIndicator")
+encounter_button_path = NodePath("../HUD/UI/EncounterButton")

@@ -16,6 +16,8 @@ var flat_bonus: int = 0
 var strength_bonus: int = 0
 var pre_multiplier_total: int = 0
 var applied_multipliers: Array = []
+var combined_multiplier_numerator: int = 1
+var combined_multiplier_denominator: int = 1
 var multiplied_total: int = 0
 var armor_equipment_ref: StringName = &""
 var armor_slot: StringName = &""
@@ -61,6 +63,8 @@ func to_dictionary() -> Dictionary:
 		"strength_bonus": strength_bonus,
 		"pre_multiplier_total": pre_multiplier_total,
 		"applied_multipliers": applied_multipliers.duplicate(true),
+		"combined_multiplier_numerator": combined_multiplier_numerator,
+		"combined_multiplier_denominator": combined_multiplier_denominator,
 		"multiplied_total": multiplied_total,
 		"armor_equipment_ref": String(armor_equipment_ref),
 		"armor_slot": String(armor_slot),

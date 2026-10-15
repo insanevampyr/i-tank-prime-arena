@@ -35,10 +35,14 @@ var adjusted_roll: Variant = null
 var accuracy_success: Variant = null
 var critical_success: bool = false
 var critical_failure: bool = false
+var critical_record_id: String = ""
+var accuracy_event_id: String = ""
 var status: String = STATUS_EXECUTING
 var result_event_id: String = ""
 var defense_resolution_id: String = ""
 var damage_resolution_id: String = ""
+var consequence_damage_multipliers: Array[Dictionary] = []
+var same_attack_condition_protected_actor_id: StringName = &""
 var revision: int = 0
 
 
@@ -102,9 +106,13 @@ func to_dictionary() -> Dictionary:
 		"accuracy_success": accuracy_success,
 		"critical_success": critical_success,
 		"critical_failure": critical_failure,
+		"critical_record_id": critical_record_id,
+		"accuracy_event_id": accuracy_event_id,
 		"status": status,
 		"result_event_id": result_event_id,
 		"defense_resolution_id": defense_resolution_id,
 		"damage_resolution_id": damage_resolution_id,
+		"consequence_damage_multipliers": consequence_damage_multipliers.duplicate(true),
+		"same_attack_condition_protected_actor_id": String(same_attack_condition_protected_actor_id),
 		"revision": revision,
 	}

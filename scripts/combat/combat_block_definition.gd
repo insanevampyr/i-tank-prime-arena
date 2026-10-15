@@ -11,6 +11,7 @@ var target_modifier: int
 var proficiency_verified: bool
 var usable: bool
 var current_shp: Variant
+var verified_shield_contact: Variant
 var source_refs: PackedStringArray
 
 
@@ -22,7 +23,8 @@ func _init(
 	p_proficiency_verified: bool = false,
 	p_usable: bool = true,
 	p_current_shp: Variant = null,
-	p_source_refs: PackedStringArray = PackedStringArray()
+	p_source_refs: PackedStringArray = PackedStringArray(),
+	p_verified_shield_contact: Variant = null
 ) -> void:
 	assert(p_defense_type == TYPE_WEAPON or p_defense_type == TYPE_SHIELD, "Block definitions must be weapon or shield Blocks.")
 	assert(not String(p_equipment_ref).is_empty(), "Block definitions require an equipment reference.")
@@ -31,6 +33,8 @@ func _init(
 	if p_current_shp != null:
 		assert(p_defense_type == TYPE_SHIELD, "Only shield Block definitions may carry SHP.")
 		assert(typeof(p_current_shp) == TYPE_INT and int(p_current_shp) >= 0, "Resolved SHP must be a non-negative integer.")
+	if p_verified_shield_contact != null:
+		assert(p_defense_type == TYPE_SHIELD and typeof(p_verified_shield_contact) == TYPE_BOOL, "Verified shield contact applies only to shield Blocks.")
 	defense_type = p_defense_type
 	equipment_ref = p_equipment_ref
 	block_target = p_block_target
@@ -38,6 +42,7 @@ func _init(
 	proficiency_verified = p_proficiency_verified
 	usable = p_usable
 	current_shp = p_current_shp
+	verified_shield_contact = p_verified_shield_contact
 	source_refs = p_source_refs.duplicate()
 
 
@@ -50,6 +55,7 @@ func to_dictionary() -> Dictionary:
 		"proficiency_verified": proficiency_verified,
 		"usable": usable,
 		"current_shp": current_shp,
+		"verified_shield_contact": verified_shield_contact,
 		"shield_zero_shp_destruction_supported": defense_type == TYPE_SHIELD,
 		"source_refs": Array(source_refs),
 	}

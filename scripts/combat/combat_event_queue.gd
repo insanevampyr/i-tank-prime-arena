@@ -41,6 +41,20 @@ func clear() -> void:
 	_event_ids.clear()
 
 
+func cancel_action_events(action_instance_id: String) -> PackedStringArray:
+	var canceled := PackedStringArray()
+	var retained: Array = []
+	for event: CombatEvent in _events:
+		var event_action_id := String(event.payload.get("action_instance_id", ""))
+		if event_action_id == action_instance_id and (event.event_type == &"action_act_due" or event.event_type == &"action_finalize_due"):
+			canceled.append(event.event_id)
+			_event_ids.erase(event.event_id)
+		else:
+			retained.append(event)
+	_events = retained
+	return canceled
+
+
 func drain() -> Array:
 	var ordered_events: Array = _events.duplicate()
 	_events.clear()

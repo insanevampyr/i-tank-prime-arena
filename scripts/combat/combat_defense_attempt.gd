@@ -19,6 +19,8 @@ var rng_draw_index: Variant = null
 var success: Variant = null
 var critical_success: bool = false
 var critical_failure: bool = false
+var roll_id: String = ""
+var critical_record_id: String = ""
 var resources_spent: Dictionary = {}
 var resolution_context: Dictionary = {}
 var parent_event_id: String = ""
@@ -45,6 +47,8 @@ func to_dictionary() -> Dictionary:
 		"success": success,
 		"critical_success": critical_success,
 		"critical_failure": critical_failure,
+		"roll_id": roll_id,
+		"critical_record_id": critical_record_id,
 		"resources_spent": resources_spent.duplicate(true),
 		"resolution_context": resolution_context.duplicate(true),
 		"parent_event_id": parent_event_id,
