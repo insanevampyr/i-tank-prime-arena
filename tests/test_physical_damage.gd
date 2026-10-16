@@ -6,6 +6,7 @@ var _failures: Array[String] = []
 func run() -> Array[String]:
 	_test_weapon_damage_sb_armor_nal_and_minimum()
 	_test_damage_types_locations_and_type_responses()
+	_test_location_specific_armor_isolation()
 	_test_defense_damage_gating_and_shield_destruction()
 	_test_multiplier_precision_and_critical_boundary()
 	_test_ducking_eligibility_policies()
@@ -101,6 +102,36 @@ func _test_damage_types_locations_and_type_responses() -> void:
 	)
 	unresolved_tal["simulation"].resolve_pending_defense(unresolved_tal["attack_id"], "unresolved_tal_defense")
 	_expect_equal(unresolved_tal["simulation"].resolve_physical_damage(unresolved_tal["attack_id"], "unresolved_tal_damage")["reason"], "armor_tal_unresolved", "Missing armor protection for an incoming type must fail closed instead of becoming zero TAL.")
+
+
+func _test_location_specific_armor_isolation() -> void:
+	# The source records armor in body groups. These fixture location identifiers
+	# deliberately exercise only the authoritative coverage contract: armor may
+	# protect its declared location and must not leak TAL into another location.
+	var torso_plate := _armor(&"torso_plate", &"torso", PackedStringArray(["torso"]), {"bashing": 3})
+	var head_armor := _armor(&"head_armor", &"head", PackedStringArray(["head", "neck"]), {"bashing": 2})
+	var locations := _unit_locations()
+	for location: String in ["upper_arm", "left_leg", "unarmored_location"]:
+		locations[location] = {"numerator": 1, "denominator": 1, "source_ref": "TEST-FIXTURE location coverage"}
+	var damage := _damage_definition(1, 6, false, true, locations)
+	var cases: Array[Dictionary] = [
+		{"id": "torso_plate", "location": "torso", "armors": [torso_plate], "armor_ref": "torso_plate", "tal": 3, "final_damage": 2},
+		{"id": "head_vs_torso_plate", "location": "head", "armors": [torso_plate], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "head_vs_head_armor", "location": "head", "armors": [head_armor], "armor_ref": "head_armor", "tal": 2, "final_damage": 3},
+		{"id": "torso_vs_head_armor", "location": "torso", "armors": [head_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "arm_vs_torso_plate", "location": "upper_arm", "armors": [torso_plate], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "leg_vs_torso_plate", "location": "left_leg", "armors": [torso_plate], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "unarmored", "location": "unarmored_location", "armors": [torso_plate, head_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
+	]
+	for entry: Dictionary in cases:
+		var fixture := _build_damage_fixture(
+			_find_seed_for_rolls(5, [6], 6), damage, PackedStringArray(["bashing"]), StringName(entry["location"]), entry["armors"]
+		)
+		var resolution := _resolve_fixture_damage(fixture, "location_isolation_%s" % String(entry["id"]))
+		_expect_equal(resolution.armor_equipment_ref, StringName(entry["armor_ref"]), "Only armor explicitly covering %s may contribute TAL." % String(entry["location"]))
+		_expect_equal(resolution.armor_tal, int(entry["tal"]), "Unrelated equipped armor must contribute zero TAL at %s." % String(entry["location"]))
+		_expect_equal(resolution.natural_armor_level, 1, "NAL must remain independent of worn armor at %s." % String(entry["location"]))
+		_expect_equal(resolution.final_damage, int(entry["final_damage"]), "Location-specific TAL and separate NAL must produce the expected final damage at %s." % String(entry["location"]))
 
 
 func _test_defense_damage_gating_and_shield_destruction() -> void:
