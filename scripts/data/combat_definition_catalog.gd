@@ -6,6 +6,12 @@ const DEFAULT_WEAPON_PATH := "res://data/equipment/weapons/prime_v3_battle_axe.t
 const DEFAULT_SHIELD_PATH := "res://data/equipment/shields/prime_v3_metal_buckler.tres"
 const DEFAULT_ARMOR_PATH := "res://data/equipment/armor/prime_v3_plate_torso.tres"
 const DEFAULT_LOADOUT_PATH := "res://data/loadouts/arena_guard_plate_buckler.tres"
+const SHORT_ROD_PATH := "res://data/equipment/weapons/prime_v3_short_rod.tres"
+const GREAT_SWORD_PATH := "res://data/equipment/weapons/prime_v3_great_sword.tres"
+const LONG_STAFF_PATH := "res://data/equipment/weapons/prime_v3_long_staff.tres"
+const WOOD_BUCKLER_PATH := "res://data/equipment/shields/prime_v3_wood_buckler.tres"
+const LEATHER_TORSO_PATH := "res://data/equipment/armor/prime_v3_leather_torso.tres"
+const LEATHER_HEAD_PATH := "res://data/equipment/armor/prime_v3_leather_head.tres"
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -21,6 +27,12 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_weapon(load(DEFAULT_WEAPON_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_shield(load(DEFAULT_SHIELD_PATH) as CombatShieldDefinitionResource)
 	catalog.register_armor(load(DEFAULT_ARMOR_PATH) as CombatArmorDefinitionResource)
+	catalog.register_weapon(load(SHORT_ROD_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_weapon(load(GREAT_SWORD_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_weapon(load(LONG_STAFF_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_shield(load(WOOD_BUCKLER_PATH) as CombatShieldDefinitionResource)
+	catalog.register_armor(load(LEATHER_TORSO_PATH) as CombatArmorDefinitionResource)
+	catalog.register_armor(load(LEATHER_HEAD_PATH) as CombatArmorDefinitionResource)
 	catalog.register_loadout(load(DEFAULT_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 

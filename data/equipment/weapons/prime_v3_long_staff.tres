@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_long_staff"
+display_name = "Long Staff"
+damage_dice_count = 1
+damage_die_sides = 6
+fixed_damage_bonus = 2
+strength_bonus_eligible = true
+damage_types = PackedStringArray("bashing")
+reach_microfeet = 8000000
+strength_requirement = 4
+one_hand_strength_requirement = -1
+block_target = 2
+required_acts = 1
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = false
+blocked_capabilities = PackedStringArray("two_handed_occupancy_not_implemented")
+source_refs = PackedStringArray("PRIME-V3 p. 131, Long Staff")

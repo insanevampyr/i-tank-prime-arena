@@ -234,3 +234,14 @@ Phase 1 Task 19 adds presentation-only ATTACK and RUN readiness snapshots and tw
 | APPROVED ARENA TEST FIXTURE | The current Guard encounter composes the Guard values with Battle Axe, Plate torso and Metal Buckler. The printed Uncommon Guard instead lists full Leather and no buckler. Three Running investments remain explicit Task 3 test data, not a claim about the printed NPC. | PRIME-V3 p. 336; Phase 1 Tasks 3 and 14 | Preserved and explicitly classified |
 | ARENA CONTROL FLOW | START activates the opponent driver immediately. Opening Initiative may lawfully block the lower-ranked opponent until the higher rank declares; the next rank unlocks at the same simulation timestamp with no aggro delay. | Existing opening-Initiative implementation and Task 15 driver | Verified; no behavior change |
 | ARENA TEST GEOMETRY | The gray center wall blocks movement/LOS. The brown/orange zone is walkable, LOS-transparent and cost-neutral; it contributes only Dodge hazard tier 1 and no cover or ACC modifier. | Task 16 authored geometry; Task 22 audit | Verified; presentation labels clarified |
+
+## Phase 1 Task 23 implementation boundary
+
+| Classification | Rule / implementation boundary | Source | Status |
+| --- | --- | --- | --- |
+| PRIME DATA | Short Rod is STR 4, Bashing, 2-foot reach, `1d6 + 2`, Block 1. | PRIME-V3 p. 131 | Registered; current in-reach physical pipeline can represent it; no fixture loadout added |
+| PRIME DATA | Great Sword is STR 10, Slashing/Piercing, 4-foot reach, `2d6 + 2`, Block 2 and natural 1-2 critical; it is two-handed unless STR 20. Long Staff is STR 4, Bashing, 8-foot reach, `1d6 + 2`, Block 2 and two-handed. | PRIME-V3 pp. 126, 131 | Registered but not combat-ready: authoritative hand occupancy is not implemented |
+| PRIME DATA | Wood Buckler is STR 7, Block 2, SHP 10 and `2 Hands Free`. | PRIME-V3 p. 137 | Registered; no fixture loadout added |
+| PRIME DATA | Leather torso is STR 7 and TAL 1 versus Slashing. Leather head is STR 2 and TAL 1 versus Slashing; existing approved Arena mapping covers head and neck. Neither selected leather row prints an MR or Dodge penalty. | PRIME-V3 p. 135; existing approved head/neck mapping | Registered; no fixture loadout added |
+| VERIFY/IMPLEMENTATION GATE | A weapon with mandatory unimplemented restrictions must be marked not combat-ready and cannot create a combat attack definition. No missing property is treated as zero or otherwise inferred. | Task 23 data-validation boundary | Implemented |
+| SOURCE AVAILABILITY | Local Specification and Roadmap files identify as v1.8, not the requested v1.10. Task 23 used printed Prime data only and introduced no new Arena-rule assumptions. | Local document inspection 16 Oct 2026 | v1.10 verification blocked |

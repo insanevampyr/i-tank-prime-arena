@@ -16,6 +16,8 @@ extends Resource
 @export var critical_success_max_natural: int = 1
 @export var approach_attack_eligible: bool = false
 @export var ducking_policy: StringName = &"unresolved"
+@export var combat_ready: bool = true
+@export var blocked_capabilities: PackedStringArray = PackedStringArray()
 @export var source_refs: PackedStringArray = PackedStringArray()
 
 
@@ -44,13 +46,18 @@ func validate_definition() -> Array[Dictionary]:
 		issues.append(_issue("invalid", "invalid_weapon_critical_range"))
 	if not [CombatAttackDefinition.DUCKING_ALLOWED, CombatAttackDefinition.DUCKING_PROHIBITED, CombatAttackDefinition.DUCKING_UNRESOLVED].has(ducking_policy):
 		issues.append(_issue("invalid", "invalid_weapon_ducking_policy"))
+	if not combat_ready:
+		if blocked_capabilities.is_empty():
+			issues.append(_issue("invalid", "weapon_not_combat_ready_without_reason"))
+		else:
+			issues.append(_issue("not_yet_implemented", "weapon_not_combat_ready", {"blocked_capabilities": Array(blocked_capabilities)}))
 	if source_refs.is_empty():
 		issues.append(_issue("requires_source_verification", "weapon_source_missing"))
 	return issues
 
 
 func make_attack_definition(attack_definition_id: StringName) -> Variant:
-	if _has_invalid_issue(validate_definition()):
+	if _has_invalid_issue(validate_definition()) or not combat_ready:
 		return null
 	var damage := CombatPhysicalDamageDefinition.new(
 		damage_dice_count,
@@ -128,6 +135,7 @@ func to_dictionary() -> Dictionary:
 		"block_target": block_target, "required_acts": required_acts,
 		"critical_success_max_natural": critical_success_max_natural,
 		"approach_attack_eligible": approach_attack_eligible, "ducking_policy": String(ducking_policy),
+		"combat_ready": combat_ready, "blocked_capabilities": Array(blocked_capabilities),
 		"source_refs": Array(source_refs),
 	}
 

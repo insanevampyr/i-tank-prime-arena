@@ -9,6 +9,7 @@ var _failures: Array[String] = []
 func run() -> Array[String]:
 	_failures.clear()
 	_test_definition_loading_and_verified_values()
+	_test_task23_catalog_expansion()
 	_test_reference_validation_and_distinct_statuses()
 	_test_independent_runtime_instances()
 	_test_fixture_migration_and_deterministic_replay()
@@ -35,6 +36,43 @@ func _test_definition_loading_and_verified_values() -> void:
 	var attack: CombatAttackDefinition = weapon.make_attack_definition(Fixture.ATTACK_ID)
 	_expect_true(attack.physical_damage.dice_count == 2 and attack.physical_damage.die_sides == 10 and attack.physical_damage.flat_bonus == 3, "Catalog weapon conversion must supply the existing physical-damage transaction exactly.")
 	_expect_true(attack.physical_damage.rounding_policy == CombatPhysicalDamageDefinition.ROUNDING_FLOOR, "Catalog weapon conversion must retain exact multiplier product and one floor before TAL/NAL.")
+
+
+func _test_task23_catalog_expansion() -> void:
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var short_rod := catalog.get_weapon(&"prime_v3_short_rod")
+	var great_sword := catalog.get_weapon(&"prime_v3_great_sword")
+	var long_staff := catalog.get_weapon(&"prime_v3_long_staff")
+	var wood_buckler := catalog.get_shield(&"prime_v3_wood_buckler")
+	var leather_torso := catalog.get_armor(&"prime_v3_leather_torso")
+	var leather_head := catalog.get_armor(&"prime_v3_leather_head")
+	_expect_true(short_rod != null and short_rod.source_refs.has("PRIME-V3 p. 131, Short Rod"), "Short Rod must retain direct Prime page provenance.")
+	_expect_true(short_rod.damage_dice_count == 1 and short_rod.damage_die_sides == 6 and short_rod.fixed_damage_bonus == 2 and short_rod.reach_microfeet == 2_000_000 and short_rod.strength_requirement == 4 and short_rod.block_target == 1, "Short Rod source data must preserve its verified damage, reach, STR and Block values.")
+	_expect_true(short_rod.combat_ready and short_rod.make_attack_definition(&"task23_short_rod") != null, "A fully represented Short Rod must be eligible for the existing in-reach physical pipeline.")
+	_expect_true(great_sword != null and great_sword.source_refs.has("PRIME-V3 p. 126, Great Sword"), "Great Sword must retain direct Prime page provenance.")
+	_expect_true(great_sword.damage_dice_count == 2 and great_sword.damage_die_sides == 6 and great_sword.fixed_damage_bonus == 2 and great_sword.reach_microfeet == 4_000_000 and great_sword.strength_requirement == 10 and great_sword.one_hand_strength_requirement == 20 and great_sword.block_target == 2 and great_sword.critical_success_max_natural == 2, "Great Sword data must preserve every verified Task 23 field.")
+	_expect_true(_has_issue(great_sword.validate_definition(), "not_yet_implemented", "weapon_not_combat_ready") and great_sword.make_attack_definition(&"task23_great_sword") == null, "Two-handed Great Sword handling must fail closed until occupancy is implemented.")
+	_expect_true(long_staff != null and long_staff.source_refs.has("PRIME-V3 p. 131, Long Staff"), "Long Staff must retain direct Prime page provenance.")
+	_expect_true(long_staff.damage_dice_count == 1 and long_staff.damage_die_sides == 6 and long_staff.fixed_damage_bonus == 2 and long_staff.reach_microfeet == 8_000_000 and long_staff.strength_requirement == 4 and long_staff.block_target == 2, "Long Staff data must preserve its verified damage, reach, STR and Block values.")
+	_expect_true(_has_issue(long_staff.validate_definition(), "not_yet_implemented", "weapon_not_combat_ready") and long_staff.make_attack_definition(&"task23_long_staff") == null, "Two-handed Long Staff handling must fail closed until occupancy is implemented.")
+	_expect_true(wood_buckler != null and wood_buckler.source_refs.has("PRIME-V3 p. 137, Shield Chart, Wood Buckler") and wood_buckler.strength_requirement == 7 and wood_buckler.block_target == 2 and wood_buckler.maximum_shp == 10 and wood_buckler.two_hands_free, "Wood Buckler data must preserve verified requirements, Block, SHP and two-hands-free status.")
+	_expect_true(leather_torso != null and leather_torso.source_refs.has("PRIME-V3 p. 135, Armor Chart, Leather torso") and leather_torso.covered_locations == PackedStringArray(["torso"]) and leather_torso.tal_by_damage_type == {"slashing": 1} and leather_torso.strength_requirement == 7, "Leather torso data must preserve verified slashing TAL, torso coverage and STR requirement.")
+	_expect_true(leather_head != null and leather_head.source_refs.has("PRIME-V3 p. 135, Armor Chart, Leather head") and leather_head.covered_locations == PackedStringArray(["head", "neck"]) and leather_head.tal_by_damage_type == {"slashing": 1} and leather_head.strength_requirement == 2, "Leather head data must preserve Prime TAL plus the existing approved head/neck mapping.")
+	_expect_true(leather_torso.validate_definition().is_empty() and leather_head.validate_definition().is_empty(), "Zero-penalty leather definitions must be immediately usable by the existing armor schema.")
+	var understrength_guard: CombatCharacterDefinitionResource = (catalog.characters[String(Fixture.CHARACTER_DEFINITION_ID)] as CombatCharacterDefinitionResource).duplicate(true)
+	understrength_guard.definition_id = &"task23_understrength_guard"
+	understrength_guard.display_name = "Task 23 Understrength Guard"
+	understrength_guard.attributes = understrength_guard.attributes.duplicate(true)
+	understrength_guard.attributes["str"] = 3
+	var understrength_loadout := CombatLoadoutDefinitionResource.new()
+	understrength_loadout.definition_id = &"task23_short_rod_loadout"
+	understrength_loadout.display_name = "Task 23 Short Rod Loadout"
+	understrength_loadout.primary_weapon_ref = &"prime_v3_short_rod"
+	understrength_loadout.source_refs = PackedStringArray(["Task 23 validation fixture"])
+	catalog.register_character(understrength_guard)
+	catalog.register_loadout(understrength_loadout)
+	var understrength_validation := catalog.validate_character_loadout(understrength_guard.definition_id, understrength_loadout.definition_id)
+	_expect_true(not understrength_validation.get("success", true) and _has_issue(understrength_validation.get("issues", []), "invalid", "equipment_strength_requirement_not_met"), "An equipped weapon must fail closed when the character does not meet its verified STR requirement.")
 
 
 func _test_reference_validation_and_distinct_statuses() -> void:

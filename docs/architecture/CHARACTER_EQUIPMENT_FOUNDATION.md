@@ -33,6 +33,23 @@ Each `instantiate_actor` call deep-copies definition dictionaries into a new `Co
 
 The printed Plate movement and Dodge penalties are now recorded but deliberately remain `not_yet_implemented`. Applying them during a schema migration would change the established MR 12 and defense fixture behavior. Their integration requires a separately approved, regression-tested rule task.
 
+## Task 23 catalog expansion
+
+The local Combat Specification and Roadmap files still identify themselves as v1.8. Requested v1.10 documents were not available for review. Task 23 therefore adds only printed Prime V3 equipment data and makes no new Arena-rule assumption.
+
+| Definition | Verified data | Prime source | Combat readiness |
+| --- | --- | --- | --- |
+| Short Rod | STR 4; Bashing; 2-foot reach; `1d6 + 2`; Block 1 | p. 131 | Ready for the existing in-reach physical pipeline; not assigned to a production loadout |
+| Great Sword | STR 10; Slashing/Piercing; 4-foot reach; `2d6 + 2`; Block 2; natural 1-2 critical; two-handed unless STR 20 | p. 126 | Not combat-ready: hand-occupancy enforcement is not implemented |
+| Long Staff | STR 4; Bashing; 8-foot reach; `1d6 + 2`; Block 2; two-handed | p. 131 | Not combat-ready: hand-occupancy enforcement is not implemented |
+| Wood Buckler | STR 7; Block 2; SHP 10; `2 Hands Free` | p. 137 | Fully represented; not assigned to a production loadout |
+| Leather torso | STR 7; torso TAL 1 versus Slashing; no printed MR/Dodge penalty | p. 135 | Fully represented; not assigned to a production loadout |
+| Leather head | STR 2; head TAL 1 versus Slashing; no printed MR/Dodge penalty | p. 135; existing approved head/neck mapping | Fully represented; not assigned to a production loadout |
+
+`CombatWeaponDefinitionResource` now records a `combat_ready` boundary and explicit blocked capabilities. A non-ready weapon cannot produce a `CombatAttackDefinition`; this prevents an unimplemented mandatory restriction from being silently activated. This is data validation, not a combat-engine rewrite.
+
+No additional character template was added. `ITank_Arena_Aren_Valecrest_Character.pdf` is labelled an audit draft rather than an approved character source, so its values were not promoted to a combat definition.
+
 ## Combat connection
 
 `PrimeV3VerticalSliceFixture` loads the catalog, validates the selected character and loadout, creates independent player/opponent actor definitions, and converts equipment resources into the existing `CombatAttackDefinition`, `CombatBlockDefinition`, and `CombatArmorDefinition` types. Registration, opening Initiative, AT, ACC, defenses, damage, criticals, movement, Running, prone, Stagger, final geometry and event processing remain unchanged.
