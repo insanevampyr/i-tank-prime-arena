@@ -18,6 +18,10 @@ var attacker_id: StringName
 var target_id: StringName
 var weapon_ref: StringName
 var target_location: StringName
+var size_relationship: StringName = &""
+var attacker_size_category: StringName = &""
+var target_size_category: StringName = &""
+var tiny_target_dodge_bonus: int = 0
 var delivery_class: StringName
 var damage_types: PackedStringArray
 var physical_soak_eligible: Variant
@@ -67,7 +71,11 @@ func _init(
 	p_base_acc: int,
 	p_location_acc_modifier: int,
 	p_roll_bonus: int,
-	p_is_back_attack: bool = false
+	p_is_back_attack: bool = false,
+	p_size_relationship: StringName = &"",
+	p_attacker_size_category: StringName = &"",
+	p_target_size_category: StringName = &"",
+	p_tiny_target_dodge_bonus: int = 0
 ) -> void:
 	attack_instance_id = p_attack_instance_id
 	attack_definition_id = p_definition.attack_definition_id
@@ -76,6 +84,10 @@ func _init(
 	target_id = p_target_id
 	weapon_ref = p_definition.weapon_ref
 	target_location = p_target_location
+	size_relationship = p_size_relationship
+	attacker_size_category = p_attacker_size_category
+	target_size_category = p_target_size_category
+	tiny_target_dodge_bonus = p_tiny_target_dodge_bonus
 	delivery_class = p_definition.delivery_class
 	damage_types = p_definition.damage_types.duplicate()
 	physical_soak_eligible = p_definition.physical_soak_eligible
@@ -98,6 +110,10 @@ func to_dictionary() -> Dictionary:
 		"target_id": String(target_id),
 		"weapon_ref": String(weapon_ref),
 		"target_location": String(target_location),
+		"size_relationship": String(size_relationship),
+		"attacker_size_category": String(attacker_size_category),
+		"target_size_category": String(target_size_category),
+		"tiny_target_dodge_bonus": tiny_target_dodge_bonus,
 		"delivery_class": String(delivery_class),
 		"damage_types": Array(damage_types),
 		"physical_soak_eligible": physical_soak_eligible,

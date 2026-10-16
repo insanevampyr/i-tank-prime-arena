@@ -2,6 +2,7 @@ class_name CombatSimulation
 extends RefCounted
 
 const CriticalConsequenceCatalog = preload("res://scripts/combat/combat_critical_consequence_catalog.gd")
+const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const MAX_SIGNED_INT_64 := 9_223_372_036_854_775_807
 
 var clock: CombatClock
@@ -470,9 +471,11 @@ func start_physical_attack(
 	var resolved_location := &"torso" if String(target_location).is_empty() else target_location
 	if not definition.allowed_target_locations.has(String(resolved_location)):
 		return _failure("illegal_target_location")
-	var location_modifier: Variant = definition.get_location_acc_modifier(resolved_location)
-	if location_modifier == null:
-		return _failure("unresolved_location_acc_modifier")
+	var target_definition: CombatActorDefinition = _actor_definitions[target_key]
+	var location_context := _resolve_location_acc_context(definition, attacker_definition, target_definition, resolved_location)
+	if not location_context.get("success", false):
+		return _failure(String(location_context.get("reason", "unresolved_location_acc_modifier")))
+	var location_modifier: int = int(location_context["location_acc_modifier"])
 	if not definition.has_resolved_range():
 		return _failure("unresolved_attack_range")
 	# Approved Arena approach-attack timing: an ordinary physical attack may be
@@ -510,9 +513,13 @@ func start_physical_attack(
 		resolved_location,
 		clock.get_elapsed_us(),
 		int(base_acc_value),
-		int(location_modifier),
+		location_modifier,
 		roll_bonus,
-		is_back_attack
+		is_back_attack,
+		StringName(location_context.get("size_relationship", "")),
+		StringName(location_context.get("attacker_size_category", "")),
+		StringName(location_context.get("target_size_category", "")),
+		int(location_context.get("tiny_target_dodge_bonus", 0))
 	)
 	attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
 	attack.declared_target_position_microfeet = target_state.position_microfeet
@@ -534,6 +541,10 @@ func start_physical_attack(
 			"attack_definition_id": definition_key,
 			"weapon_ref": String(definition.weapon_ref),
 			"target_location": String(resolved_location),
+			"size_relationship": String(attack.size_relationship),
+			"attacker_size_category": String(attack.attacker_size_category),
+			"target_size_category": String(attack.target_size_category),
+			"tiny_target_dodge_bonus": attack.tiny_target_dodge_bonus,
 			"acc_target": attack.acc_target,
 			"distance_squared_microfeet": distance_squared,
 			"request_id": request_id,
@@ -544,6 +555,46 @@ func start_physical_attack(
 		}
 	)
 	return _success({"attack_instance_id": attack_instance_id, "action_instance_id": action_instance_id})
+
+
+func _resolve_location_acc_context(
+	definition: CombatAttackDefinition,
+	attacker_definition: CombatActorDefinition,
+	target_definition: CombatActorDefinition,
+	target_location: StringName
+) -> Dictionary:
+	if not definition.uses_size_based_location_acc:
+		var static_modifier: Variant = definition.get_location_acc_modifier(target_location)
+		if static_modifier == null:
+			return {"success": false, "reason": "unresolved_location_acc_modifier"}
+		return {
+			"success": true,
+			"location_acc_modifier": int(static_modifier),
+			"size_relationship": "",
+			"attacker_size_category": "",
+			"target_size_category": "",
+			"tiny_target_dodge_bonus": 0,
+		}
+	if attacker_definition.size_category.is_empty():
+		return {"success": false, "reason": "unresolved_attacker_size_category"}
+	if target_definition.size_category.is_empty():
+		return {"success": false, "reason": "unresolved_target_size_category"}
+	var profile := HitLocations.resolve_attack_profile(attacker_definition.size_category, target_definition.size_category)
+	if not profile.get("success", false):
+		return {"success": false, "reason": String(profile.get("reason", "unsupported_size_relationship"))}
+	if not (profile.get("allowed_target_locations", PackedStringArray()) as PackedStringArray).has(String(target_location)):
+		return {"success": false, "reason": "unresolved_location_acc_modifier"}
+	var modifier: Variant = (profile.get("acc_modifiers_by_location", {}) as Dictionary).get(String(target_location))
+	if modifier == null:
+		return {"success": false, "reason": "unresolved_location_acc_modifier"}
+	return {
+		"success": true,
+		"location_acc_modifier": int(modifier),
+		"size_relationship": String(profile.get("size_relationship", "")),
+		"attacker_size_category": String(profile.get("attacker_size", "")),
+		"target_size_category": String(profile.get("target_size", "")),
+		"tiny_target_dodge_bonus": int(profile.get("tiny_target_dodge_bonus", 0)),
+	}
 
 
 func resolve_pending_defense(
@@ -1566,6 +1617,7 @@ func _evaluate_defense_eligibility(
 			if result["base_target"] == null:
 				result["reason"] = "dodge_target_unresolved"
 				return result
+			result["target_modifier"] = profile.get_modifier(defense_type) + attack.tiny_target_dodge_bonus
 			if dodge_context == null:
 				result["reason"] = "dodge_context_unresolved"
 				return result
@@ -2338,15 +2390,21 @@ func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary
 	if acc_value == null:
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_acc_unresolved")
 		return
-	var location_modifier: Variant = definition.get_location_acc_modifier(&"torso")
-	if location_modifier == null:
+	var reactor_definition: CombatActorDefinition = _actor_definitions[reactor_key]
+	var target_definition: CombatActorDefinition = _actor_definitions[target_key]
+	var location_context := _resolve_location_acc_context(definition, reactor_definition, target_definition, &"torso")
+	if not location_context.get("success", false):
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_torso_target_unresolved")
 		return
 	var attack_id := _make_attack_instance_id(_next_attack_sequence)
 	_next_attack_sequence += 1
 	var reaction := CombatAttackInstance.new(
 		attack_id, definition, "", reactor_id, reaction_target_id, &"torso", clock.get_elapsed_us(),
-		int(acc_value), int(location_modifier), _get_actor_roll_bonus(_actor_definitions[reactor_key])
+		int(acc_value), int(location_context["location_acc_modifier"]), _get_actor_roll_bonus(reactor_definition), false,
+		StringName(location_context.get("size_relationship", "")),
+		StringName(location_context.get("attacker_size_category", "")),
+		StringName(location_context.get("target_size_category", "")),
+		int(location_context.get("tiny_target_dodge_bonus", 0))
 	)
 	_attacks[attack_id] = reaction
 	_state_revision += 1

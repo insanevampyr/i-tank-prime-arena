@@ -11,6 +11,7 @@ const REQUIRED_COMBAT_STATS := [
 var actor_id: StringName
 var actor_kind: StringName
 var display_name: String
+var size_category: StringName
 var attributes: Dictionary
 var base_combat_stats: Dictionary
 var combat_stats: Dictionary
@@ -32,13 +33,15 @@ func _init(
 	p_equipment_refs: PackedStringArray = PackedStringArray(),
 	p_defensive_capabilities: Dictionary = {},
 	p_field_sources: Dictionary = {},
-	p_unresolved_fields: PackedStringArray = PackedStringArray()
+	p_unresolved_fields: PackedStringArray = PackedStringArray(),
+	p_size_category: StringName = &""
 ) -> void:
 	assert(not String(p_actor_id).is_empty(), "Combat actors require a stable identifier.")
 	assert(not String(p_actor_kind).is_empty(), "Combat actors require a stable kind.")
 	actor_id = p_actor_id
 	actor_kind = p_actor_kind
 	display_name = p_display_name
+	size_category = p_size_category
 	attributes = p_attributes.duplicate(true)
 	base_combat_stats = p_combat_stats.duplicate(true)
 	combat_stats = base_combat_stats.duplicate(true)
@@ -83,6 +86,7 @@ func to_dictionary() -> Dictionary:
 		"actor_id": String(actor_id),
 		"actor_kind": String(actor_kind),
 		"display_name": display_name,
+		"size_category": String(size_category),
 		"attributes": attributes.duplicate(true),
 		"base_combat_stats": base_combat_stats.duplicate(true),
 		"combat_stats": combat_stats.duplicate(true),

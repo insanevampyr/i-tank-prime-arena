@@ -8,7 +8,7 @@ The data migration changes where verified fixture values live, not how combat re
 
 ## Definition layout
 
-- `data/characters/prime_v3_uncommon_guard.tres` stores reusable identity, attributes, derived combat values, capabilities, Running fixture metadata and source references.
+- `data/characters/prime_v3_uncommon_guard.tres` stores reusable identity, Prime size category, attributes, derived combat values, capabilities, Running fixture metadata and source references.
 - `data/equipment/weapons/prime_v3_battle_axe.tres` stores the Battle Axe dice, fixed bonus, SB eligibility, Slashing type, three-foot reach, Strength requirements, Block, critical range and approved approach capability.
 - `data/equipment/shields/prime_v3_metal_buckler.tres` stores Strength requirement, Block, maximum SHP and `2 Hands Free` evidence.
 - `data/equipment/armor/prime_v3_plate_torso.tres` stores torso coverage, Bashing/Slashing/Piercing TAL, Strength requirement and the printed movement/Dodge penalties.
@@ -17,11 +17,14 @@ The data migration changes where verified fixture values live, not how combat re
 
 Each `instantiate_actor` call deep-copies definition dictionaries into a new `CombatActorDefinition`. `CombatActorState` owns mutable HPC, resources, equipment references and conditions. Weapon/shield/armor resources create fresh combat definitions, so shield SHP cannot leak between combatants or resets.
 
+Task 28 adds `size_category` as immutable actor-definition data, validated against Prime's printed Tiny, Small, Medium, Large, Extra Large, Gigantic and Enormous categories before a catalog-backed actor can register. It is separate from mutable combat state and equipment. A size-aware attack fails closed if either participant lacks a supported category.
+
 ## Source mapping
 
 | Field group | Stored value | Classification and source |
 | --- | --- | --- |
 | Guard identity | Uncommon Guard; race Varies; Fighter | Prime V3 p. 336 |
+| Guard size category | Medium | Prime V3 pp. 95-97 printed height bands; approved Task 28 fixture classification |
 | Guard attributes | STR 16, END 10, SPD 12, DEX 14, WIS 8, INT 5, WIT 8, MAN 12, LUK 1, APP 8 | Prime V3 p. 336 |
 | Guard combat values | HPM 100, SB 4, NAL 1, Physical Soak 4, MR 12, AT 2, DT 8, DP 6, ACC 12, INIT 4, RB 0 | Prime V3 p. 336 |
 | Running profile | three investments, SCM 0, RB 0 | Explicit Task 3 test fixture; the Guard row does not print these Running investments |

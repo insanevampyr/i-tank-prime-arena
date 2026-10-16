@@ -4,6 +4,7 @@ extends Resource
 @export var definition_id: StringName
 @export var display_name: String
 @export var actor_kind: StringName = &"prime_v3_verified_fixture"
+@export var size_category: StringName = &""
 @export var race_name: String = ""
 @export var class_names: PackedStringArray = PackedStringArray()
 @export var level: int = -1
@@ -25,6 +26,8 @@ func validate_definition() -> Array[Dictionary]:
 		issues.append(_issue("invalid", "missing_character_display_name"))
 	if String(actor_kind).is_empty():
 		issues.append(_issue("invalid", "missing_actor_kind"))
+	if not CombatHitLocationCatalog.is_supported_size_category(size_category):
+		issues.append(_issue("invalid", "unsupported_character_size_category", {"size_category": String(size_category)}))
 	for field_name: String in CombatActorDefinition.REQUIRED_CORE_ATTRIBUTES:
 		_validate_integer_field(issues, attributes, field_name, "attributes", false)
 	for field_name: String in CombatActorDefinition.REQUIRED_COMBAT_STATS:
@@ -55,7 +58,8 @@ func instantiate_actor(actor_id: StringName, instance_display_name: String, equi
 		equipment_refs,
 		defensive_capabilities,
 		field_sources,
-		unresolved_fields
+		unresolved_fields,
+		size_category
 	)
 
 
@@ -64,6 +68,7 @@ func to_dictionary() -> Dictionary:
 		"definition_id": String(definition_id),
 		"display_name": display_name,
 		"actor_kind": String(actor_kind),
+		"size_category": String(size_category),
 		"race_name": race_name,
 		"class_names": Array(class_names),
 		"level": level,

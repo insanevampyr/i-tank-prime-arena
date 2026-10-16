@@ -7,6 +7,7 @@ script = ExtResource("1_character")
 definition_id = &"prime_v3_uncommon_guard"
 display_name = "Prime V3 Uncommon Guard"
 actor_kind = &"prime_v3_verified_vertical_slice_fixture"
+size_category = &"medium"
 race_name = "Varies"
 class_names = PackedStringArray("Fighter")
 level = -1
@@ -52,6 +53,7 @@ field_sources = {
 "attributes": "PRIME-V3 p. 336, Uncommon Guard",
 "combat_stats": "PRIME-V3 p. 336, Uncommon Guard",
 "equipment": "Phase 1 Task 14 assembled Arena fixture; item fields are separately sourced",
-"running_profile": "Task 3 explicit movement-test profile; not printed in the Guard row"
+"running_profile": "Task 3 explicit movement-test profile; not printed in the Guard row",
+"size_category": "PRIME-V3 pp. 95-97, Medium height range 3ft1in-6ft4in; Guard fixture classified by approved Task 28 source mapping"
 }
 unresolved_fields = PackedStringArray()

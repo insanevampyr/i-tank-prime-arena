@@ -21,6 +21,7 @@ const FloatingCombatTextTests = preload("res://tests/test_floating_combat_text.g
 const CharacterEquipmentFoundationTests = preload("res://tests/test_character_equipment_foundation.gd")
 const ArmorPenaltyTests = preload("res://tests/test_armor_penalties.gd")
 const NineLocationTargetingTests = preload("res://tests/test_nine_location_targeting.gd")
+const SizeBasedTargetingTests = preload("res://tests/test_size_based_targeting.gd")
 
 
 func _initialize() -> void:
@@ -50,6 +51,7 @@ func _run_tests() -> void:
 		{"name": "Task 22 character and equipment foundation", "instance": CharacterEquipmentFoundationTests.new()},
 		{"name": "Task 25 armor penalties", "instance": ArmorPenaltyTests.new()},
 		{"name": "Task 27 nine-location targeting", "instance": NineLocationTargetingTests.new()},
+		{"name": "Task 28 size-based targeting", "instance": SizeBasedTargetingTests.new()},
 	]
 	var failure_count := 0
 	for suite: Dictionary in suites:

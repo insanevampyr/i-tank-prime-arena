@@ -88,11 +88,13 @@ func make_attack_definition(attack_definition_id: StringName, targeting_profile:
 			"source_ref": "PRIME-V3 pp. 95-98, same-size torso hit location 3",
 		},
 	}
+	var uses_size_based_location_acc := false
 	var attack_sources := source_refs.duplicate()
 	if not targeting_profile.is_empty():
 		acc_modifiers = targeting_profile.get("acc_modifiers_by_location", {}).duplicate(true)
 		allowed_locations = targeting_profile.get("allowed_target_locations", PackedStringArray()).duplicate()
 		location_multipliers = targeting_profile.get("location_multipliers", {}).duplicate(true)
+		uses_size_based_location_acc = bool(targeting_profile.get("uses_size_based_location_acc", false))
 		for profile_source: String in targeting_profile.get("source_refs", PackedStringArray()):
 			if not attack_sources.has(profile_source):
 				attack_sources.append(profile_source)
@@ -139,7 +141,8 @@ func make_attack_definition(attack_definition_id: StringName, targeting_profile:
 		ducking_policy,
 		damage,
 		critical_policy,
-		approach_attack_eligible
+		approach_attack_eligible,
+		uses_size_based_location_acc
 	)
 
 
