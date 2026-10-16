@@ -1,6 +1,8 @@
 class_name CombatDefinitionCatalog
 extends RefCounted
 
+const WEAPON_HAND_CAPACITY := 2
+
 const DEFAULT_CHARACTER_PATH := "res://data/characters/prime_v3_uncommon_guard.tres"
 const DEFAULT_WEAPON_PATH := "res://data/equipment/weapons/prime_v3_battle_axe.tres"
 const DEFAULT_SHIELD_PATH := "res://data/equipment/shields/prime_v3_metal_buckler.tres"
@@ -69,28 +71,16 @@ func validate_character_loadout(character_id: StringName, loadout_id: StringName
 		return _validation_result(issues)
 	issues.append_array(character.validate_definition())
 	issues.append_array(loadout_definition.validate_definition())
-	var strength_value: Variant = character.attributes.get("str")
-	var weapon: CombatWeaponDefinitionResource = weapons.get(String(loadout_definition.primary_weapon_ref))
-	if weapon == null:
-		issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": String(loadout_definition.primary_weapon_ref)}))
-	else:
-		issues.append_array(weapon.validate_definition())
-		_validate_strength_requirement(issues, strength_value, weapon.strength_requirement, weapon.definition_id)
-	var shield: CombatShieldDefinitionResource = null
-	if not String(loadout_definition.shield_ref).is_empty():
-		shield = shields.get(String(loadout_definition.shield_ref))
-		if shield == null:
-			issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": String(loadout_definition.shield_ref)}))
-		else:
-			issues.append_array(shield.validate_definition())
-			_validate_strength_requirement(issues, strength_value, shield.strength_requirement, shield.definition_id)
-	for armor_ref: String in loadout_definition.armor_refs:
-		var armor: CombatArmorDefinitionResource = armors.get(armor_ref)
-		if armor == null:
-			issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": armor_ref}))
-			continue
-		issues.append_array(armor.validate_definition())
-		_validate_strength_requirement(issues, strength_value, armor.strength_requirement, armor.definition_id)
+	_validate_equipment_refs(issues, character.attributes.get("str"), loadout_definition.equipment_refs())
+	return _validation_result(issues)
+
+
+func validate_actor_equipment(actor: CombatActorDefinition) -> Dictionary:
+	var issues: Array[Dictionary] = registration_issues.duplicate(true)
+	if actor == null:
+		issues.append(_issue("invalid", "missing_actor_definition"))
+		return _validation_result(issues)
+	_validate_equipment_refs(issues, actor.attributes.get("str"), actor.equipment_refs)
 	return _validation_result(issues)
 
 
@@ -103,6 +93,9 @@ func instantiate_actor(character_id: StringName, loadout_id: StringName, actor_i
 	var actor: Variant = character.instantiate_actor(actor_id, display_name, loadout_definition.equipment_refs())
 	if actor == null:
 		return _validation_result([_issue("invalid", "character_instantiation_failed")])
+	var actor_equipment_validation := validate_actor_equipment(actor as CombatActorDefinition)
+	if not actor_equipment_validation.get("success", false):
+		return actor_equipment_validation
 	return {"success": true, "status": validation["status"], "issues": validation["issues"], "actor": actor}
 
 
@@ -147,6 +140,58 @@ func _validate_strength_requirement(issues: Array[Dictionary], strength_value: V
 		issues.append(_issue("invalid", "character_strength_missing", {"equipment_ref": String(equipment_id)}))
 	elif int(strength_value) < requirement:
 		issues.append(_issue("invalid", "equipment_strength_requirement_not_met", {"equipment_ref": String(equipment_id), "required": requirement, "actual": int(strength_value)}))
+
+
+func _validate_equipment_refs(issues: Array[Dictionary], strength_value: Variant, equipment_refs: PackedStringArray) -> void:
+	var weapon: CombatWeaponDefinitionResource = null
+	var shield: CombatShieldDefinitionResource = null
+	var occupied_armor_slots: Dictionary = {}
+	for equipment_ref: String in equipment_refs:
+		if weapons.has(equipment_ref):
+			if weapon != null:
+				issues.append(_issue("invalid", "multiple_primary_weapons_not_supported", {"equipment_ref": equipment_ref}))
+				continue
+			weapon = weapons[equipment_ref]
+			issues.append_array(weapon.validate_definition())
+			_validate_strength_requirement(issues, strength_value, weapon.strength_requirement, weapon.definition_id)
+		elif shields.has(equipment_ref):
+			if shield != null:
+				issues.append(_issue("invalid", "multiple_shields_not_supported", {"equipment_ref": equipment_ref}))
+				continue
+			shield = shields[equipment_ref]
+			issues.append_array(shield.validate_definition())
+			_validate_strength_requirement(issues, strength_value, shield.strength_requirement, shield.definition_id)
+		elif armors.has(equipment_ref):
+			var armor: CombatArmorDefinitionResource = armors[equipment_ref]
+			issues.append_array(armor.validate_definition())
+			_validate_strength_requirement(issues, strength_value, armor.strength_requirement, armor.definition_id)
+			var armor_slot := String(armor.armor_slot)
+			if occupied_armor_slots.has(armor_slot):
+				issues.append(_issue("invalid", "equipment_slot_conflict", {
+					"slot": armor_slot,
+					"equipment_refs": [occupied_armor_slots[armor_slot], equipment_ref],
+				}))
+			else:
+				occupied_armor_slots[armor_slot] = equipment_ref
+		else:
+			issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": equipment_ref}))
+	if weapon == null:
+		issues.append(_issue("invalid", "missing_primary_weapon_equipment"))
+		return
+	if strength_value == null or typeof(strength_value) != TYPE_INT:
+		return
+	var weapon_hands := weapon.effective_hands_required(int(strength_value))
+	if weapon_hands == CombatWeaponDefinitionResource.INVALID_HAND_REQUIREMENT:
+		return
+	var shield_hands := 0 if shield == null else shield.hand_occupancy
+	if weapon_hands + shield_hands > WEAPON_HAND_CAPACITY:
+		issues.append(_issue("invalid", "equipment_hand_occupancy_conflict", {
+			"weapon_ref": String(weapon.definition_id),
+			"weapon_hands": weapon_hands,
+			"shield_ref": "" if shield == null else String(shield.definition_id),
+			"shield_hands": shield_hands,
+			"available_hands": WEAPON_HAND_CAPACITY,
+		}))
 
 
 func _validation_result(issues: Array[Dictionary]) -> Dictionary:

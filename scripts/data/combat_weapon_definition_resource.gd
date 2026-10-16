@@ -1,6 +1,8 @@
 class_name CombatWeaponDefinitionResource
 extends Resource
 
+const INVALID_HAND_REQUIREMENT := -1
+
 @export var definition_id: StringName
 @export var display_name: String
 @export var damage_dice_count: int = -1
@@ -11,6 +13,7 @@ extends Resource
 @export var reach_microfeet: int = -1
 @export var strength_requirement: int = -1
 @export var one_hand_strength_requirement: int = -1
+@export_range(1, 2) var base_hands_required: int = 1
 @export var block_target: int = -1
 @export var required_acts: int = 1
 @export var critical_success_max_natural: int = 1
@@ -38,6 +41,15 @@ func validate_definition() -> Array[Dictionary]:
 		issues.append(_issue("invalid", "invalid_weapon_reach"))
 	if strength_requirement < 0:
 		issues.append(_issue("requires_source_verification", "weapon_strength_requirement_unresolved"))
+	if base_hands_required < 1 or base_hands_required > 2:
+		issues.append(_issue("invalid", "invalid_weapon_hand_requirement"))
+	elif base_hands_required == 1 and one_hand_strength_requirement != -1:
+		issues.append(_issue("invalid", "unexpected_one_hand_strength_threshold"))
+	elif base_hands_required == 2 and strength_requirement >= 0 and one_hand_strength_requirement != strength_requirement * 2:
+		issues.append(_issue("invalid", "weapon_one_hand_strength_threshold_mismatch", {
+			"expected": strength_requirement * 2,
+			"actual": one_hand_strength_requirement,
+		}))
 	if block_target < 0:
 		issues.append(_issue("requires_source_verification", "weapon_block_unresolved"))
 	if required_acts <= 0:
@@ -54,6 +66,14 @@ func validate_definition() -> Array[Dictionary]:
 	if source_refs.is_empty():
 		issues.append(_issue("requires_source_verification", "weapon_source_missing"))
 	return issues
+
+
+func effective_hands_required(character_strength: int) -> int:
+	if strength_requirement < 0 or character_strength < strength_requirement:
+		return INVALID_HAND_REQUIREMENT
+	if base_hands_required == 1:
+		return 1
+	return 1 if character_strength >= strength_requirement * 2 else 2
 
 
 func make_attack_definition(attack_definition_id: StringName) -> Variant:
@@ -132,6 +152,7 @@ func to_dictionary() -> Dictionary:
 		"fixed_damage_bonus": fixed_damage_bonus, "strength_bonus_eligible": strength_bonus_eligible,
 		"damage_types": Array(damage_types), "reach_microfeet": reach_microfeet,
 		"strength_requirement": strength_requirement, "one_hand_strength_requirement": one_hand_strength_requirement,
+		"base_hands_required": base_hands_required,
 		"block_target": block_target, "required_acts": required_acts,
 		"critical_success_max_natural": critical_success_max_natural,
 		"approach_attack_eligible": approach_attack_eligible, "ducking_policy": String(ducking_policy),

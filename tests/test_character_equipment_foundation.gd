@@ -10,6 +10,7 @@ func run() -> Array[String]:
 	_failures.clear()
 	_test_definition_loading_and_verified_values()
 	_test_task23_catalog_expansion()
+	_test_task24_hand_occupancy_and_strength_boundaries()
 	_test_reference_validation_and_distinct_statuses()
 	_test_independent_runtime_instances()
 	_test_fixture_migration_and_deterministic_replay()
@@ -31,7 +32,7 @@ func _test_definition_loading_and_verified_values() -> void:
 	_expect_equal(character.combat_stats, {"hpm": 100, "acc": 12, "at": 2, "init": 4, "mr": 12, "nal": 1, "dt": 8, "dp": 6, "physical_soak": 4, "rb": 0, "sb": 4}, "Guard derived combat values must match the frozen verified fixture.")
 	_expect_true(weapon != null and weapon.damage_dice_count == 2 and weapon.damage_die_sides == 10 and weapon.fixed_damage_bonus == 3 and weapon.strength_bonus_eligible, "Battle Axe must remain 2d10 + 3 + eligible SB.")
 	_expect_true(weapon.reach_microfeet == 3_000_000 and weapon.block_target == 2 and weapon.critical_success_max_natural == 2 and weapon.approach_attack_eligible, "Battle Axe reach, Block, critical range and Arena approach policy must remain explicit.")
-	_expect_true(shield != null and shield.maximum_shp == 20 and shield.block_target == 2 and shield.two_hands_free, "Metal Buckler definition must retain SHP, Block and two-hands-free facts.")
+	_expect_true(shield != null and shield.maximum_shp == 20 and shield.block_target == 2 and shield.two_hands_free and shield.mounting_type == CombatShieldDefinitionResource.MOUNTING_ARM_MOUNTED_BUCKLER and shield.hand_occupancy == 0, "Metal Buckler must retain SHP and Block while explicitly preserving both weapon hands.")
 	_expect_true(armor != null and armor.covered_locations == PackedStringArray(["torso"]) and armor.tal_by_damage_type == {"bashing": 3, "slashing": 3, "piercing": 3}, "Plate torso definition must retain location-specific B/S/P TAL 3.")
 	var attack: CombatAttackDefinition = weapon.make_attack_definition(Fixture.ATTACK_ID)
 	_expect_true(attack.physical_damage.dice_count == 2 and attack.physical_damage.die_sides == 10 and attack.physical_damage.flat_bonus == 3, "Catalog weapon conversion must supply the existing physical-damage transaction exactly.")
@@ -51,10 +52,10 @@ func _test_task23_catalog_expansion() -> void:
 	_expect_true(short_rod.combat_ready and short_rod.make_attack_definition(&"task23_short_rod") != null, "A fully represented Short Rod must be eligible for the existing in-reach physical pipeline.")
 	_expect_true(great_sword != null and great_sword.source_refs.has("PRIME-V3 p. 126, Great Sword"), "Great Sword must retain direct Prime page provenance.")
 	_expect_true(great_sword.damage_dice_count == 2 and great_sword.damage_die_sides == 6 and great_sword.fixed_damage_bonus == 2 and great_sword.reach_microfeet == 4_000_000 and great_sword.strength_requirement == 10 and great_sword.one_hand_strength_requirement == 20 and great_sword.block_target == 2 and great_sword.critical_success_max_natural == 2, "Great Sword data must preserve every verified Task 23 field.")
-	_expect_true(_has_issue(great_sword.validate_definition(), "not_yet_implemented", "weapon_not_combat_ready") and great_sword.make_attack_definition(&"task23_great_sword") == null, "Two-handed Great Sword handling must fail closed until occupancy is implemented.")
+	_expect_true(great_sword.combat_ready and great_sword.base_hands_required == 2 and great_sword.make_attack_definition(&"task24_great_sword") != null, "Great Sword must activate only after its two-handed occupancy data is supported.")
 	_expect_true(long_staff != null and long_staff.source_refs.has("PRIME-V3 p. 131, Long Staff"), "Long Staff must retain direct Prime page provenance.")
 	_expect_true(long_staff.damage_dice_count == 1 and long_staff.damage_die_sides == 6 and long_staff.fixed_damage_bonus == 2 and long_staff.reach_microfeet == 8_000_000 and long_staff.strength_requirement == 4 and long_staff.block_target == 2, "Long Staff data must preserve its verified damage, reach, STR and Block values.")
-	_expect_true(_has_issue(long_staff.validate_definition(), "not_yet_implemented", "weapon_not_combat_ready") and long_staff.make_attack_definition(&"task23_long_staff") == null, "Two-handed Long Staff handling must fail closed until occupancy is implemented.")
+	_expect_true(long_staff.combat_ready and long_staff.base_hands_required == 2 and long_staff.one_hand_strength_requirement == 8 and long_staff.make_attack_definition(&"task24_long_staff") != null, "Long Staff must use the locked universal double-STR threshold and activate only after occupancy support exists.")
 	_expect_true(wood_buckler != null and wood_buckler.source_refs.has("PRIME-V3 p. 137, Shield Chart, Wood Buckler") and wood_buckler.strength_requirement == 7 and wood_buckler.block_target == 2 and wood_buckler.maximum_shp == 10 and wood_buckler.two_hands_free, "Wood Buckler data must preserve verified requirements, Block, SHP and two-hands-free status.")
 	_expect_true(leather_torso != null and leather_torso.source_refs.has("PRIME-V3 p. 135, Armor Chart, Leather torso") and leather_torso.covered_locations == PackedStringArray(["torso"]) and leather_torso.tal_by_damage_type == {"slashing": 1} and leather_torso.strength_requirement == 7, "Leather torso data must preserve verified slashing TAL, torso coverage and STR requirement.")
 	_expect_true(leather_head != null and leather_head.source_refs.has("PRIME-V3 p. 135, Armor Chart, Leather head") and leather_head.covered_locations == PackedStringArray(["head", "neck"]) and leather_head.tal_by_damage_type == {"slashing": 1} and leather_head.strength_requirement == 2, "Leather head data must preserve Prime TAL plus the existing approved head/neck mapping.")
@@ -73,6 +74,67 @@ func _test_task23_catalog_expansion() -> void:
 	catalog.register_loadout(understrength_loadout)
 	var understrength_validation := catalog.validate_character_loadout(understrength_guard.definition_id, understrength_loadout.definition_id)
 	_expect_true(not understrength_validation.get("success", true) and _has_issue(understrength_validation.get("issues", []), "invalid", "equipment_strength_requirement_not_met"), "An equipped weapon must fail closed when the character does not meet its verified STR requirement.")
+
+
+func _test_task24_hand_occupancy_and_strength_boundaries() -> void:
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var boundaries := [
+		[&"prime_v3_battle_axe", 11, false, -1], [&"prime_v3_battle_axe", 12, true, 2],
+		[&"prime_v3_battle_axe", 23, true, 2], [&"prime_v3_battle_axe", 24, true, 1],
+		[&"prime_v3_great_sword", 9, false, -1], [&"prime_v3_great_sword", 10, true, 2],
+		[&"prime_v3_great_sword", 19, true, 2], [&"prime_v3_great_sword", 20, true, 1],
+		[&"prime_v3_long_staff", 3, false, -1], [&"prime_v3_long_staff", 4, true, 2],
+		[&"prime_v3_long_staff", 7, true, 2], [&"prime_v3_long_staff", 8, true, 1],
+		[&"prime_v3_short_rod", 3, false, -1], [&"prime_v3_short_rod", 4, true, 1],
+		[&"prime_v3_short_rod", 12, true, 1],
+	]
+	for boundary: Array in boundaries:
+		var weapon_ref: StringName = boundary[0]
+		var strength: int = boundary[1]
+		var expected_valid: bool = boundary[2]
+		var expected_hands: int = boundary[3]
+		var actor := _make_equipment_actor(strength, weapon_ref)
+		var result := catalog.validate_actor_equipment(actor)
+		_expect_equal(result.get("success", false), expected_valid, "%s at STR %d must match its exact minimum/double-STR boundary." % [String(weapon_ref), strength])
+		_expect_equal(catalog.get_weapon(weapon_ref).effective_hands_required(strength), expected_hands, "%s at STR %d must calculate the authoritative hand requirement." % [String(weapon_ref), strength])
+
+	var ordinary_shield := CombatShieldDefinitionResource.new()
+	ordinary_shield.definition_id = &"task24_ordinary_hand_shield"
+	ordinary_shield.display_name = "Task 24 Ordinary Hand Shield"
+	ordinary_shield.strength_requirement = 4
+	ordinary_shield.block_target = 1
+	ordinary_shield.maximum_shp = 5
+	ordinary_shield.two_hands_free = false
+	ordinary_shield.mounting_type = CombatShieldDefinitionResource.MOUNTING_HAND_HELD
+	ordinary_shield.hand_occupancy = 1
+	ordinary_shield.source_refs = PackedStringArray(["Task 24 occupancy test fixture; not production equipment"])
+	_expect_true(catalog.register_shield(ordinary_shield).get("success", false), "The isolated ordinary-shield test fixture must register cleanly.")
+
+	_expect_true(catalog.validate_actor_equipment(_make_equipment_actor(10, &"prime_v3_great_sword")).get("success", false), "A minimum-STR two-handed weapon alone must occupy two available hands legally.")
+	_expect_true(catalog.validate_actor_equipment(_make_equipment_actor(10, &"prime_v3_great_sword", &"prime_v3_wood_buckler")).get("success", false), "An arm-mounted buckler must coexist with a two-handed weapon.")
+	_expect_true(catalog.validate_actor_equipment(_make_equipment_actor(7, &"prime_v3_short_rod", &"prime_v3_wood_buckler")).get("success", false), "A one-handed weapon and arm-mounted buckler must be legal when Strength requirements are met.")
+	_expect_true(catalog.validate_actor_equipment(_make_equipment_actor(4, &"prime_v3_short_rod", ordinary_shield.definition_id)).get("success", false), "A one-handed weapon and ordinary hand-held shield must fit within two hands.")
+	var conflicted := catalog.validate_actor_equipment(_make_equipment_actor(19, &"prime_v3_great_sword", ordinary_shield.definition_id))
+	_expect_true(not conflicted.get("success", true) and _has_issue(conflicted.get("issues", []), "invalid", "equipment_hand_occupancy_conflict"), "A two-handed weapon below double STR plus a hand-held shield must fail explicitly.")
+	_expect_true(catalog.validate_actor_equipment(_make_equipment_actor(20, &"prime_v3_great_sword", ordinary_shield.definition_id)).get("success", false), "A two-handed weapon at double STR must become one-handed and permit a compatible hand-held shield.")
+	var understrength_buckler := catalog.validate_actor_equipment(_make_equipment_actor(6, &"prime_v3_short_rod", &"prime_v3_wood_buckler"))
+	_expect_true(not understrength_buckler.get("success", true) and _has_issue(understrength_buckler.get("issues", []), "invalid", "equipment_strength_requirement_not_met"), "An under-strength arm-mounted buckler must still be rejected.")
+	var invalid_ref := catalog.validate_actor_equipment(_make_equipment_actor(20, &"task24_missing_weapon"))
+	_expect_true(not invalid_ref.get("success", true) and _has_issue(invalid_ref.get("issues", []), "invalid", "missing_equipment_definition"), "Unknown equipment must fail explicitly without normalization.")
+	var duplicate_shield_actor := _make_equipment_actor(20, &"prime_v3_short_rod", &"prime_v3_wood_buckler")
+	duplicate_shield_actor.equipment_refs.append("prime_v3_metal_buckler")
+	var duplicate_shield := catalog.validate_actor_equipment(duplicate_shield_actor)
+	_expect_true(not duplicate_shield.get("success", true) and _has_issue(duplicate_shield.get("issues", []), "invalid", "multiple_shields_not_supported"), "Two shield-slot items must fail explicitly until such a loadout is supported.")
+
+	var baseline_actor := Fixture.make_guard_actor(&"task24_guard", "Task 24 Guard")
+	var baseline_validation := catalog.validate_actor_equipment(baseline_actor)
+	_expect_true(baseline_validation.get("success", false), "The STR 16 Guard Battle Axe plus arm-mounted Metal Buckler fixture must remain legal.")
+	_expect_equal(catalog.get_weapon(Fixture.WEAPON_REF).effective_hands_required(16), 2, "The Guard's Battle Axe must remain two-handed below STR 24.")
+	_expect_equal(catalog.get_shield(Fixture.SHIELD_REF).hand_occupancy, 0, "The Metal Buckler must not consume either Battle Axe hand.")
+	var great_attack: CombatAttackDefinition = catalog.get_weapon(&"prime_v3_great_sword").make_attack_definition(&"task24_great_attack")
+	var staff_attack: CombatAttackDefinition = catalog.get_weapon(&"prime_v3_long_staff").make_attack_definition(&"task24_staff_attack")
+	_expect_true(great_attack != null and great_attack.maximum_range_microfeet == 4_000_000 and great_attack.critical_trigger_policy.critical_success_max == 2 and great_attack.physical_damage.dice_count == 2 and great_attack.physical_damage.die_sides == 6, "Great Sword activation must preserve damage, reach and critical range.")
+	_expect_true(staff_attack != null and staff_attack.maximum_range_microfeet == 8_000_000 and staff_attack.physical_damage.dice_count == 1 and staff_attack.physical_damage.die_sides == 6 and staff_attack.physical_damage.flat_bonus == 2, "Long Staff activation must preserve damage and reach.")
 
 
 func _test_reference_validation_and_distinct_statuses() -> void:
@@ -196,6 +258,15 @@ func _test_scene_and_floating_feedback_compatibility() -> void:
 	layer.present_authoritative_event(CombatEvent.new("task22_damage", 1, 1, 1, &"physical_damage_resolved", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, "", PackedStringArray(), {"final_damage": 8, "hpc_after": 92}, {}))
 	_expect_true(layer.get_active_messages_for_testing().size() == 1 and layer.get_active_messages_for_testing()[0]["actor_id"] == Fixture.OPPONENT_ID, "Definition-backed actor IDs must remain compatible with Task 21 authoritative floating feedback.")
 	scene.free()
+
+
+func _make_equipment_actor(strength: int, weapon_ref: StringName, shield_ref: StringName = &"") -> CombatActorDefinition:
+	var actor := Fixture.make_guard_actor(&"task24_equipment_actor", "Task 24 Equipment Actor")
+	actor.attributes["str"] = strength
+	actor.equipment_refs = PackedStringArray([String(weapon_ref)])
+	if not String(shield_ref).is_empty():
+		actor.equipment_refs.append(String(shield_ref))
+	return actor
 
 
 func _event_signature(session: ArenaCombatSession) -> Array[Dictionary]:

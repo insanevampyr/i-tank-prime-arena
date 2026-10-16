@@ -2,7 +2,7 @@
 
 ## Authority and available sources
 
-Task 22 uses the ITank Prime V3 manuscript dated 03-01-2026 and the current project Rules Ledger. The locally available Arena Combat Specification and Roadmap both identify themselves internally as v1.8 dated 15 October 2026. Requested v1.9 documents were not available and were not treated as reviewed.
+Task 22 established this architecture from the ITank Prime V3 manuscript dated 03-01-2026 and the project Rules Ledger. The current stable-filename Arena Combat Specification and Roadmap now identify their controlling addenda internally as v1.12 dated 16 October 2026. Task 24 uses those addenda plus its locked designer ruling where the task explicitly resolves the addenda's earlier Long Staff question.
 
 The data migration changes where verified fixture values live, not how combat resolves them. `CombatSimulation` remains authoritative. Resource definitions do not own current HPC, SHP, conditions, movement spending, action timing, RNG, events, or visual state.
 
@@ -35,18 +35,28 @@ The printed Plate movement and Dodge penalties are now recorded but deliberately
 
 ## Task 23 catalog expansion
 
-The local Combat Specification and Roadmap files still identify themselves as v1.8. Requested v1.10 documents were not available for review. Task 23 therefore adds only printed Prime V3 equipment data and makes no new Arena-rule assumption.
+Task 23 added only printed Prime V3 equipment data and made no new hand-occupancy assumption. Task 24 subsequently supplies and implements the approved occupancy rulings described below.
 
 | Definition | Verified data | Prime source | Combat readiness |
 | --- | --- | --- | --- |
 | Short Rod | STR 4; Bashing; 2-foot reach; `1d6 + 2`; Block 1 | p. 131 | Ready for the existing in-reach physical pipeline; not assigned to a production loadout |
-| Great Sword | STR 10; Slashing/Piercing; 4-foot reach; `2d6 + 2`; Block 2; natural 1-2 critical; two-handed unless STR 20 | p. 126 | Not combat-ready: hand-occupancy enforcement is not implemented |
-| Long Staff | STR 4; Bashing; 8-foot reach; `1d6 + 2`; Block 2; two-handed | p. 131 | Not combat-ready: hand-occupancy enforcement is not implemented |
+| Great Sword | STR 10; Slashing/Piercing; 4-foot reach; `2d6 + 2`; Block 2; natural 1-2 critical; two-handed unless STR 20 | p. 126 | Combat-ready after Task 24 occupancy validation; not assigned to a production loadout |
+| Long Staff | STR 4; Bashing; 8-foot reach; `1d6 + 2`; Block 2; printed two-handed | p. 131 | Combat-ready after Task 24 applies the locked universal double-STR ruling; not assigned to a production loadout |
 | Wood Buckler | STR 7; Block 2; SHP 10; `2 Hands Free` | p. 137 | Fully represented; not assigned to a production loadout |
 | Leather torso | STR 7; torso TAL 1 versus Slashing; no printed MR/Dodge penalty | p. 135 | Fully represented; not assigned to a production loadout |
 | Leather head | STR 2; head TAL 1 versus Slashing; no printed MR/Dodge penalty | p. 135; existing approved head/neck mapping | Fully represented; not assigned to a production loadout |
 
-`CombatWeaponDefinitionResource` now records a `combat_ready` boundary and explicit blocked capabilities. A non-ready weapon cannot produce a `CombatAttackDefinition`; this prevents an unimplemented mandatory restriction from being silently activated. This is data validation, not a combat-engine rewrite.
+`CombatWeaponDefinitionResource` records a `combat_ready` boundary and explicit blocked capabilities. A non-ready weapon cannot produce a `CombatAttackDefinition`; this prevents an unimplemented mandatory restriction from being silently activated. This is data validation, not a combat-engine rewrite.
+
+## Task 24 hand occupancy
+
+Weapon definitions now state whether their printed base use occupies one or two hands. For a two-handed weapon, the authoritative effective requirement is two hands from minimum STR through one below double STR, then one hand at `2 x listed STR` or higher. Strength below the listed minimum remains illegal. Battle Axe therefore resolves as 12-23 STR/two hands and 24+ STR/one hand; Great Sword as 10-19/two and 20+/one; Long Staff as 4-7/two and 8+/one under the locked Task 24 universal ruling. Short Rod remains one-handed at STR 4+.
+
+Shield definitions separately record mounting type and weapon-hand occupancy. The Wood and Metal Buckler retain Prime's `2 Hands Free` chart fact and the approved Arena clarification models them as arm-mounted bucklers consuming zero weapon hands. A hand-held shield consumes one weapon hand. No production ordinary-shield resource was added; tests use an explicitly non-production hand-held shield fixture to verify the generic validator.
+
+`CombatDefinitionCatalog` validates the complete authoritative equipment reference set against the actor's actual STR before actor registration. It rejects missing definitions, unmet STR, multiple primary weapons, multiple shields, repeated armor slots and weapon-plus-shield hand totals above the two-hand capacity. Great Sword and Long Staff can now create their existing attack definitions because the former occupancy gate is implemented. Their damage, reach, Block and critical properties are unchanged.
+
+The Guard remains STR 16 with a two-handed Battle Axe. Its arm-mounted Metal Buckler consumes zero weapon hands, so the approved Battle Axe + Metal Buckler + Plate torso test loadout remains legal without inventing a STR 24 exception. Dynamic equipping, dual-wield combat and ordinary-shield production definitions remain outside this task.
 
 No additional character template was added. `ITank_Arena_Aren_Valecrest_Character.pdf` is labelled an audit draft rather than an approved character source, so its values were not promoted to a combat definition.
 

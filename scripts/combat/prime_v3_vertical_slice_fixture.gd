@@ -90,12 +90,16 @@ static func validate_combatant_fixture(
 		if actor.get_combat_stat(field_name) == null:
 			return {"success": false, "reason": "fixture_combat_stat_unresolved", "field": field_name}
 	var strength := int(actor.attributes.get("str", -1))
-	if strength < BATTLE_AXE_STRENGTH_REQUIREMENT:
-		return {"success": false, "reason": "battle_axe_strength_requirement_not_met"}
-	if strength < METAL_BUCKLER_STRENGTH_REQUIREMENT:
-		return {"success": false, "reason": "metal_buckler_strength_requirement_not_met"}
-	if strength < PLATE_TORSO_STRENGTH_REQUIREMENT:
-		return {"success": false, "reason": "plate_torso_strength_requirement_not_met"}
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var equipment_validation := catalog.validate_actor_equipment(actor)
+	if not equipment_validation.get("success", false):
+		for issue: Dictionary in equipment_validation.get("issues", []):
+			if issue.get("code") == "equipment_strength_requirement_not_met":
+				var equipment_ref := String(issue.get("details", {}).get("equipment_ref", ""))
+				if equipment_ref == String(WEAPON_REF): return {"success": false, "reason": "battle_axe_strength_requirement_not_met", "issues": equipment_validation["issues"]}
+				if equipment_ref == String(SHIELD_REF): return {"success": false, "reason": "metal_buckler_strength_requirement_not_met", "issues": equipment_validation["issues"]}
+				if equipment_ref == String(ARMOR_REF): return {"success": false, "reason": "plate_torso_strength_requirement_not_met", "issues": equipment_validation["issues"]}
+		return {"success": false, "reason": "fixture_equipment_invalid", "issues": equipment_validation.get("issues", [])}
 	for equipment_ref: StringName in [WEAPON_REF, SHIELD_REF, ARMOR_REF]:
 		if not actor.equipment_refs.has(String(equipment_ref)):
 			return {"success": false, "reason": "fixture_equipment_not_equipped", "equipment_ref": String(equipment_ref)}
@@ -117,8 +121,8 @@ static func validate_combatant_fixture(
 			return {"success": false, "reason": "fixture_armor_tal_mismatch", "damage_type": damage_type}
 	return {
 		"success": true,
-		"battle_axe_two_handed": strength < BATTLE_AXE_ONE_HAND_STRENGTH_REQUIREMENT,
-		"buckler_preserves_two_free_hands": true,
+		"battle_axe_two_handed": catalog.get_weapon(WEAPON_REF).effective_hands_required(strength) == 2,
+		"buckler_preserves_two_free_hands": catalog.get_shield(SHIELD_REF).hand_occupancy == 0,
 	}
 
 

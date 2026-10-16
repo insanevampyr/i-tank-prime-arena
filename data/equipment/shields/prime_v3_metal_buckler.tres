@@ -10,4 +10,6 @@ strength_requirement = 8
 block_target = 2
 maximum_shp = 20
 two_hands_free = true
-source_refs = PackedStringArray("PRIME-V3 p. 137, Shield Chart, Metal Buckler")
+mounting_type = &"arm_mounted_buckler"
+hand_occupancy = 0
+source_refs = PackedStringArray("PRIME-V3 p. 137, Shield Chart, Metal Buckler", "PRIME-V3 p. 137, 2 Hands Free", "Arena Combat Specification v1.12 equipment addendum, arm-mounted buckler clarification")
