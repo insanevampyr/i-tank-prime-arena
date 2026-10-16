@@ -19,6 +19,7 @@ const CROWDED_HORIZONTAL_OFFSET_PIXELS := 58.0
 
 var _presented_event_ids: Dictionary = {}
 var _active_messages: Array[Dictionary] = []
+var _next_local_message_sequence: int = 0
 
 @onready var _player: Node2D = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -32,6 +33,14 @@ func present_authoritative_event(event: CombatEvent) -> void:
 		_add_message(intent, event.event_id)
 
 
+func present_local_selection(actor_id: StringName, text: String) -> void:
+	_next_local_message_sequence += 1
+	_add_message(
+		{"actor_id": actor_id, "text": text, "category": "selection", "priority": 3},
+		"local_selection_%06d" % _next_local_message_sequence
+	)
+
+
 func clear() -> void:
 	for message: Dictionary in _active_messages:
 		var label: Label = message.get("label")
@@ -39,6 +48,7 @@ func clear() -> void:
 			label.queue_free()
 	_active_messages.clear()
 	_presented_event_ids.clear()
+	_next_local_message_sequence = 0
 
 
 func get_active_messages_for_testing() -> Array[Dictionary]:

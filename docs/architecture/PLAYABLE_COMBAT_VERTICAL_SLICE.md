@@ -22,9 +22,9 @@ Task 22 moves those values into reusable Godot Resource definitions and a valida
 ## Playable flow
 
 1. The scene initializes both actors, their equipment/protection/defense profiles, critical-reaction registrations, positions, seeded RNG, and opening Initiative in the authority.
-2. The opponent is selected by default. Left-clicking it selects and requests one attack; tapping it or pressing Tab selects only. Clicking/tapping empty arena space clears selection.
+2. The opponent is selected by default. Left-clicking it selects and requests one attack; tapping it or pressing Tab/Shift+Tab selects only. Clicking/tapping empty arena space clears selection. Desktop top-row and keypad 1-9 select a Prime aim location without attacking or consuming an Act.
 3. The player moves with the existing WASD/touch joystick and Running path. At attack input, the adapter submits the current canonical player position to the combat authority.
-4. The authority validates alive state, equipped Battle Axe, torso target, opening Initiative, and action availability. Ordinary melee reach and obstruction are checked at final resolution rather than prohibiting an approach-attack declaration.
+4. The authority validates alive state, equipped Battle Axe, selected source-supported location, opening Initiative, and action availability. The target actor and aim location are copied into the attack instance at declaration, so later selection changes cannot retarget an executing action. Ordinary melee reach and obstruction are checked at final resolution rather than prohibiting an approach-attack declaration.
 5. One Act executes at the fixture's AT 2, so ACC occurs after exactly 2.5 simulation seconds.
 6. An ACC hit enters the existing ordered Dodge, weapon Block, shield Block, and Physical Soak pipeline. The open fixture arena supplies bounded, collision-free, unoccupied, hazard-free Dodge candidates; no in-place duck is supplied because Battle Axe duck eligibility is unresolved.
 7. If defenses are exhausted, the existing exact damage transaction applies Battle Axe dice plus eligible SB, approved critical factors, Plate TAL, NAL, and HPC once.
@@ -53,6 +53,7 @@ Task 19 adds passive ATTACK and RUN rings sourced from the existing action, lega
 - The opponent's Task 15 behavior is a fixed, labeled encounter script rather than general AI. It initiates the same ordinary attack only when authoritative legality succeeds.
 - The Task 16 battlefield supplies deterministic authoritative navigation for this one arena. The opponent declares through the same authority when otherwise eligible, approaches through legal paths during AT execution, and reaches ACC only when final range and line of sight are legal; it never teleports or infers terrain from presentation pixels.
 - Battle Axe in-place duck eligibility remains unresolved; displacement candidates remain legal and deterministic.
+- Prime location 8 uses the approved Arena alternating selection: Knee, then Lower Leg. The declared subdivision selects knee armor or leg armor exclusively; their TAL never stacks.
 - Rare shield-contact prone is unavailable when exact contact is not verified, and the log reports that boundary.
 - Backfire and Dwarvestek/Grentek remain blocked behind their existing verification gates.
 - Defeat is displayed and further targeting/attacks are rejected. No death flow, loot, EXP, progression, respawn, or match result is invented.

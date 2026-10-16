@@ -1,6 +1,8 @@
 class_name PrimeV3VerticalSliceFixture
 extends RefCounted
 
+const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
+
 const PLAYER_ID := &"player"
 const OPPONENT_ID := &"opponent"
 const ATTACK_ID := &"prime_v3_battle_axe_torso"
@@ -135,7 +137,7 @@ static func make_guard_actor(actor_id: StringName, display_name: String) -> Comb
 static func make_attack_definition() -> CombatAttackDefinition:
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
 	var weapon := catalog.get_weapon(WEAPON_REF)
-	return null if weapon == null else weapon.make_attack_definition(ATTACK_ID) as CombatAttackDefinition
+	return null if weapon == null else weapon.make_attack_definition(ATTACK_ID, HitLocations.get_same_size_attack_profile()) as CombatAttackDefinition
 
 
 static func make_defense_profile(actor_id: StringName) -> CombatDefenseProfile:

@@ -76,26 +76,39 @@ func effective_hands_required(character_strength: int) -> int:
 	return 1 if character_strength >= strength_requirement * 2 else 2
 
 
-func make_attack_definition(attack_definition_id: StringName) -> Variant:
+func make_attack_definition(attack_definition_id: StringName, targeting_profile: Dictionary = {}) -> Variant:
 	if _has_invalid_issue(validate_definition()) or not combat_ready:
 		return null
+	var acc_modifiers := {"torso": 0}
+	var allowed_locations := PackedStringArray(["torso"])
+	var location_multipliers := {
+		"torso": {
+			"numerator": 1,
+			"denominator": 1,
+			"source_ref": "PRIME-V3 pp. 95-98, same-size torso hit location 3",
+		},
+	}
+	var attack_sources := source_refs.duplicate()
+	if not targeting_profile.is_empty():
+		acc_modifiers = targeting_profile.get("acc_modifiers_by_location", {}).duplicate(true)
+		allowed_locations = targeting_profile.get("allowed_target_locations", PackedStringArray()).duplicate()
+		location_multipliers = targeting_profile.get("location_multipliers", {}).duplicate(true)
+		for profile_source: String in targeting_profile.get("source_refs", PackedStringArray()):
+			if not attack_sources.has(profile_source):
+				attack_sources.append(profile_source)
+		if not allowed_locations.has("torso") or acc_modifiers.keys().size() != allowed_locations.size() or location_multipliers.keys().size() != allowed_locations.size():
+			return null
 	var damage := CombatPhysicalDamageDefinition.new(
 		damage_dice_count,
 		damage_die_sides,
 		fixed_damage_bonus,
 		strength_bonus_eligible,
 		true,
-		{
-			"torso": {
-				"numerator": 1,
-				"denominator": 1,
-				"source_ref": "PRIME-V3 pp. 95-98, same-size torso hit location 3",
-			},
-		},
+		location_multipliers,
 		null,
 		true,
 		CombatPhysicalDamageDefinition.ROUNDING_FLOOR,
-		source_refs
+		attack_sources
 	)
 	var critical_policy := CombatCriticalTriggerPolicy.new(
 		StringName("%s_critical_range" % String(definition_id)),
@@ -105,7 +118,7 @@ func make_attack_definition(attack_definition_id: StringName) -> Variant:
 		&"",
 		"%s: natural 1-%d is a critical strike" % [display_name, critical_success_max_natural],
 		"PRIME-V3 natural 20 critical failure",
-		source_refs
+		attack_sources
 	)
 	return CombatAttackDefinition.new(
 		attack_definition_id,
@@ -114,12 +127,12 @@ func make_attack_definition(attack_definition_id: StringName) -> Variant:
 		true,
 		true,
 		0,
-		{"torso": 0},
-		PackedStringArray(["torso"]),
+		acc_modifiers,
+		allowed_locations,
 		0,
 		reach_microfeet,
 		true,
-		source_refs,
+		attack_sources,
 		&"hand_held",
 		damage_types,
 		true,

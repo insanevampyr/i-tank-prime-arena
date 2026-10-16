@@ -8,6 +8,7 @@ const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
 const ReadinessModel = preload("res://scripts/ui/combat_readiness_model.gd")
 const EncounterTranscript = preload("res://scripts/ui/arena_encounter_transcript.gd")
 const LogExporter = preload("res://scripts/ui/arena_log_exporter.gd")
+const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 
 const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
@@ -148,7 +149,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_request_attack("keyboard")
 			get_viewport().set_input_as_handled()
 		elif event.physical_keycode == KEY_TAB:
-			_select_opponent()
+			_cycle_enemy(-1 if event.shift_pressed else 1)
+			get_viewport().set_input_as_handled()
+		elif location_number_for_key_event(event) > 0:
+			_select_location_by_number(location_number_for_key_event(event))
 			get_viewport().set_input_as_handled()
 		elif event.physical_keycode == KEY_R:
 			_reset_encounter()
@@ -214,6 +218,10 @@ func get_last_ui_message_for_testing() -> String:
 	return _last_ui_message
 
 
+func select_location_for_testing(number: int) -> Dictionary:
+	return _select_location_by_number(number)
+
+
 func get_transcript_text_for_testing() -> String:
 	return _build_transcript_text()
 
@@ -277,11 +285,12 @@ func _request_attack(input_source: String) -> Dictionary:
 		var action := _session.simulation.get_action(String(result.get("action_instance_id", "")))
 		var duration_us := 0 if action == null else action.final_effect_due_at_us - action.started_at_us
 		var at_value := 0 if action == null else action.at_at_start
+		var location_name := HitLocations.get_display_name(_session.get_selected_target_location())
 		_last_ui_message = (
 			"Approach attack started (%.3f s at AT %d). Reach 3 ft with clear line of sight before resolution."
 			% [float(duration_us) / 1_000_000.0, at_value]
 			if declaration_legality.get("approach_required", false)
-			else "Battle Axe action executing (%.3f s at AT %d)." % [float(duration_us) / 1_000_000.0, at_value]
+			else "Battle Axe action executing at %s (%.3f s at AT %d)." % [location_name, float(duration_us) / 1_000_000.0, at_value]
 		)
 	else:
 		_last_ui_message = "Attack illegal: %s" % _friendly_reason(String(result.get("reason", "rejected")))
@@ -347,10 +356,57 @@ func _select_opponent() -> Dictionary:
 	var result := _session.select_target(Fixture.OPPONENT_ID)
 	if result.get("success", false):
 		_last_ui_message = "Opponent selected."
+		_present_local_selection(Fixture.OPPONENT_ID, "TARGET: OPPONENT")
 	else:
 		_last_ui_message = "Target unavailable: %s" % _friendly_reason(String(result.get("reason", "invalid target")))
 	_update_presentation()
 	return result
+
+
+func _cycle_enemy(direction: int) -> Dictionary:
+	var result := _session.cycle_target(direction)
+	if result.get("success", false):
+		var target_id := StringName(result["target_id"])
+		_last_ui_message = "%s selected." % String(target_id).replace("_", " ").capitalize()
+		_present_local_selection(target_id, "TARGET: %s" % String(target_id).replace("_", " ").to_upper())
+	else:
+		_last_ui_message = "Target unavailable: %s" % _friendly_reason(String(result.get("reason", "invalid target")))
+	_update_presentation()
+	return result
+
+
+func _select_location_by_number(number: int) -> Dictionary:
+	var result := _session.select_target_location_by_number(number)
+	if result.get("success", false):
+		var location_id := StringName(result["target_location"])
+		var display_name := HitLocations.get_display_name(location_id)
+		_last_ui_message = "Aim selected: %s." % display_name
+		var feedback_actor := _session.get_selected_target_id()
+		if feedback_actor == &"":
+			feedback_actor = Fixture.PLAYER_ID
+		_present_local_selection(feedback_actor, "AIM: %s" % display_name)
+	_update_presentation()
+	return result
+
+
+func _present_local_selection(actor_id: StringName, text: String) -> void:
+	if _floating_combat_text != null:
+		_floating_combat_text.present_local_selection(actor_id, text)
+
+
+static func location_number_for_key_event(event: InputEventKey) -> int:
+	if event == null:
+		return 0
+	var top_row := [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9]
+	var keypad := [KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9]
+	for code: Key in [event.physical_keycode, event.keycode]:
+		var top_index := top_row.find(code)
+		if top_index >= 0:
+			return top_index + 1
+		var keypad_index := keypad.find(code)
+		if keypad_index >= 0:
+			return keypad_index + 1
+	return 0
 
 
 func _process_new_events() -> void:

@@ -4,6 +4,7 @@ extends RefCounted
 const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
+const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -20,6 +21,8 @@ var simulation: CombatSimulation
 
 var _attack_definition: CombatAttackDefinition
 var _selected_target_id: StringName = &""
+var _selected_target_location: StringName = &"torso"
+var _next_location_8_is_knee: bool = true
 var _active_player_attack_id: String = ""
 var _active_opponent_attack_id: String = ""
 var _next_request_sequence: int = 0
@@ -75,6 +78,8 @@ func initialize(
 		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
 		_attack_definition = result["attack_definition"]
 		_selected_target_id = Fixture.OPPONENT_ID
+		_selected_target_location = &"torso"
+		_next_location_8_is_knee = true
 		_initialized = true
 		_encounter_active = start_active
 		_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
@@ -124,6 +129,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	simulation = CombatSimulation.new(_seed_value)
 	_attack_definition = null
 	_selected_target_id = &""
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
 	_active_player_attack_id = ""
 	_active_opponent_attack_id = ""
 	_next_request_sequence = 0
@@ -157,7 +164,7 @@ func get_battlefield() -> ArenaBattlefield:
 
 
 func select_target(target_id: StringName) -> Dictionary:
-	if target_id != Fixture.OPPONENT_ID:
+	if not get_targetable_enemy_ids().has(String(target_id)):
 		_selected_target_id = &""
 		_last_error = "invalid_target"
 		return {"success": false, "reason": _last_error}
@@ -169,6 +176,70 @@ func select_target(target_id: StringName) -> Dictionary:
 	_selected_target_id = target_id
 	_last_error = ""
 	return {"success": true, "target_id": String(target_id)}
+
+
+func cycle_target(direction: int) -> Dictionary:
+	var candidates := get_targetable_enemy_ids()
+	if candidates.is_empty():
+		clear_target()
+		return {"success": false, "reason": "no_target_available"}
+	var selected := choose_cycled_target(_selected_target_id, candidates, direction)
+	return select_target(selected)
+
+
+func get_targetable_enemy_ids() -> PackedStringArray:
+	var candidates := PackedStringArray()
+	for actor_snapshot: Dictionary in simulation.get_state_snapshot().get("actors", []):
+		var state: Dictionary = actor_snapshot.get("state", {})
+		var actor_id := String(state.get("actor_id", ""))
+		if actor_id.is_empty() or actor_id == String(Fixture.PLAYER_ID):
+			continue
+		var current_hpc: Variant = state.get("current_hpc")
+		if current_hpc == null or int(current_hpc) <= 0:
+			continue
+		candidates.append(actor_id)
+	candidates.sort()
+	return candidates
+
+
+static func choose_cycled_target(current_target_id: StringName, candidates: PackedStringArray, direction: int) -> StringName:
+	if candidates.is_empty():
+		return &""
+	var ordered := candidates.duplicate()
+	ordered.sort()
+	var step := -1 if direction < 0 else 1
+	var current_index := ordered.find(String(current_target_id))
+	if current_index < 0:
+		return StringName(ordered[ordered.size() - 1] if step < 0 else ordered[0])
+	return StringName(ordered[posmod(current_index + step, ordered.size())])
+
+
+func select_target_location(location_id: StringName) -> Dictionary:
+	var location := HitLocations.get_by_id(location_id)
+	if location.is_empty():
+		return _failure("invalid_target_location")
+	_selected_target_location = location_id
+	if location_id == HitLocations.LOCATION_8_KNEE:
+		_next_location_8_is_knee = false
+	elif location_id == HitLocations.LOCATION_8_LOWER_LEG:
+		_next_location_8_is_knee = true
+	else:
+		_next_location_8_is_knee = true
+	_last_error = ""
+	return {"success": true, "target_location": String(location_id), "location_number": int(location["number"])}
+
+
+func select_target_location_by_number(number: int) -> Dictionary:
+	if number == 8:
+		return select_target_location(
+			HitLocations.LOCATION_8_KNEE
+			if _next_location_8_is_knee
+			else HitLocations.LOCATION_8_LOWER_LEG
+		)
+	var location := HitLocations.get_by_number(number)
+	if location.is_empty():
+		return _failure("invalid_target_location_number")
+	return select_target_location(StringName(location["id"]))
 
 
 func clear_target() -> void:
@@ -256,7 +327,8 @@ func request_player_attack(input_source: String) -> Dictionary:
 	if not legality.get("success", false):
 		_last_error = String(legality.get("reason", "attack_illegal"))
 		return legality
-	var result := _request_actor_attack(Fixture.PLAYER_ID, _selected_target_id, input_source)
+	var locked_location := _selected_target_location
+	var result := _request_actor_attack(Fixture.PLAYER_ID, _selected_target_id, input_source, locked_location)
 	if result.get("success", false):
 		_active_player_attack_id = String(result["attack_instance_id"])
 		_last_error = ""
@@ -269,6 +341,8 @@ func request_player_attack(input_source: String) -> Dictionary:
 func get_attack_legality() -> Dictionary:
 	if _selected_target_id == &"":
 		return {"success": false, "reason": "no_target_selected"}
+	if not _attack_definition.allowed_target_locations.has(String(_selected_target_location)):
+		return {"success": false, "reason": "unsupported_target_location"}
 	return _get_actor_attack_legality(Fixture.PLAYER_ID, _selected_target_id)
 
 
@@ -394,6 +468,10 @@ func get_selected_target_id() -> StringName:
 	return _selected_target_id
 
 
+func get_selected_target_location() -> StringName:
+	return _selected_target_location
+
+
 func get_active_player_attack_id() -> String:
 	return _active_player_attack_id
 
@@ -470,14 +548,14 @@ func get_state_snapshot() -> Dictionary:
 	return snapshot
 
 
-func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String) -> Dictionary:
+func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String, target_location: StringName = &"torso") -> Dictionary:
 	var request_id := _next_request_id("%s_%s_attack" % [String(attacker_id), input_source])
 	var result := simulation.start_physical_attack(
 		attacker_id,
 		target_id,
 		_attack_definition,
 		request_id,
-		&"torso",
+		target_location,
 		_battlefield.has_line_of_sight(
 			simulation.get_actor_state(attacker_id).position_microfeet,
 			simulation.get_actor_state(target_id).position_microfeet

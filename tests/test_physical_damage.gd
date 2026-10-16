@@ -110,8 +110,10 @@ func _test_location_specific_armor_isolation() -> void:
 	# protect its declared location and must not leak TAL into another location.
 	var torso_plate := _armor(&"torso_plate", &"torso", PackedStringArray(["torso"]), {"bashing": 3})
 	var head_armor := _armor(&"head_armor", &"head", PackedStringArray(["head", "neck"]), {"bashing": 2})
+	var knee_armor := _armor(&"knee_armor", &"knees", PackedStringArray(["knee"]), {"bashing": 4})
+	var leg_armor := _armor(&"leg_armor", &"legs", PackedStringArray(["groin_upper_legs", "lower_leg", "feet"]), {"bashing": 2})
 	var locations := _unit_locations()
-	for location: String in ["upper_arm", "left_leg", "unarmored_location"]:
+	for location: String in ["upper_arm", "left_leg", "knee", "lower_leg", "unarmored_location"]:
 		locations[location] = {"numerator": 1, "denominator": 1, "source_ref": "TEST-FIXTURE location coverage"}
 	var damage := _damage_definition(1, 6, false, true, locations)
 	var cases: Array[Dictionary] = [
@@ -121,6 +123,10 @@ func _test_location_specific_armor_isolation() -> void:
 		{"id": "torso_vs_head_armor", "location": "torso", "armors": [head_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
 		{"id": "arm_vs_torso_plate", "location": "upper_arm", "armors": [torso_plate], "armor_ref": "", "tal": 0, "final_damage": 5},
 		{"id": "leg_vs_torso_plate", "location": "left_leg", "armors": [torso_plate], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "knee_uses_only_knee_armor", "location": "knee", "armors": [knee_armor, leg_armor], "armor_ref": "knee_armor", "tal": 4, "final_damage": 1},
+		{"id": "lower_leg_uses_only_leg_armor", "location": "lower_leg", "armors": [knee_armor, leg_armor], "armor_ref": "leg_armor", "tal": 2, "final_damage": 3},
+		{"id": "missing_knee_armor_is_zero_tal", "location": "knee", "armors": [leg_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
+		{"id": "missing_leg_armor_is_zero_tal", "location": "lower_leg", "armors": [knee_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
 		{"id": "unarmored", "location": "unarmored_location", "armors": [torso_plate, head_armor], "armor_ref": "", "tal": 0, "final_damage": 5},
 	]
 	for entry: Dictionary in cases:

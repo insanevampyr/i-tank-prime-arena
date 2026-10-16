@@ -18,7 +18,8 @@ No touch handler rolls dice, spends resources, schedules combat events, resolves
 | --- | --- | --- | --- |
 | Movement | WASD | Lower-left virtual joystick | Existing deterministic movement request |
 | Running | Hold Shift while moving | Hold lower-right RUN while moving | Existing Running activation, maintenance, cap, recovery and stop path |
-| Select opponent | Press Tab, or click empty terrain to clear | Tap opponent | Touch selection remains separate from ATTACK; authority validates the actor at attack request |
+| Select opponent | Tab / Shift+Tab cycle living targetable enemies; click empty terrain to clear | Tap opponent | Touch selection remains separate from ATTACK; authority validates the actor at attack request |
+| Select aim location | Top-row or numeric-keypad 1-9 | Not yet exposed as a touch control | Selection is presentation/input state only; it consumes no Act, does not attack, and is locked into the attack record at declaration |
 | Ordinary attack | Left-click opponent, Space, or Enter | Tap lower-right ATTACK | Shared one-shot `ArenaCombatSession.request_player_attack` path; desktop click selects then requests exactly once |
 | Start/reset encounter | Click START/RESET or press R to reset | Tap START/RESET | Rebuilds the owned simulation with the original fixture positions and seed |
 
@@ -30,7 +31,7 @@ Task 19 adds passive ATTACK and RUN readiness rings above the combat-results reg
 
 ## Deliberately unavailable controls
 
-Only the source-verified fixture's ordinary Battle Axe torso attack is exposed. If the player is prone, the existing ATTACK action input requests the verified one-Act stand instead of submitting an illegal attack. Aiming at other body locations, manual defense choices, Specials, NACs, inventory, loot, EXP, progression and general opponent commands remain unavailable. Defenses and eligible Critical Reactions run through the configured authoritative automation; the UI does not offer buttons that would imply unsupported player choices.
+The source-verified same-size Guard fixture exposes Prime locations 1-9 through desktop number keys. Location 8 uses the approved Arena subdivision: the first 8 press selects Knee, the next selects Lower Leg, and subsequent top-row or keypad presses alternate. Selecting another number resets the next 8 press to Knee. Knee and Lower Leg enter the same ordinary Battle Axe pipeline as the other locations; the declared subdivision determines exclusive knee-armor or leg-armor TAL. No location selector is currently exposed on touch. If the player is prone, the existing ATTACK action input requests the verified one-Act stand instead of submitting an illegal attack. Manual defense choices, Specials, NACs, inventory, loot, EXP, progression and general opponent commands remain unavailable. Defenses and eligible Critical Reactions run through the configured authoritative automation; the UI does not offer buttons that would imply unsupported player choices.
 
 ## Responsive layout contract
 

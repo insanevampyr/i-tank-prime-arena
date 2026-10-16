@@ -48,7 +48,10 @@ static func format_event(event: CombatEvent) -> String:
 		"action_completed":
 			return prefix + "%s action completed." % _display_actor(event.source_actor_id)
 		"physical_attack_declared":
-			return prefix + "%s begins Battle Axe attack on torso." % _display_actor(event.source_actor_id)
+			return prefix + "%s begins Battle Axe attack on %s." % [
+				_display_actor(event.source_actor_id),
+				_pretty_name(String(payload.get("target_location", "torso"))),
+			]
 		"physical_attack_accuracy_resolved":
 			var outcome := "HIT" if payload.get("accuracy_success", false) else "MISS"
 			return prefix + "%s ACC d20 %s vs %s: %s%s" % [
