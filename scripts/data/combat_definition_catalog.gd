@@ -96,7 +96,57 @@ func instantiate_actor(character_id: StringName, loadout_id: StringName, actor_i
 	var actor_equipment_validation := validate_actor_equipment(actor as CombatActorDefinition)
 	if not actor_equipment_validation.get("success", false):
 		return actor_equipment_validation
+	var modifier_result := calculate_armor_stat_modifiers((actor as CombatActorDefinition).equipment_refs)
+	if not modifier_result.get("success", false):
+		return modifier_result
+	(actor as CombatActorDefinition).apply_equipment_stat_modifiers(modifier_result["modifiers"])
 	return {"success": true, "status": validation["status"], "issues": validation["issues"], "actor": actor}
+
+
+func calculate_armor_stat_modifiers(equipment_refs: PackedStringArray) -> Dictionary:
+	var modifiers := {"mr": 0, "dt": 0, "dp": 0}
+	var issues: Array[Dictionary] = []
+	var armor_refs: Array[String] = []
+	var occupied_slots: Dictionary = {}
+	for equipment_ref: String in equipment_refs:
+		if weapons.has(equipment_ref) or shields.has(equipment_ref):
+			continue
+		if not armors.has(equipment_ref):
+			issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": equipment_ref}))
+			continue
+		var armor: CombatArmorDefinitionResource = armors[equipment_ref]
+		var armor_slot := String(armor.armor_slot)
+		if occupied_slots.has(armor_slot):
+			issues.append(_issue("invalid", "equipment_slot_conflict", {
+				"slot": armor_slot,
+				"equipment_refs": [occupied_slots[armor_slot], equipment_ref],
+			}))
+			continue
+		occupied_slots[armor_slot] = equipment_ref
+		if not armor.unresolved_penalty_fields.is_empty():
+			for field_name: String in armor.unresolved_penalty_fields:
+				issues.append(_issue("requires_source_verification", "variable_armor_penalty_unresolved", {
+					"equipment_ref": equipment_ref,
+					"field": field_name,
+				}))
+			continue
+		modifiers["mr"] += armor.mr_penalty
+		modifiers["dt"] += armor.dt_penalty
+		modifiers["dp"] += armor.projectile_dodge_penalty
+		armor_refs.append(equipment_ref)
+	if not issues.is_empty():
+		var issue_result := _validation_result(issues)
+		issue_result["success"] = false
+		issue_result["modifiers"] = {}
+		return issue_result
+	armor_refs.sort()
+	return {
+		"success": true,
+		"status": "valid",
+		"issues": [],
+		"modifiers": modifiers,
+		"armor_refs": armor_refs,
+	}
 
 
 func get_weapon(definition_id: StringName) -> CombatWeaponDefinitionResource:

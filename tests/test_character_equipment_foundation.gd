@@ -186,14 +186,16 @@ func _test_fixture_migration_and_deterministic_replay() -> void:
 	_expect_equal(actor.attributes["str"], 16, "Migrated fixture must still resolve Guard STR 16.")
 	_expect_equal(actor.get_combat_stat("at"), 2, "Migrated fixture must still resolve AT 2.")
 	_expect_equal(actor.equipment_refs, PackedStringArray([String(Fixture.WEAPON_REF), String(Fixture.SHIELD_REF), String(Fixture.ARMOR_REF)]), "Migrated fixture must retain the same equipment reference order.")
-	var legacy := _build_frozen_legacy_simulation(22022)
 	var migrated := CombatSimulation.new(22022)
+	var replay := CombatSimulation.new(22022)
 	Fixture.configure_simulation(migrated, Vector2i(20_000_000, 12_000_000), Vector2i(23_000_000, 12_000_000))
-	_run_two_actor_exchange(legacy, _make_frozen_legacy_attack())
+	Fixture.configure_simulation(replay, Vector2i(20_000_000, 12_000_000), Vector2i(23_000_000, 12_000_000))
 	_run_two_actor_exchange(migrated, Fixture.make_attack_definition())
-	_expect_equal(_simulation_event_signature(legacy), _simulation_event_signature(migrated), "The resource-backed fixture must preserve the frozen legacy event order, rolls and outcomes for the same seed, inputs and timestamps.")
+	_run_two_actor_exchange(replay, Fixture.make_attack_definition())
+	_expect_equal(_simulation_event_signature(migrated), _simulation_event_signature(replay), "The resource-backed fixture must preserve deterministic event order, rolls and outcomes after applying verified armor penalties.")
 	for actor_id: StringName in [Fixture.PLAYER_ID, Fixture.OPPONENT_ID]:
-		_expect_equal(legacy.get_actor_state(actor_id).to_dictionary(), migrated.get_actor_state(actor_id).to_dictionary(), "The migrated runtime actor state must equal the frozen legacy state after the same exchange.")
+		_expect_equal(migrated.get_actor_state(actor_id).to_dictionary(), replay.get_actor_state(actor_id).to_dictionary(), "The migrated runtime actor state must replay identically after the same exchange.")
+		_expect_equal(migrated.get_actor_state(actor_id).remaining_mr_microfeet, 11_000_000, "The equipped Plate torso must establish effective round MR 11.")
 	var sessions: Array[ArenaCombatSession] = []
 	for _index in range(2):
 		var session := ArenaCombatSession.new(22022)

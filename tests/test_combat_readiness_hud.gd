@@ -108,17 +108,17 @@ func _test_attack_readiness_states_and_interruption() -> void:
 
 
 func _test_running_readiness_states() -> void:
-	var movement := PrimeMovement.new(12, 12, 10, 3, 0, 0)
+	var movement := PrimeMovement.new(11, 12, 10, 3, 0, 0)
 	var ready := Readiness.get_running_readiness(movement.to_dictionary())
 	_expect_equal(ready["state"], Readiness.STATE_READY, "The automatic three-investment fixture must show Running READY.")
 	_expect_true(ready["automatic"], "Running readiness must expose the fixture's authoritative automatic proficiency.")
-	_expect_equal(ready["effective_mr"], 12, "READY must show walking MR before Running activates.")
+	_expect_equal(ready["effective_mr"], 11, "READY must show armor-adjusted walking MR before Running activates.")
 	_expect_equal(movement.request_running(), PrimeMovement.RunningRequestResult.ACTIVATED, "Automatic Running must activate without a roll.")
 	movement.advance(2_000_000, Vector2.RIGHT)
 	var active := Readiness.get_running_readiness(movement.to_dictionary())
 	_expect_equal(active["state"], Readiness.STATE_RUNNING, "Active Running must show RUNNING.")
 	_expect_equal(active["remaining_us"], 48_000_000, "END 10 Running readiness must count down from the exact 50-second cap.")
-	_expect_equal(active["effective_mr"], 18, "Active Running readiness must expose actual MR 18.")
+	_expect_equal(active["effective_mr"], 17, "Active Running readiness must expose armor-adjusted MR 17.")
 	movement.stop_running(PrimeMovement.RunningEndReason.SHIFT_RELEASED)
 	var recovery := Readiness.get_running_readiness(movement.to_dictionary())
 	_expect_equal(recovery["state"], Readiness.STATE_RECOVERING, "Voluntary stop must retain and display recovery debt.")

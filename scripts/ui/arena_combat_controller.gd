@@ -89,7 +89,7 @@ func _ready() -> void:
 	else:
 		_session.select_target(Fixture.OPPONENT_ID)
 		_append_log("Verified Prime V3 fixture ready; no production character data is claimed.")
-		var running_validation := _player.validate_running_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
+		var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
 		if not running_validation.get("success", false):
 			_last_ui_message = "Running fixture blocked: %s" % _friendly_reason(String(running_validation.get("reason", "unresolved running profile")))
 	_player.set_authoritative_movement_resolver(_resolve_player_movement)

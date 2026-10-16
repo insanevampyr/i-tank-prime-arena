@@ -19,6 +19,7 @@ const CombatReadinessHudTests = preload("res://tests/test_combat_readiness_hud.g
 const PlaytestQualityTests = preload("res://tests/test_playtest_quality.gd")
 const FloatingCombatTextTests = preload("res://tests/test_floating_combat_text.gd")
 const CharacterEquipmentFoundationTests = preload("res://tests/test_character_equipment_foundation.gd")
+const ArmorPenaltyTests = preload("res://tests/test_armor_penalties.gd")
 
 
 func _initialize() -> void:
@@ -46,6 +47,7 @@ func _run_tests() -> void:
 		{"name": "Task 20 playtest quality", "instance": PlaytestQualityTests.new()},
 		{"name": "Task 21 floating combat text", "instance": FloatingCombatTextTests.new()},
 		{"name": "Task 22 character and equipment foundation", "instance": CharacterEquipmentFoundationTests.new()},
+		{"name": "Task 25 armor penalties", "instance": ArmorPenaltyTests.new()},
 	]
 	var failure_count := 0
 	for suite: Dictionary in suites:

@@ -13,5 +13,6 @@ tal_by_damage_type = {
 }
 strength_requirement = 7
 mr_penalty = 0
-dodge_penalty = 0
+dt_penalty = 0
+projectile_dodge_penalty = 0
 source_refs = PackedStringArray("PRIME-V3 p. 135, Armor Chart, Leather torso")

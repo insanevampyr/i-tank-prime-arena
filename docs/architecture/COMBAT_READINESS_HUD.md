@@ -29,7 +29,7 @@ READY means an ordinary attack may be initiated. For the approved ordinary melee
 | RETRY | The existing failed-check five-second retry restriction remains |
 | BLOCKED | Encounter inactive, focus unavailable, prone, Critical Stagger, defeat or recorded incapacitation/unconsciousness prevents the input |
 
-The blue integration fixture retains SPD 12, END 10, MR 12, three Running investments, SCM 0 and RB 0. Prime's verified target is 10 and the three-investment fixture is automatic. Arena Running therefore exposes MR 18 and a 50-second cap. Recovery still equals actual Running time, clears at 100 percent while standing and 50 percent while walking, and is not removed by releasing Shift. If retry and recovery coexist, the compact indicator shows RETRY first while DEBUG retains both exact values.
+The blue integration fixture retains baseline SPD 12, END 10 and MR 12, three Running investments, SCM 0 and RB 0. Task 25 applies its equipped Plate torso's verified MR -1, so authoritative walking MR is 11. Prime's verified Running target remains 10 and the three-investment fixture remains automatic; Running therefore exposes MR 17 and the same 50-second cap. Recovery still equals actual Running time, clears at 100 percent while standing and 50 percent while walking, and is not removed by releasing Shift. If retry and recovery coexist, the compact indicator shows RETRY first while DEBUG retains both exact values.
 
 ## Movement and action concurrency
 

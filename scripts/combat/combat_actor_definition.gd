@@ -12,7 +12,9 @@ var actor_id: StringName
 var actor_kind: StringName
 var display_name: String
 var attributes: Dictionary
+var base_combat_stats: Dictionary
 var combat_stats: Dictionary
+var equipment_stat_modifiers: Dictionary
 var resource_maxima: Dictionary
 var equipment_refs: PackedStringArray
 var defensive_capabilities: Dictionary
@@ -38,7 +40,9 @@ func _init(
 	actor_kind = p_actor_kind
 	display_name = p_display_name
 	attributes = p_attributes.duplicate(true)
-	combat_stats = p_combat_stats.duplicate(true)
+	base_combat_stats = p_combat_stats.duplicate(true)
+	combat_stats = base_combat_stats.duplicate(true)
+	equipment_stat_modifiers = {"mr": 0, "dt": 0, "dp": 0}
 	resource_maxima = p_resource_maxima.duplicate(true)
 	equipment_refs = p_equipment_refs.duplicate()
 	defensive_capabilities = p_defensive_capabilities.duplicate(true)
@@ -57,13 +61,32 @@ func get_combat_stat(field_name: String) -> Variant:
 	return combat_stats[field_name]
 
 
+func get_base_combat_stat(field_name: String) -> Variant:
+	if not base_combat_stats.has(field_name):
+		return null
+	return base_combat_stats[field_name]
+
+
+func apply_equipment_stat_modifiers(modifiers: Dictionary) -> void:
+	for field_name: String in ["mr", "dt", "dp"]:
+		var modifier_value: Variant = modifiers.get(field_name, 0)
+		assert(typeof(modifier_value) == TYPE_INT, "Equipment stat modifiers must be integers.")
+		equipment_stat_modifiers[field_name] = int(modifier_value)
+	combat_stats = base_combat_stats.duplicate(true)
+	for field_name: String in equipment_stat_modifiers:
+		if combat_stats.has(field_name):
+			combat_stats[field_name] = int(base_combat_stats[field_name]) + int(equipment_stat_modifiers[field_name])
+
+
 func to_dictionary() -> Dictionary:
 	return {
 		"actor_id": String(actor_id),
 		"actor_kind": String(actor_kind),
 		"display_name": display_name,
 		"attributes": attributes.duplicate(true),
+		"base_combat_stats": base_combat_stats.duplicate(true),
 		"combat_stats": combat_stats.duplicate(true),
+		"equipment_stat_modifiers": equipment_stat_modifiers.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),
 		"equipment_refs": Array(equipment_refs),
 		"defensive_capabilities": defensive_capabilities.duplicate(true),
@@ -92,8 +115,8 @@ func _build_unresolved_fields(explicit_fields: PackedStringArray) -> PackedStrin
 func _validate_known_values() -> void:
 	for field_name: Variant in attributes:
 		assert(typeof(attributes[field_name]) == TYPE_INT, "Known Prime attributes must be stored as integers.")
-	for field_name: Variant in combat_stats:
-		assert(typeof(combat_stats[field_name]) == TYPE_INT, "Known combat statistics must be stored as integers.")
+	for field_name: Variant in base_combat_stats:
+		assert(typeof(base_combat_stats[field_name]) == TYPE_INT, "Known combat statistics must be stored as integers.")
 	for field_name: Variant in resource_maxima:
 		assert(typeof(resource_maxima[field_name]) == TYPE_INT, "Known resource maxima must be stored as integers.")
 		assert(resource_maxima[field_name] >= 0, "Resource maxima cannot be negative.")

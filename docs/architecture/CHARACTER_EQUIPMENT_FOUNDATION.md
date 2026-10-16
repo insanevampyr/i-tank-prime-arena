@@ -28,10 +28,12 @@ Each `instantiate_actor` call deep-copies definition dictionaries into a new `Co
 | Battle Axe | `2d10 + 3 + eligible SB`, Slashing, reach 3 feet, STR 12, two-handed below STR 24, Block 2, critical success on natural 1-2 | Prime V3 p. 127 plus previously verified general SB handling |
 | Approach capability | declaration may begin outside reach; final range/LOS gate before ACC | Approved Arena v1.8 section 18 adaptation; not a printed Battle Axe property |
 | Metal Buckler | STR 8, Block 2, SHP 20, `2 Hands Free` | Prime V3 p. 137 |
-| Plate torso | torso TAL 3 against Bashing/Slashing/Piercing; STR 16; MR -1; Dodge -2/-2 | Prime V3 p. 135 |
+| Plate torso | torso TAL 3 against Bashing/Slashing/Piercing; STR 16; MR -1; DT -2; projectile Dodge -2 | Prime V3 p. 135; Task 25 owner-confirmed left/right Dodge interpretation |
 | Plate and buckler loadout | Guard plus Battle Axe, Plate torso and Metal Buckler | Approved assembled Arena test fixture; the printed Uncommon Guard instead lists full Leather armor and no buckler |
 
-The printed Plate movement and Dodge penalties are now recorded but deliberately remain `not_yet_implemented`. Applying them during a schema migration would change the established MR 12 and defense fixture behavior. Their integration requires a separately approved, regression-tested rule task.
+Task 25 activates the printed armor penalties through the definition catalog. Armor stores independent MR, DT and projectile-Dodge components. The catalog sums each component across equipped armor, preserves the character definition's unmodified values as `base_combat_stats`, and exposes the adjusted values through authoritative `combat_stats`. Recalculation always starts from the baseline dictionary, so repeated derivation cannot compound a penalty. A variable `V` component is recorded in `unresolved_penalty_fields` and blocks actor construction instead of becoming zero.
+
+For the current assembled Guard fixture, Prime V3 p. 336 remains the source of baseline MR 12, DT 8 and DP 6. The equipped Plate torso row on Prime V3 p. 135 applies MR -1, DT -2 and DP -2, producing effective MR 11, DT 6 and DP 4. Running still adds `floor(SPD / 2)` to effective walking MR, so this fixture runs at MR 17; its skill target, automatic proficiency, endurance cap, recovery and retry rules are unchanged.
 
 ## Task 23 catalog expansion
 

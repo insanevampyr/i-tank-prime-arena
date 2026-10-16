@@ -10,7 +10,7 @@ const HALF_SIZE: float = 16.0
 const INTENTIONAL_STOP_GRACE_US: int = 100_000
 
 # Test-profile values only; these do not define Aren or Garrick.
-@export var test_base_mr: int = 12
+@export var test_base_mr: int = 11
 @export var test_effective_spd: int = 12
 @export var test_effective_end: int = 10
 @export var test_running_skill_investment: int = Fixture.PLAYER_RUNNING_SKILL_INVESTMENT
@@ -132,6 +132,24 @@ func set_authoritative_movement_resolver(resolver: Callable) -> void:
 
 func get_movement_state_for_testing() -> Dictionary:
 	return {} if _movement == null else _movement.to_dictionary()
+
+
+func configure_authoritative_actor_profile(actor_definition: CombatActorDefinition) -> Dictionary:
+	if actor_definition == null:
+		return {"success": false, "reason": "missing_actor_definition"}
+	for field_name: String in ["mr", "rb"]:
+		if actor_definition.get_combat_stat(field_name) == null:
+			return {"success": false, "reason": "unresolved_running_profile", "field": field_name}
+	for field_name: String in ["spd", "end"]:
+		if not actor_definition.attributes.has(field_name):
+			return {"success": false, "reason": "unresolved_running_profile", "field": field_name}
+	test_base_mr = int(actor_definition.get_combat_stat("mr"))
+	test_effective_spd = int(actor_definition.attributes["spd"])
+	test_effective_end = int(actor_definition.attributes["end"])
+	test_roll_bonus = int(actor_definition.get_combat_stat("rb"))
+	if _movement != null:
+		_reset_movement_model(_movement.position_feet)
+	return validate_running_profile(actor_definition)
 
 
 func validate_running_profile(actor_definition: CombatActorDefinition) -> Dictionary:
