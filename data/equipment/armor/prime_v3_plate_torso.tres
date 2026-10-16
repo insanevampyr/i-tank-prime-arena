@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="CombatArmorDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_armor_definition_resource.gd" id="1_armor"]
+
+[resource]
+script = ExtResource("1_armor")
+definition_id = &"prime_v3_plate_torso"
+display_name = "Plate Torso Armor"
+armor_slot = &"torso"
+covered_locations = PackedStringArray("torso")
+tal_by_damage_type = {
+"bashing": 3,
+"piercing": 3,
+"slashing": 3
+}
+strength_requirement = 16
+mr_penalty = -1
+dodge_penalty = -2
+source_refs = PackedStringArray("PRIME-V3 p. 135, Armor Chart, Plate torso")

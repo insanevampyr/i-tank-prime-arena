@@ -4,6 +4,7 @@ extends CharacterBody2D
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
 const DeterministicCombatRng = preload("res://scripts/combat/deterministic_rng.gd")
 const ArenaPlayerInputIntent = preload("res://scripts/input/arena_player_input_intent.gd")
+const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 
 const HALF_SIZE: float = 16.0
 const INTENTIONAL_STOP_GRACE_US: int = 100_000
@@ -12,10 +13,10 @@ const INTENTIONAL_STOP_GRACE_US: int = 100_000
 @export var test_base_mr: int = 12
 @export var test_effective_spd: int = 12
 @export var test_effective_end: int = 10
-@export var test_running_skill_investment: int = 3
-@export var test_skill_check_modifier: int = 0
+@export var test_running_skill_investment: int = Fixture.PLAYER_RUNNING_SKILL_INVESTMENT
+@export var test_skill_check_modifier: int = Fixture.PLAYER_RUNNING_SCM
 @export var test_roll_bonus: int = 0
-@export var test_rng_seed: int = 1_337
+@export var test_rng_seed: int = Fixture.PLAYER_RUNNING_RNG_SEED
 
 # Presentation conversion only. Canonical movement remains measured in feet.
 @export var pixels_per_foot: float = 24.0
@@ -76,6 +77,8 @@ func _physics_process(delta: float) -> void:
 	var direction := ArenaPlayerInputIntent.combine_movement(desktop_direction, touch_direction)
 	var touch_run_held: bool = false if _touch_controls == null else _touch_controls.is_run_held()
 	var run_held := ArenaPlayerInputIntent.combine_run(Input.is_physical_key_pressed(KEY_SHIFT), touch_run_held)
+	if _movement.is_prone():
+		run_held = false
 	if _combat_movement_locked:
 		direction = Vector2.ZERO
 		run_held = false
@@ -118,6 +121,11 @@ func set_combat_movement_locked(locked: bool) -> void:
 		_movement.stop_running(PrimeMovementModel.RunningEndReason.INTENTIONAL_STOP)
 
 
+func set_prone(prone: bool) -> void:
+	if _movement != null:
+		_movement.set_prone(prone)
+
+
 func set_authoritative_movement_resolver(resolver: Callable) -> void:
 	_authoritative_movement_resolver = resolver
 
@@ -126,27 +134,52 @@ func get_movement_state_for_testing() -> Dictionary:
 	return {} if _movement == null else _movement.to_dictionary()
 
 
+func validate_running_profile(actor_definition: CombatActorDefinition) -> Dictionary:
+	if actor_definition == null:
+		return {"success": false, "reason": "missing_actor_definition"}
+	var expected := {
+		"base_mr": actor_definition.get_combat_stat("mr"),
+		"effective_spd": actor_definition.attributes.get("spd"),
+		"effective_end": actor_definition.attributes.get("end"),
+		"roll_bonus": actor_definition.get_combat_stat("rb"),
+		"running_skill_investment": Fixture.PLAYER_RUNNING_SKILL_INVESTMENT,
+		"skill_check_modifier": Fixture.PLAYER_RUNNING_SCM,
+	}
+	var actual := {
+		"base_mr": test_base_mr,
+		"effective_spd": test_effective_spd,
+		"effective_end": test_effective_end,
+		"roll_bonus": test_roll_bonus,
+		"running_skill_investment": test_running_skill_investment,
+		"skill_check_modifier": test_skill_check_modifier,
+	}
+	for field_name: String in expected:
+		if expected[field_name] == null:
+			return {"success": false, "reason": "unresolved_running_profile", "field": field_name}
+		if actual[field_name] != expected[field_name]:
+			return {"success": false, "reason": "running_profile_mismatch", "field": field_name}
+	return {"success": true, "profile": actual, "running_target": _movement.get_running_check_target()}
+
+
 func _update_debug_label() -> void:
 	if _movement_debug_label == null:
 		return
-	var maintenance_text := "--"
-	if _movement.is_running_automatic() and _movement.is_running():
-		maintenance_text = "automatic (%.2f s to interval)" % _seconds(_movement.get_time_until_next_maintenance_us())
-	elif _movement.is_running():
-		maintenance_text = "%.2f s" % _seconds(_movement.get_time_until_next_maintenance_us())
-
+	var run_state := "ACTIVE" if _movement.is_running() else "READY"
+	if _movement.is_prone():
+		run_state = "BLOCKED: PRONE"
+	elif _movement.get_recovery_remaining_us() > 0:
+		run_state = "RECOVERING"
+	elif _movement.get_running_retry_cooldown_us() > 0:
+		run_state = "RETRY WAIT"
 	_movement_debug_label.text = (
-		"Current MR: %d ft / 5 s\nRunning bonus: +%d MR\nRunning: %s\nLast check: %s\nNext maintenance: %s\nMaximum duration: %.2f s\nRecovery remaining: %.2f s\nRetry cooldown: %.2f s\nVisual scale: %.1f px / ft"
+		"MOVEMENT  MR %d%s | %s\nRUNNING  %s | Recovery %.1f s | Retry %.1f s"
 		% [
 			_movement.get_effective_mr(),
-			_movement.get_running_bonus_mr() if _movement.is_running() else 0,
-			"active" if _movement.is_running() else "inactive",
-			_movement.get_last_check_result_name(),
-			maintenance_text,
-			_seconds(_movement.get_max_running_duration_us()),
+			" (+%d)" % _movement.get_running_bonus_mr() if _movement.is_running() else "",
+			"PRONE CRAWL" if _movement.is_prone() else "STANDING",
+			run_state,
 			_seconds(_movement.get_recovery_remaining_us()),
 			_seconds(_movement.get_running_retry_cooldown_us()),
-			pixels_per_foot,
 		]
 	)
 

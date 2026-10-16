@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_battle_axe"
+display_name = "Battle Axe"
+damage_dice_count = 2
+damage_die_sides = 10
+fixed_damage_bonus = 3
+strength_bonus_eligible = true
+damage_types = PackedStringArray("slashing")
+reach_microfeet = 3000000
+strength_requirement = 12
+one_hand_strength_requirement = 24
+block_target = 2
+required_acts = 1
+critical_success_max_natural = 2
+approach_attack_eligible = true
+ducking_policy = &"unresolved"
+source_refs = PackedStringArray("PRIME-V3 p. 127, Battle Axe", "Arena Combat Specification v1.8 section 18, approach-capable fixture", "Arena Combat Specification v1.6 exact multiplier order")

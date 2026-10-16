@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CombatShieldDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_shield_definition_resource.gd" id="1_shield"]
+
+[resource]
+script = ExtResource("1_shield")
+definition_id = &"prime_v3_metal_buckler"
+display_name = "Metal Buckler"
+strength_requirement = 8
+block_target = 2
+maximum_shp = 20
+two_hands_free = true
+source_refs = PackedStringArray("PRIME-V3 p. 137, Shield Chart, Metal Buckler")

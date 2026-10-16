@@ -13,6 +13,12 @@ const MobileInputTests = preload("res://tests/test_mobile_input.gd")
 const PlayableCombatIntegrationTests = preload("res://tests/test_playable_combat_integration.gd")
 const TwoWayCombatEncounterTests = preload("res://tests/test_two_way_combat_encounter.gd")
 const BattlefieldMovementTests = preload("res://tests/test_battlefield_movement.gd")
+const ProneCombatMovingTargetTests = preload("res://tests/test_prone_combat_and_moving_targets.gd")
+const CombatUsabilityTests = preload("res://tests/test_combat_usability.gd")
+const CombatReadinessHudTests = preload("res://tests/test_combat_readiness_hud.gd")
+const PlaytestQualityTests = preload("res://tests/test_playtest_quality.gd")
+const FloatingCombatTextTests = preload("res://tests/test_floating_combat_text.gd")
+const CharacterEquipmentFoundationTests = preload("res://tests/test_character_equipment_foundation.gd")
 
 
 func _initialize() -> void:
@@ -34,6 +40,12 @@ func _run_tests() -> void:
 		{"name": "playable combat integration", "instance": PlayableCombatIntegrationTests.new()},
 		{"name": "two-way combat encounter", "instance": TwoWayCombatEncounterTests.new()},
 		{"name": "battlefield movement and approach", "instance": BattlefieldMovementTests.new()},
+		{"name": "prone combat and moving-target accuracy", "instance": ProneCombatMovingTargetTests.new()},
+		{"name": "combat usability and pursuit", "instance": CombatUsabilityTests.new()},
+		{"name": "combat readiness HUD", "instance": CombatReadinessHudTests.new()},
+		{"name": "Task 20 playtest quality", "instance": PlaytestQualityTests.new()},
+		{"name": "Task 21 floating combat text", "instance": FloatingCombatTextTests.new()},
+		{"name": "Task 22 character and equipment foundation", "instance": CharacterEquipmentFoundationTests.new()},
 	]
 	var failure_count := 0
 	for suite: Dictionary in suites:

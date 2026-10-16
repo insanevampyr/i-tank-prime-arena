@@ -3,6 +3,7 @@ extends RefCounted
 
 const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
+const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -13,6 +14,7 @@ const ENCOUNTER_PLAYER_DEFEAT := "player_defeat"
 const ENCOUNTER_DOUBLE_DEFEAT := "double_defeat"
 const OPPONENT_BEHAVIOR_LABEL := "task15_deterministic_test_opponent"
 const OPPONENT_MOVEMENT_TICK_US := 100_000
+const OPPONENT_REPATH_DISTANCE_MICROFEET := ArenaBattlefield.NAVIGATION_STEP_MICROFEET
 
 var simulation: CombatSimulation
 
@@ -34,8 +36,13 @@ var _opponent_behavior_status: String = "disabled"
 var _initial_player_position_microfeet := Vector2i.ZERO
 var _initial_opponent_position_microfeet := Vector2i.ZERO
 var _opponent_path: Array[Vector2i] = []
+var _opponent_path_target_microfeet: Variant = null
+var _opponent_path_rebuild_count: int = 0
 var _opponent_movement_remainder: int = 0
 var _opponent_last_movement_us: int = 0
+var _opponent_movement_model: PrimeMovementModel
+var _opponent_movement_round_index: int = -1
+var _opponent_movement_spent_microfeet: int = 0
 var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
 
@@ -65,6 +72,7 @@ func initialize(
 		return _failure("opponent_%s" % opponent_position_check["reason"])
 	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet)
 	if result.get("success", false):
+		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
 		_attack_definition = result["attack_definition"]
 		_selected_target_id = Fixture.OPPONENT_ID
 		_initialized = true
@@ -72,8 +80,13 @@ func initialize(
 		_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
 		_opponent_behavior_status = "idle" if _opponent_behavior_enabled else "disabled"
 		_opponent_path.clear()
+		_opponent_path_target_microfeet = null
+		_opponent_path_rebuild_count = 0
 		_opponent_movement_remainder = 0
 		_opponent_last_movement_us = simulation.clock.get_elapsed_us()
+		_opponent_movement_model = _make_opponent_movement_model(opponent_position_microfeet)
+		_opponent_movement_round_index = simulation.clock.get_round_index()
+		_opponent_movement_spent_microfeet = 0
 		_player_movement_round_index = simulation.clock.get_round_index()
 		_player_movement_spent_microfeet = 0
 		_last_error = ""
@@ -119,6 +132,9 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_encounter_active = false
 	_encounter_state = ENCOUNTER_READY
 	_opponent_behavior_status = "idle" if _opponent_behavior_enabled else "disabled"
+	_opponent_movement_model = null
+	_opponent_movement_round_index = -1
+	_opponent_movement_spent_microfeet = 0
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
 
@@ -133,6 +149,7 @@ func configure_battlefield(battlefield: ArenaBattlefield) -> void:
 	_battlefield = battlefield
 	_arena_bounds_microfeet = battlefield.bounds_microfeet
 	_opponent_path.clear()
+	_opponent_path_target_microfeet = null
 
 
 func get_battlefield() -> ArenaBattlefield:
@@ -173,12 +190,14 @@ func update_player_position(position_microfeet: Vector2i) -> Dictionary:
 
 func request_player_movement(position_microfeet: Vector2i, effective_mr: int) -> Dictionary:
 	if not _encounter_active:
-		return _movement_rejected("encounter_not_running")
+		var inactive_player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+		return _movement_rejected(
+			"encounter_not_running",
+			Vector2i.ZERO if inactive_player_state == null else inactive_player_state.position_microfeet
+		)
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
 	if player_state == null:
 		return _movement_rejected("player_unavailable")
-	if player_state.conditions.has("prone"):
-		return _movement_rejected("movement_blocked_while_prone", player_state.position_microfeet)
 	if effective_mr < 0:
 		return _movement_rejected("invalid_effective_mr", player_state.position_microfeet)
 	var resolved := _battlefield.resolve_motion(
@@ -201,6 +220,9 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 		}
 	_refresh_player_movement_ledger()
 	var allowance := effective_mr * MICROFEET_PER_FOOT
+	if player_state.conditions.has("prone"):
+		@warning_ignore("integer_division")
+		allowance /= 4
 	var remaining := maxi(0, allowance - _player_movement_spent_microfeet)
 	if movement_cost > remaining:
 		var start := player_state.position_microfeet
@@ -220,7 +242,6 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 	if not result.get("success", false):
 		return _movement_rejected(String(result.get("reason", "position_update_rejected")), player_state.position_microfeet)
 	_player_movement_spent_microfeet += movement_cost
-	_opponent_path.clear()
 	return {
 		"success": true,
 		"position_microfeet": destination,
@@ -302,27 +323,35 @@ func _get_actor_attack_legality(attacker_id: StringName, target_id: StringName, 
 		return {"success": false, "reason": "attack_in_progress"}
 	if not attacker_state.equipment_refs.has(String(_attack_definition.weapon_ref)):
 		return {"success": false, "reason": "weapon_not_equipped"}
-	var offset := target_state.position_microfeet - attacker_state.position_microfeet
-	var maximum_range := int(_attack_definition.maximum_range_microfeet)
-	if offset.length_squared() > maximum_range * maximum_range:
-		return {
-			"success": false,
-			"reason": "target_out_of_range",
-			"distance_microfeet": roundi(Vector2(offset).length()),
-			"maximum_range_microfeet": maximum_range,
-		}
-	if _attack_definition.requires_line_of_sight \
-		and not _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet):
-		return {
-			"success": false,
-			"reason": "line_of_sight_blocked",
-			"distance_microfeet": roundi(Vector2(offset).length()),
-			"maximum_range_microfeet": maximum_range,
-		}
+	var geometry := _get_actor_attack_geometry(attacker_id, target_id)
 	return {
 		"success": true,
+		"reason": "legal",
+		"distance_microfeet": geometry["distance_microfeet"],
+		"maximum_range_microfeet": geometry["maximum_range_microfeet"],
+		"currently_in_range": geometry["in_range"],
+		"currently_unobstructed": geometry["line_of_sight"],
+		"approach_required": not geometry["success"],
+	}
+
+
+func _get_actor_attack_geometry(attacker_id: StringName, target_id: StringName) -> Dictionary:
+	var attacker_state := simulation.get_actor_state(attacker_id)
+	var target_state := simulation.get_actor_state(target_id)
+	if attacker_state == null or target_state == null:
+		return {"success": false, "reason": "attack_geometry_unavailable"}
+	var offset := target_state.position_microfeet - attacker_state.position_microfeet
+	var maximum_range := int(_attack_definition.maximum_range_microfeet)
+	var in_range := offset.length_squared() <= maximum_range * maximum_range
+	var line_of_sight := not _attack_definition.requires_line_of_sight \
+		or _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
+	return {
+		"success": in_range and line_of_sight,
+		"reason": "legal" if in_range and line_of_sight else ("target_out_of_range" if not in_range else "line_of_sight_blocked"),
 		"distance_microfeet": roundi(Vector2(offset).length()),
 		"maximum_range_microfeet": maximum_range,
+		"in_range": in_range,
+		"line_of_sight": line_of_sight,
 	}
 
 
@@ -349,7 +378,7 @@ func advance_by(delta_us: int) -> void:
 			step_timestamp_us = mini(step_timestamp_us, movement_tick_us)
 		simulation.advance_to(step_timestamp_us)
 		if step_timestamp_us == movement_tick_us:
-			_advance_opponent_approach(step_timestamp_us - _opponent_last_movement_us)
+			_advance_opponent_movement(step_timestamp_us - _opponent_last_movement_us)
 			_opponent_last_movement_us = step_timestamp_us
 		_resolve_ready_attack_pipeline()
 		_refresh_active_attacks()
@@ -405,6 +434,10 @@ func get_opponent_behavior_label() -> String:
 	return OPPONENT_BEHAVIOR_LABEL
 
 
+func get_opponent_path_rebuild_count_for_testing() -> int:
+	return _opponent_path_rebuild_count
+
+
 func get_last_error() -> String:
 	return _last_error
 
@@ -422,7 +455,16 @@ func get_state_snapshot() -> Dictionary:
 	snapshot["battlefield"] = _battlefield.to_dictionary()
 	snapshot["opponent_behavior_status"] = _opponent_behavior_status
 	snapshot["opponent_path"] = _serialize_vector_path(_opponent_path)
+	snapshot["opponent_path_target_microfeet"] = (
+		null
+		if _opponent_path_target_microfeet == null
+		else [_opponent_path_target_microfeet.x, _opponent_path_target_microfeet.y]
+	)
+	snapshot["opponent_path_rebuild_count"] = _opponent_path_rebuild_count
 	snapshot["opponent_movement_remainder"] = _opponent_movement_remainder
+	snapshot["opponent_movement"] = {} if _opponent_movement_model == null else _opponent_movement_model.to_dictionary()
+	snapshot["opponent_movement_round_index"] = _opponent_movement_round_index
+	snapshot["opponent_movement_spent_microfeet"] = _opponent_movement_spent_microfeet
 	snapshot["player_movement_round_index"] = _player_movement_round_index
 	snapshot["player_movement_spent_microfeet"] = _player_movement_spent_microfeet
 	return snapshot
@@ -451,6 +493,14 @@ func _request_actor_attack(attacker_id: StringName, target_id: StringName, input
 	return result
 
 
+func _resolve_attack_final_line_of_sight(attacker_id: StringName, target_id: StringName) -> Variant:
+	var attacker_state := simulation.get_actor_state(attacker_id)
+	var target_state := simulation.get_actor_state(target_id)
+	if attacker_state == null or target_state == null:
+		return null
+	return _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
+
+
 func _run_opponent_behavior() -> void:
 	if not _opponent_behavior_enabled:
 		_opponent_behavior_status = "disabled"
@@ -476,7 +526,16 @@ func _run_opponent_behavior() -> void:
 		_opponent_behavior_status = "blocked_critical_stagger"
 		return
 	if not opponent_state.current_action_instance_id.is_empty() or is_opponent_attack_in_flight():
-		_opponent_behavior_status = "action_in_progress"
+		var geometry := _get_actor_attack_geometry(Fixture.OPPONENT_ID, Fixture.PLAYER_ID)
+		if is_opponent_attack_in_flight() and not geometry.get("success", false):
+			var path_result := _ensure_current_opponent_path()
+			_opponent_behavior_status = (
+				"attacking_while_approaching"
+				if path_result.get("success", false)
+				else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))
+			)
+		else:
+			_opponent_behavior_status = "action_in_progress"
 		return
 	if opponent_state.conditions.has("prone"):
 		var stand_result := simulation.start_stand_action(
@@ -487,21 +546,20 @@ func _run_opponent_behavior() -> void:
 		return
 	var legality := get_opponent_attack_legality()
 	if not legality.get("success", false):
-		var reason := String(legality.get("reason", "attack_illegal"))
-		if reason == "target_out_of_range":
-			if not _battlefield.navigation_authoritative:
-				_opponent_behavior_status = "approach_blocked_unverified_path"
-				return
-			var path_result := {"success": true, "reason": "existing_path"} if not _opponent_path.is_empty() else _build_opponent_approach_path()
-			if path_result.get("success", false):
-				_opponent_behavior_status = "approaching"
-			else:
-				_opponent_behavior_status = "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))
-		else:
-			_opponent_behavior_status = "blocked_%s" % reason
+		_opponent_behavior_status = "blocked_%s" % String(legality.get("reason", "attack_illegal"))
 		return
 	var result := _request_actor_attack(Fixture.OPPONENT_ID, Fixture.PLAYER_ID, "scripted")
-	_opponent_behavior_status = "attacking" if result.get("success", false) else "blocked_%s" % String(result.get("reason", "attack_rejected"))
+	if not result.get("success", false):
+		_opponent_behavior_status = "blocked_%s" % String(result.get("reason", "attack_rejected"))
+		return
+	var geometry := _get_actor_attack_geometry(Fixture.OPPONENT_ID, Fixture.PLAYER_ID)
+	if geometry.get("success", false):
+		_opponent_behavior_status = "attacking"
+	elif not _battlefield.navigation_authoritative:
+		_opponent_behavior_status = "approach_blocked_unverified_path"
+	else:
+		var path_result := _ensure_current_opponent_path()
+		_opponent_behavior_status = "attacking_while_approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))
 
 
 func _update_encounter_outcome() -> void:
@@ -588,7 +646,13 @@ func _make_dodge_environment(attack: CombatAttackInstance) -> CombatDodgeEnviron
 	if defender_state == null or attacker_state == null:
 		return CombatDodgeEnvironment.new(&"task14_incomplete", false, candidates, "Task 14 fixture actor state unavailable")
 	var defender_definition: Dictionary = _actor_definition_snapshot(attack.target_id)
-	var maximum_dodge_feet := floori(float(int(defender_definition.get("combat_stats", {}).get("mr", 0))) / 2.0)
+	var defender_mr := int(defender_definition.get("combat_stats", {}).get("mr", 0))
+	var maximum_dodge_feet := floori(float(defender_mr) / 2.0)
+	if defender_state.conditions.has("prone"):
+		# Arena Task 17 crawl is one quarter walking MR; Prime then rounds the
+		# half-MR Dodge allowance down to whole feet.
+		@warning_ignore("integer_division")
+		maximum_dodge_feet = defender_mr / 8
 	var maximum_attack_range := int(_attack_definition.maximum_range_microfeet)
 	var candidate_facts := _battlefield.build_dodge_candidate_facts(
 		attack.target_id,
@@ -672,6 +736,7 @@ func _build_opponent_approach_path() -> Dictionary:
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
 	if opponent_state == null or player_state == null:
 		_opponent_path.clear()
+		_opponent_path_target_microfeet = null
 		return {"success": false, "reason": "missing_actor_state"}
 	var path_result := _battlefield.find_path_to_attack_position(
 		Fixture.OPPONENT_ID,
@@ -681,39 +746,79 @@ func _build_opponent_approach_path() -> Dictionary:
 		_actor_occupancy()
 	)
 	_opponent_path.clear()
+	_opponent_path_target_microfeet = player_state.position_microfeet
+	_opponent_path_rebuild_count += 1
 	if path_result.get("success", false):
 		for waypoint: Vector2i in path_result["waypoints"]:
 			_opponent_path.append(waypoint)
 	return path_result
 
 
-func _advance_opponent_approach(delta_us: int) -> void:
+func _ensure_current_opponent_path() -> Dictionary:
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		_opponent_path.clear()
+		_opponent_path_target_microfeet = null
+		return {"success": false, "reason": "missing_actor_state"}
+	if _opponent_path.is_empty() or _opponent_path_target_microfeet == null:
+		return _build_opponent_approach_path()
+	var target_offset: Vector2i = player_state.position_microfeet - _opponent_path_target_microfeet
+	if target_offset.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET * OPPONENT_REPATH_DISTANCE_MICROFEET:
+		return _build_opponent_approach_path()
+	return {"success": true, "reason": "stable_existing_path"}
+
+
+func _advance_opponent_movement(delta_us: int) -> void:
 	if delta_us <= 0 or not _encounter_active or not _opponent_behavior_enabled:
 		return
-	var legality := get_opponent_attack_legality()
-	if legality.get("success", false) or String(legality.get("reason", "")) != "target_out_of_range":
+	if _opponent_movement_model == null:
+		return
+	var attack := simulation.get_attack(_active_opponent_attack_id)
+	if attack == null or attack.status != CombatAttackInstance.STATUS_EXECUTING:
+		_stop_opponent_running_if_active()
+		_opponent_movement_model.advance(delta_us, Vector2.ZERO)
+		return
+	var geometry := _get_actor_attack_geometry(Fixture.OPPONENT_ID, Fixture.PLAYER_ID)
+	if geometry.get("success", false):
+		_opponent_path.clear()
+		_opponent_path_target_microfeet = null
+		_stop_opponent_running_if_active()
+		_opponent_movement_model.advance(delta_us, Vector2.ZERO)
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	if opponent_state == null or opponent_state.conditions.has("prone") \
 		or opponent_state.critical_stagger_until_us > simulation.clock.get_elapsed_us():
+		_opponent_movement_model.set_prone(opponent_state != null and opponent_state.conditions.has("prone"))
+		_opponent_movement_model.advance(delta_us, Vector2.ZERO)
 		return
-	var path_result := {"success": true, "reason": "existing_path"} if not _opponent_path.is_empty() else _build_opponent_approach_path()
+	_opponent_movement_model.set_prone(false)
+	var path_result := _ensure_current_opponent_path()
 	if not path_result.get("success", false) or _opponent_path.is_empty():
 		_opponent_behavior_status = "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))
+		_stop_opponent_running_if_active()
+		_opponent_movement_model.advance(delta_us, Vector2.ZERO)
 		return
-	var definition := _actor_definition_snapshot(Fixture.OPPONENT_ID)
-	var movement_rate := int(definition.get("combat_stats", {}).get("mr", 0))
+	if not _opponent_movement_model.is_running():
+		_opponent_movement_model.request_running()
+	var movement_rate := _opponent_movement_model.get_effective_mr()
 	if movement_rate <= 0:
 		_opponent_behavior_status = "approach_blocked_no_movement_rate"
 		return
-	var numerator := delta_us * movement_rate * MICROFEET_PER_FOOT + _opponent_movement_remainder
-	@warning_ignore("integer_division")
-	var movement_budget := numerator / CombatClock.ROUND_DURATION_US
-	_opponent_movement_remainder = numerator % CombatClock.ROUND_DURATION_US
-	if movement_budget <= 0:
-		return
+	_refresh_opponent_movement_ledger()
+	var round_allowance := movement_rate * MICROFEET_PER_FOOT
+	var remaining_round_movement := maxi(0, round_allowance - _opponent_movement_spent_microfeet)
 	var destination: Vector2i = _opponent_path[0]
 	var offset := destination - opponent_state.position_microfeet
+	var requested_direction := Vector2(offset).normalized()
+	_opponent_movement_model.position_feet = Vector2(opponent_state.position_microfeet) / float(MICROFEET_PER_FOOT)
+	var displacement_feet := _opponent_movement_model.advance(delta_us, requested_direction)
+	var movement_budget := mini(
+		roundi(displacement_feet.length() * float(MICROFEET_PER_FOOT)),
+		remaining_round_movement
+	)
+	if movement_budget <= 0:
+		_opponent_behavior_status = "approach_waiting_for_mr"
+		return
 	var distance := roundi(Vector2(offset).length())
 	if distance > movement_budget:
 		destination = opponent_state.position_microfeet + Vector2i(
@@ -729,7 +834,10 @@ func _advance_opponent_approach(delta_us: int) -> void:
 	if not resolved.get("success", false) or int(resolved.get("movement_cost_microfeet", 0)) <= 0:
 		_opponent_behavior_status = "approach_blocked_collision"
 		_opponent_path.clear()
+		_opponent_path_target_microfeet = null
 		return
+	opponent_state.movement_round_index = simulation.clock.get_round_index()
+	opponent_state.remaining_mr_microfeet = remaining_round_movement
 	var movement_result := simulation.apply_authoritative_position(
 		Fixture.OPPONENT_ID,
 		resolved["position_microfeet"],
@@ -740,9 +848,38 @@ func _advance_opponent_approach(delta_us: int) -> void:
 		var reason := String(movement_result.get("reason", "movement_rejected"))
 		_opponent_behavior_status = "approach_waiting_for_mr" if reason == "insufficient_remaining_mr" else "approach_blocked_%s" % reason
 		return
+	_opponent_movement_spent_microfeet += int(resolved["movement_cost_microfeet"])
+	_opponent_movement_model.position_feet = Vector2(resolved["position_microfeet"]) / float(MICROFEET_PER_FOOT)
 	if resolved["position_microfeet"] == _opponent_path[0]:
 		_opponent_path.pop_front()
-	_opponent_behavior_status = "approaching"
+	_opponent_behavior_status = "attacking_while_approaching"
+
+
+func _make_opponent_movement_model(position_microfeet: Vector2i) -> PrimeMovementModel:
+	var actor := Fixture.make_guard_actor(Fixture.OPPONENT_ID, "Opponent Guard Fixture")
+	var model := PrimeMovementModel.new(
+		int(actor.get_combat_stat("mr")),
+		int(actor.attributes["spd"]),
+		int(actor.attributes["end"]),
+		Fixture.PLAYER_RUNNING_SKILL_INVESTMENT,
+		Fixture.PLAYER_RUNNING_SCM,
+		int(actor.get_combat_stat("rb"))
+	)
+	model.position_feet = Vector2(position_microfeet) / float(MICROFEET_PER_FOOT)
+	return model
+
+
+func _refresh_opponent_movement_ledger() -> void:
+	var round_index := simulation.clock.get_round_index()
+	if _opponent_movement_round_index == round_index:
+		return
+	_opponent_movement_round_index = round_index
+	_opponent_movement_spent_microfeet = 0
+
+
+func _stop_opponent_running_if_active() -> void:
+	if _opponent_movement_model != null and _opponent_movement_model.is_running():
+		_opponent_movement_model.stop_running(PrimeMovementModel.RunningEndReason.INTENTIONAL_STOP)
 
 
 func _serialize_vector_path(path: Array[Vector2i]) -> Array:

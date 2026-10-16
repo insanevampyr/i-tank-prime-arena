@@ -19,6 +19,7 @@ func run() -> Array[String]:
 	_test_authoritative_player_movement_restrictions()
 	_test_keyboard_and_touch_share_movement_authority()
 	_test_deterministic_path_and_opponent_approach()
+	_test_opponent_approaches_during_attack_execution()
 	_test_dodge_geometry_and_known_hazards()
 	_test_replay_reset_and_two_client_convergence()
 	return _failures
@@ -65,7 +66,9 @@ func _test_authoritative_player_movement_restrictions() -> void:
 	_expect_equal(simultaneous.request_player_movement(Vector2i(21_000_000, 7_000_000), 12)["reason"], "movement_blocked_by_critical_stagger", "Critical Stagger must stop voluntary battlefield movement.")
 	player_state.critical_stagger_until_us = 0
 	player_state.conditions.append("prone")
-	_expect_equal(simultaneous.request_player_movement(Vector2i(21_000_000, 7_000_000), 12)["reason"], "movement_blocked_while_prone", "The vertical slice must fail closed on voluntary prone movement until its verified one-Act stand completes.")
+	var prone_crawl := simultaneous.request_player_movement(Vector2i(21_000_000, 7_000_000), 12)
+	_expect_true(prone_crawl["success"], "The approved Task 17 prone crawl must use the same authoritative battlefield movement path.")
+	_expect_true(int(prone_crawl["movement_cost_microfeet"]) <= 3_000_000, "Prone crawl must remain capped at 25% of the fixture's 12 MR walking allowance.")
 
 
 func _test_keyboard_and_touch_share_movement_authority() -> void:
@@ -108,6 +111,29 @@ func _test_deterministic_path_and_opponent_approach() -> void:
 	_expect_true(current != previous, "The scripted opponent must spend MR to approach instead of remaining permanently blocked.")
 	_expect_true(_has_event(session, "actor_position_changed", Fixture.OPPONENT_ID), "Authoritative approach positions must be event-recorded.")
 	_expect_true(_has_event(session, "physical_attack_declared", Fixture.OPPONENT_ID), "The opponent must attack through the existing pipeline after reaching legal range.")
+
+
+func _test_opponent_approaches_during_attack_execution() -> void:
+	var player_position := Vector2i(20_000_000, 7_000_000)
+	var opponent_position := Vector2i(26_000_000, 7_000_000)
+	var seed_value := _find_opponent_opening_seed()
+	var session := ArenaCombatSession.new(seed_value)
+	session.configure_battlefield(Battlefield.new(
+		Rect2i(2_000_000, 2_000_000, 44_000_000, 23_000_000),
+		[],
+		Battlefield.DEFAULT_ACTOR_RADIUS_MICROFEET,
+		true
+	))
+	_expect_true(session.initialize(player_position, opponent_position).get("success", false), "The authoritative open approach-attack fixture must initialize.")
+	session.set_opponent_behavior_enabled(true)
+	var attack_id := session.get_active_opponent_attack_id()
+	_expect_true(not attack_id.is_empty(), "The opponent must declare its ordinary attack while still six feet from the player.")
+	_expect_equal(session.get_actor_state(Fixture.OPPONENT_ID).position_microfeet, opponent_position, "Declaration itself must not teleport the opponent into reach.")
+	session.advance_by(100_000)
+	_expect_true(session.get_actor_state(Fixture.OPPONENT_ID).position_microfeet != opponent_position, "The opponent must spend authoritative MR while its AT action is executing.")
+	_expect_equal(session.simulation.get_attack(attack_id).status, CombatAttackInstance.STATUS_EXECUTING, "Approach movement must occur before the attack's final effect point.")
+	session.advance_by(2_400_000)
+	_expect_true(_has_event(session, "physical_attack_accuracy_resolved", Fixture.OPPONENT_ID), "An opponent that reaches three-foot Battle Axe reach before resolution must proceed to ACC.")
 
 
 func _test_dodge_geometry_and_known_hazards() -> void:

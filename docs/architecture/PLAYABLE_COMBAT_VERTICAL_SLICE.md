@@ -4,7 +4,7 @@
 
 Phase 1 Task 14 connects the temporary Arena scene to one `CombatSimulation`. `ArenaCombatSession` is an intent and orchestration adapter: it selects an existing target, samples the canonical movement position when an attack is requested, advances deterministic simulation time, submits the existing automatic-defense transaction, and invokes the existing physical-damage transaction only after defenses are exhausted. It does not calculate ACC, AT duration, defense eligibility, criticals, damage, TAL, NAL, SHP, or HPC.
 
-Keyboard Space/Enter and the one-shot touch ATTACK button both call the same `request_player_attack` boundary. Repeated input is rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
+Desktop left-click, keyboard Space/Enter, and the one-shot touch ATTACK button all call the same `request_player_attack` boundary. A desktop click on the opponent selects it and requests exactly one ordinary attack; a touch tap selects only, preserving the separate mobile ATTACK button. Repeated input is rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
 
 ## Source-verified fixture
 
@@ -17,16 +17,18 @@ Production Aren/Garrick definitions are still unavailable. The scene therefore l
 
 Task 14 combines those verified rows only as a controlled integration fixture. It does not claim that this assembled loadout is Aren Valecrest, Garrick Ironward, or a saved production character.
 
+Task 22 moves those values into reusable Godot Resource definitions and a validated loadout catalog. Player and opponent remain independent instances of the same definition, while mutable HPC, conditions and equipment durability remain simulation state. The printed Uncommon Guard uses Leather and does not list the buckler; Plate plus Metal Buckler remains an approved assembled Arena test loadout rather than a printed NPC loadout. See `CHARACTER_EQUIPMENT_FOUNDATION.md`.
+
 ## Playable flow
 
 1. The scene initializes both actors, their equipment/protection/defense profiles, critical-reaction registrations, positions, seeded RNG, and opening Initiative in the authority.
-2. The opponent is selected by default; clicking/tapping it or pressing Tab selects it again. Clicking/tapping empty arena space clears selection.
+2. The opponent is selected by default. Left-clicking it selects and requests one attack; tapping it or pressing Tab selects only. Clicking/tapping empty arena space clears selection.
 3. The player moves with the existing WASD/touch joystick and Running path. At attack input, the adapter submits the current canonical player position to the combat authority.
-4. The authority validates alive state, equipped Battle Axe, torso target, line of sight, three-foot range, opening Initiative, and action availability.
+4. The authority validates alive state, equipped Battle Axe, torso target, opening Initiative, and action availability. Ordinary melee reach and obstruction are checked at final resolution rather than prohibiting an approach-attack declaration.
 5. One Act executes at the fixture's AT 2, so ACC occurs after exactly 2.5 simulation seconds.
 6. An ACC hit enters the existing ordered Dodge, weapon Block, shield Block, and Physical Soak pipeline. The open fixture arena supplies bounded, collision-free, unoccupied, hazard-free Dodge candidates; no in-place duck is supplied because Battle Axe duck eligibility is unresolved.
 7. If defenses are exhausted, the existing exact damage transaction applies Battle Axe dice plus eligible SB, approved critical factors, Plate TAL, NAL, and HPC once.
-8. The event log renders authoritative ACC, defense, damage, critical rarity/outcome, Stagger, prone, reaction, interruption, pending, blocked, and unavailable records.
+8. The player-facing log renders important authoritative attack, defense, damage, critical, condition and interruption results. F3 toggles a hidden developer overlay containing timing, path status and the more detailed authoritative event transcript.
 
 ## Deterministic presentation
 
@@ -38,10 +40,18 @@ Release builds enqueue scheduled events before evaluating the uniqueness asserti
 
 Task 15 keeps this same authority boundary and adds a deterministic two-way encounter driver, explicit `START`/`RESET`, player defeat/victory, legal one-Act standing and clearer actor-specific event presentation. See `TWO_WAY_COMBAT_ENCOUNTER.md`.
 
+## Task 18 usability extension
+
+Task 18 adds desktop click-to-attack without auto-attack or queued Acts, keeps touch selection separate from the one-shot ATTACK button, reduces the default HUD to play-relevant state, and moves technical detail behind F3. It also validates the blue Task 3 movement-test profile against the Guard fixture before play. See `COMBAT_USABILITY_AND_PURSUIT.md`.
+
+## Task 19 readiness extension
+
+Task 19 adds passive ATTACK and RUN rings sourced from the existing action, legality and movement snapshots. The attack countdown uses the linked action's actual scheduled start/effect timestamps; the Running ring uses actual endurance, recovery and retry state. These controls do not issue intents or add cooldowns. Movement and Running remain legal during actions where existing rules permit, and final range/line-of-sight validation still precedes ACC. See `COMBAT_READINESS_HUD.md`.
+
 ## Deliberate limits
 
 - The opponent's Task 15 behavior is a fixed, labeled encounter script rather than general AI. It initiates the same ordinary attack only when authoritative legality succeeds.
-- Out-of-range approach is blocked because no authoritative navigation path is authored; the opponent never teleports or infers terrain from presentation pixels.
+- The Task 16 battlefield supplies deterministic authoritative navigation for this one arena. The opponent declares through the same authority when otherwise eligible, approaches through legal paths during AT execution, and reaches ACC only when final range and line of sight are legal; it never teleports or infers terrain from presentation pixels.
 - Battle Axe in-place duck eligibility remains unresolved; displacement candidates remain legal and deterministic.
 - Rare shield-contact prone is unavailable when exact contact is not verified, and the log reports that boundary.
 - Backfire and Dwarvestek/Grentek remain blocked behind their existing verification gates.

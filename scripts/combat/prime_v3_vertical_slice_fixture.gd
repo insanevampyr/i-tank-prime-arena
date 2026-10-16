@@ -7,17 +7,24 @@ const ATTACK_ID := &"prime_v3_battle_axe_torso"
 const WEAPON_REF := &"prime_v3_battle_axe"
 const SHIELD_REF := &"prime_v3_metal_buckler"
 const ARMOR_REF := &"prime_v3_plate_torso"
+const CHARACTER_DEFINITION_ID := &"prime_v3_uncommon_guard"
+const LOADOUT_DEFINITION_ID := &"arena_guard_plate_buckler"
 
-const PRIME_GUARD_SOURCE := "PRIME-V3 pp. 350-351, Uncommon Guard"
-const PRIME_BATTLE_AXE_SOURCE := "PRIME-V3 p. 122, Battle Axe"
-const PRIME_PLATE_SOURCE := "PRIME-V3 p. 133, Plate torso armor"
-const PRIME_BUCKLER_SOURCE := "PRIME-V3 p. 134, Metal Buckler"
+const PRIME_GUARD_SOURCE := "PRIME-V3 p. 336, Uncommon Guard"
+const PRIME_BATTLE_AXE_SOURCE := "PRIME-V3 p. 127, Battle Axe"
+const PRIME_PLATE_SOURCE := "PRIME-V3 p. 135, Plate torso armor"
+const PRIME_BUCKLER_SOURCE := "PRIME-V3 p. 137, Metal Buckler"
 const ARENA_DAMAGE_SOURCE := "ARENA-COMBAT-1.6 exact multiplier order"
 
 const BATTLE_AXE_STRENGTH_REQUIREMENT := 12
 const BATTLE_AXE_ONE_HAND_STRENGTH_REQUIREMENT := 24
 const METAL_BUCKLER_STRENGTH_REQUIREMENT := 8
 const PLATE_TORSO_STRENGTH_REQUIREMENT := 16
+
+# Task 3 movement-test profile. These are not part of the Prime Guard stat row.
+const PLAYER_RUNNING_SKILL_INVESTMENT := 3
+const PLAYER_RUNNING_SCM := 0
+const PLAYER_RUNNING_RNG_SEED := 1_337
 
 
 static func configure_simulation(
@@ -27,6 +34,10 @@ static func configure_simulation(
 ) -> Dictionary:
 	if simulation == null:
 		return {"success": false, "reason": "missing_simulation"}
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var catalog_validation := catalog.validate_character_loadout(CHARACTER_DEFINITION_ID, LOADOUT_DEFINITION_ID)
+	if not catalog_validation.get("success", false):
+		return {"success": false, "reason": "fixture_catalog_invalid", "issues": catalog_validation.get("issues", [])}
 	var attack_definition := make_attack_definition()
 	for actor_id: StringName in [PLAYER_ID, OPPONENT_ID]:
 		var display_name := "Player Guard Fixture" if actor_id == PLAYER_ID else "Opponent Guard Fixture"
@@ -112,111 +123,23 @@ static func validate_combatant_fixture(
 
 
 static func make_guard_actor(actor_id: StringName, display_name: String) -> CombatActorDefinition:
-	return CombatActorDefinition.new(
-		actor_id,
-		&"prime_v3_verified_vertical_slice_fixture",
-		display_name,
-		{
-			"str": 16, "end": 10, "spd": 12, "dex": 14, "wis": 8,
-			"int": 5, "wit": 8, "man": 12, "luk": 1, "app": 8,
-		},
-		{
-			"hpm": 100, "acc": 12, "at": 2, "init": 4, "mr": 12,
-			"nal": 1, "dt": 8, "dp": 6, "physical_soak": 4,
-			"rb": 0, "sb": 4,
-		},
-		{},
-		PackedStringArray([String(WEAPON_REF), String(SHIELD_REF), String(ARMOR_REF)]),
-		{
-			"dodge": true,
-			"weapon_block": true,
-			"shield_block": true,
-			"physical_soak": true,
-		},
-		{
-			"attributes": PRIME_GUARD_SOURCE,
-			"combat_stats": PRIME_GUARD_SOURCE,
-			"equipment": "Task 14 fixture assembled only from %s; %s; %s" % [
-				PRIME_BATTLE_AXE_SOURCE, PRIME_PLATE_SOURCE, PRIME_BUCKLER_SOURCE,
-			],
-		},
-		PackedStringArray()
-	)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var result := catalog.instantiate_actor(CHARACTER_DEFINITION_ID, LOADOUT_DEFINITION_ID, actor_id, display_name)
+	return result.get("actor") as CombatActorDefinition
 
 
 static func make_attack_definition() -> CombatAttackDefinition:
-	var damage := CombatPhysicalDamageDefinition.new(
-		2,
-		10,
-		3,
-		true,
-		true,
-		{
-			"torso": {
-				"numerator": 1,
-				"denominator": 1,
-				"source_ref": "PRIME-V3 torso ordinary location",
-			},
-		},
-		null,
-		true,
-		CombatPhysicalDamageDefinition.ROUNDING_FLOOR,
-		PackedStringArray([PRIME_BATTLE_AXE_SOURCE, ARENA_DAMAGE_SOURCE])
-	)
-	var critical_policy := CombatCriticalTriggerPolicy.new(
-		&"prime_v3_battle_axe_critical_range",
-		2,
-		0,
-		20,
-		&"",
-		"%s: natural 1-2 is a critical strike" % PRIME_BATTLE_AXE_SOURCE,
-		"PRIME-V3 pp. 16, 92, 350: natural 20 critical failure",
-		PackedStringArray([PRIME_BATTLE_AXE_SOURCE, "ARENA-COMBAT-1.7 section 18"])
-	)
-	return CombatAttackDefinition.new(
-		ATTACK_ID,
-		WEAPON_REF,
-		1,
-		true,
-		true,
-		0,
-		{"torso": 0},
-		PackedStringArray(["torso"]),
-		0,
-		3_000_000,
-		true,
-		PackedStringArray([PRIME_BATTLE_AXE_SOURCE, "ARENA-COMBAT-1.7 section 18"]),
-		&"hand_held",
-		PackedStringArray(["slashing"]),
-		true,
-		CombatAttackDefinition.DUCKING_UNRESOLVED,
-		damage,
-		critical_policy
-	)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var weapon := catalog.get_weapon(WEAPON_REF)
+	return null if weapon == null else weapon.make_attack_definition(ATTACK_ID) as CombatAttackDefinition
 
 
 static func make_defense_profile(actor_id: StringName) -> CombatDefenseProfile:
-	var weapon_block := CombatBlockDefinition.new(
-		CombatBlockDefinition.TYPE_WEAPON,
-		WEAPON_REF,
-		2,
-		0,
-		true,
-		true,
-		null,
-		PackedStringArray([PRIME_BATTLE_AXE_SOURCE])
-	)
-	var shield_block := CombatBlockDefinition.new(
-		CombatBlockDefinition.TYPE_SHIELD,
-		SHIELD_REF,
-		2,
-		0,
-		true,
-		true,
-		20,
-		PackedStringArray([PRIME_BUCKLER_SOURCE]),
-		null
-	)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var weapon := catalog.get_weapon(WEAPON_REF)
+	var shield := catalog.get_shield(SHIELD_REF)
+	var weapon_block: CombatBlockDefinition = null if weapon == null else weapon.make_block_definition()
+	var shield_block: CombatBlockDefinition = null if shield == null else shield.make_block_definition()
 	return CombatDefenseProfile.new(
 		StringName("task14_%s_defenses" % String(actor_id)),
 		PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]),
@@ -228,13 +151,9 @@ static func make_defense_profile(actor_id: StringName) -> CombatDefenseProfile:
 
 
 static func make_damage_protection_profile(actor_id: StringName) -> CombatDamageProtectionProfile:
-	var plate := CombatArmorDefinition.new(
-		ARMOR_REF,
-		&"torso",
-		PackedStringArray(["torso"]),
-		{"bashing": 3, "slashing": 3, "piercing": 3},
-		PackedStringArray([PRIME_PLATE_SOURCE])
-	)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var armor := catalog.get_armor(ARMOR_REF)
+	var plate: CombatArmorDefinition = null if armor == null else armor.make_combat_armor_definition()
 	return CombatDamageProtectionProfile.new(
 		StringName("task14_%s_protection" % String(actor_id)),
 		[plate],

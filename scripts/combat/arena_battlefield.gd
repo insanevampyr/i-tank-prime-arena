@@ -167,6 +167,10 @@ func has_line_of_sight(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bo
 	return true
 
 
+func is_attack_position_legal(position_microfeet: Vector2i, target_microfeet: Vector2i, attack_range_microfeet: int) -> bool:
+	return _within_reach_and_visible(position_microfeet, target_microfeet, attack_range_microfeet)
+
+
 func find_path_to_attack_position(
 	mover_id: StringName,
 	start_microfeet: Vector2i,

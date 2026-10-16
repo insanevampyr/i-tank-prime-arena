@@ -40,6 +40,7 @@ var _combat_started: bool = false
 var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
 var _opening_rank_count: int = 0
+var _attack_final_line_of_sight_resolver: Callable
 
 
 func _init(seed_value: int) -> void:
@@ -79,6 +80,10 @@ func schedule_event(
 
 func roll_int(min_inclusive: int, max_inclusive: int) -> int:
 	return random.next_int(min_inclusive, max_inclusive)
+
+
+func set_attack_final_line_of_sight_resolver(resolver: Callable) -> void:
+	_attack_final_line_of_sight_resolver = resolver
 
 
 func begin_combat() -> Dictionary:
@@ -470,14 +475,19 @@ func start_physical_attack(
 		return _failure("unresolved_location_acc_modifier")
 	if not definition.has_resolved_range():
 		return _failure("unresolved_attack_range")
-	if definition.requires_line_of_sight and authoritative_line_of_sight != true:
-		return _failure("line_of_sight_unverified")
-	var offset := target_state.position_microfeet - attacker_state.position_microfeet
-	var distance_squared := offset.x * offset.x + offset.y * offset.y
-	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
-	var maximum_range := int(definition.maximum_range_microfeet)
-	if distance_squared < minimum_range * minimum_range or distance_squared > maximum_range * maximum_range:
-		return _failure("target_out_of_range")
+	# Approved Arena approach-attack timing: an ordinary physical attack may be
+	# declared before the attacker reaches weapon range or clears an obstruction.
+	# Range and line of sight remain authoritative requirements, but they are
+	# evaluated at the final effect point before the ACC die is rolled.
+	if not definition.allows_approach_during_execution:
+		if definition.requires_line_of_sight and authoritative_line_of_sight != true:
+			return _failure("line_of_sight_unverified")
+		var declaration_offset := target_state.position_microfeet - attacker_state.position_microfeet
+		var declaration_distance_squared := declaration_offset.x * declaration_offset.x + declaration_offset.y * declaration_offset.y
+		var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
+		var maximum_range := int(definition.maximum_range_microfeet)
+		if declaration_distance_squared < minimum_range * minimum_range or declaration_distance_squared > maximum_range * maximum_range:
+			return _failure("target_out_of_range")
 
 	var definition_key := String(definition.attack_definition_id)
 	if _attack_definitions.has(definition_key):
@@ -504,6 +514,11 @@ func start_physical_attack(
 		roll_bonus,
 		is_back_attack
 	)
+	attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
+	attack.declared_target_position_microfeet = target_state.position_microfeet
+	attack.declaration_line_of_sight_verified = authoritative_line_of_sight
+	var declared_offset := target_state.position_microfeet - attacker_state.position_microfeet
+	var distance_squared := declared_offset.x * declared_offset.x + declared_offset.y * declared_offset.y
 	_attacks[attack_instance_id] = attack
 	_attack_by_action_id[action_instance_id] = attack_instance_id
 	_state_revision += 1
@@ -1339,10 +1354,39 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 	var attack: CombatAttackInstance = _attacks[attack_instance_id]
 	if attack.status != CombatAttackInstance.STATUS_EXECUTING:
 		return
+	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
+	var final_legality := _evaluate_final_attack_legality(attack, definition)
+	if not final_legality["success"]:
+		attack.status = CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED
+		attack.resolved_at_us = clock.get_elapsed_us()
+		attack.final_legality_reason = String(final_legality["reason"])
+		attack.revision += 1
+		_state_revision += 1
+		var failed := _record_resolved_event(
+			clock.get_elapsed_us(),
+			&"physical_attack_final_legality_failed",
+			action.initiative,
+			attack.attacker_id,
+			attack.target_id,
+			{
+				"attack_instance_id": attack.attack_instance_id,
+				"action_instance_id": action.action_instance_id,
+				"reason": attack.final_legality_reason,
+				"final_distance_squared_microfeet": attack.final_distance_squared_microfeet,
+				"final_range_legal": attack.final_range_legal,
+				"final_line_of_sight_legal": attack.final_line_of_sight_legal,
+				"natural_d20": null,
+				"accuracy_rolled": false,
+				"elapsed_action_time_refunded": false,
+				"damage_applied": false,
+			},
+			parent_event_id
+		)
+		attack.result_event_id = failed.event_id
+		return
 	attack.natural_roll = roll_int(1, 20)
 	attack.rng_draw_index = random.get_draw_count()
 	attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
-	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
 	var critical_result := definition.critical_trigger_policy.classify(int(attack.natural_roll))
 	attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
 	attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
@@ -1401,6 +1445,44 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 		_apply_critical_consequence(critical_record, attack)
 	if attack.status == CombatAttackInstance.STATUS_MISSED:
 		_finalize_deferred_critical_consequences(attack)
+
+
+func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: CombatAttackDefinition) -> Dictionary:
+	var attacker_state: CombatActorState = _actor_states.get(String(attack.attacker_id))
+	var target_state: CombatActorState = _actor_states.get(String(attack.target_id))
+	if attacker_state == null or target_state == null:
+		attack.final_range_legal = false
+		attack.final_line_of_sight_legal = null
+		return _failure("final_attack_actor_unavailable")
+	attack.final_attacker_position_microfeet = attacker_state.position_microfeet
+	attack.final_target_position_microfeet = target_state.position_microfeet
+	var offset := target_state.position_microfeet - attacker_state.position_microfeet
+	var distance_squared := offset.x * offset.x + offset.y * offset.y
+	attack.final_distance_squared_microfeet = distance_squared
+	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
+	var maximum_range := int(definition.maximum_range_microfeet)
+	attack.final_range_legal = distance_squared >= minimum_range * minimum_range \
+		and distance_squared <= maximum_range * maximum_range
+	if not attack.final_range_legal:
+		attack.final_line_of_sight_legal = null
+		return _failure("target_out_of_range_at_resolution")
+	if not definition.requires_line_of_sight:
+		attack.final_line_of_sight_legal = true
+		return _success()
+	var line_of_sight: Variant = null
+	if _attack_final_line_of_sight_resolver.is_valid():
+		line_of_sight = _attack_final_line_of_sight_resolver.call(attack.attacker_id, attack.target_id)
+	elif attacker_state.position_microfeet == attack.declared_attacker_position_microfeet \
+		and target_state.position_microfeet == attack.declared_target_position_microfeet:
+		# A static fixture can reuse its declaration fact only when neither
+		# endpoint moved. Moved endpoints fail closed without geometry.
+		line_of_sight = attack.declaration_line_of_sight_verified
+	attack.final_line_of_sight_legal = line_of_sight
+	if line_of_sight == null:
+		return _failure("final_line_of_sight_unresolved")
+	if line_of_sight != true:
+		return _failure("line_of_sight_blocked_at_resolution")
+	return _success()
 
 
 func _interrupt_linked_attack(action: CombatActionInstance, parent_event_id: String) -> void:
@@ -1595,7 +1677,12 @@ func _validate_resolved_dodge_context(
 	var mr_value: Variant = defender_definition.get_combat_stat("mr")
 	if mr_value == null:
 		return {"valid": false, "reason": "actor_mr_unresolved"}
-	var maximum_dodge_microfeet := floori(float(int(mr_value)) / 2.0) * 1_000_000
+	var movement_allowance_microfeet := int(mr_value) * 1_000_000
+	if defender_state.conditions.has("prone"):
+		@warning_ignore("integer_division")
+		movement_allowance_microfeet /= 4
+	@warning_ignore("integer_division")
+	var maximum_dodge_microfeet := movement_allowance_microfeet / (2 * 1_000_000) * 1_000_000
 	if movement_cost > maximum_dodge_microfeet:
 		return {"valid": false, "reason": "dodge_exceeds_half_mr"}
 	if movement_cost > int(defender_state.remaining_mr_microfeet):
@@ -1789,6 +1876,15 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 		core_multipliers.append({
 			"kind": String(consequence_multiplier.get("kind", "critical_consequence")),
 			"multiplier": consequence_multiplier,
+		})
+	if target_state.conditions.has("prone"):
+		core_multipliers.append({
+			"kind": "arena_prone_target",
+			"multiplier": {
+				"numerator": 3,
+				"denominator": 2,
+				"source_ref": "ARENA-TASK-17 experimental prone physical-damage playtest rule",
+			},
 		})
 
 	var type_response_value: Variant = protection_profile.get_exact_type_response(attack.damage_types)
@@ -2144,6 +2240,7 @@ func _record_critical_effect(
 	reason: String = ""
 ) -> CombatEvent:
 	var effect_id := String(effect["effect_id"])
+	var affected_actor_id := _critical_effect_actor_id(record, String(effect.get("target", "source")))
 	if applied:
 		if not record.applied_effect_ids.has(effect_id):
 			record.applied_effect_ids.append(effect_id)
@@ -2159,6 +2256,7 @@ func _record_critical_effect(
 			"critical_record_id": record.critical_record_id,
 			"outcome_id": String(record.outcome_id),
 			"effect_id": effect_id,
+			"affected_actor_id": String(affected_actor_id),
 			"applied": applied,
 			"reason": reason,
 		}, record.event_id

@@ -2,6 +2,28 @@ class_name ArenaCombatEventPresenter
 extends RefCounted
 
 
+static func is_player_facing_event(event: CombatEvent) -> bool:
+	if event == null:
+		return false
+	return String(event.event_type) in [
+		"physical_attack_declared",
+		"physical_attack_accuracy_resolved",
+		"physical_attack_final_legality_failed",
+		"physical_defense_attempted",
+		"physical_defense_resolved",
+		"physical_damage_resolved",
+		"critical_trigger_recorded",
+		"critical_stagger_applied",
+		"critical_prone_applied",
+		"critical_reaction_started",
+		"actor_stood_from_prone",
+		"critical_effect_unavailable",
+		"critical_effect_blocked",
+		"physical_attack_interrupted",
+		"action_interrupted",
+	]
+
+
 static func format_event(event: CombatEvent) -> String:
 	if event == null:
 		return ""
@@ -32,6 +54,11 @@ static func format_event(event: CombatEvent) -> String:
 			return prefix + "%s ACC d20 %s vs %s: %s%s" % [
 				_display_actor(event.source_actor_id), payload.get("natural_d20", "?"), payload.get("acc_target", "?"), outcome,
 				_critical_suffix(payload),
+			]
+		"physical_attack_final_legality_failed":
+			return prefix + "%s attack cannot connect at resolution: %s (ACC not rolled)." % [
+				_display_actor(event.source_actor_id),
+				_pretty_name(String(payload.get("reason", "final legality failed"))),
 			]
 		"physical_defense_attempted":
 			var attempt: Dictionary = payload.get("attempt", {})

@@ -23,6 +23,7 @@ var physical_soak_eligible: Variant
 var ducking_policy: StringName
 var physical_damage: CombatPhysicalDamageDefinition
 var critical_trigger_policy: CombatCriticalTriggerPolicy
+var allows_approach_during_execution: bool
 
 
 func _init(
@@ -43,7 +44,8 @@ func _init(
 	p_physical_soak_eligible: Variant = null,
 	p_ducking_policy: StringName = DUCKING_UNRESOLVED,
 	p_physical_damage: CombatPhysicalDamageDefinition = null,
-	p_critical_trigger_policy: CombatCriticalTriggerPolicy = null
+	p_critical_trigger_policy: CombatCriticalTriggerPolicy = null,
+	p_allows_approach_during_execution: bool = false
 ) -> void:
 	assert(not String(p_attack_definition_id).is_empty(), "Physical attack definitions require a stable identifier.")
 	assert(not String(p_weapon_ref).is_empty(), "Physical attack definitions require an equipment reference.")
@@ -87,6 +89,7 @@ func _init(
 	ducking_policy = p_ducking_policy
 	physical_damage = p_physical_damage
 	critical_trigger_policy = p_critical_trigger_policy
+	allows_approach_during_execution = p_allows_approach_during_execution
 	if critical_trigger_policy == null:
 		critical_trigger_policy = CombatCriticalTriggerPolicy.new()
 
@@ -138,4 +141,5 @@ func to_dictionary() -> Dictionary:
 		"ducking_policy": String(ducking_policy),
 		"physical_damage": null if physical_damage == null else physical_damage.to_dictionary(),
 		"critical_trigger_policy": critical_trigger_policy.to_dictionary(),
+		"allows_approach_during_execution": allows_approach_during_execution,
 	}

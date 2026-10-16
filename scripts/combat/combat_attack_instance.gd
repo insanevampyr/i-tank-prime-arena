@@ -4,6 +4,7 @@ extends RefCounted
 const STATUS_EXECUTING := "executing"
 const STATUS_PENDING_DEFENSE := "pending_defense"
 const STATUS_MISSED := "missed"
+const STATUS_FINAL_LEGALITY_FAILED := "final_legality_failed"
 const STATUS_INTERRUPTED := "interrupted"
 const STATUS_PENDING_DODGE_DISPLACEMENT := "pending_dodge_displacement"
 const STATUS_DEFENDED := "defended"
@@ -23,7 +24,16 @@ var physical_soak_eligible: Variant
 var ducking_policy: StringName
 var is_back_attack: bool
 var declared_at_us: int
+var declared_attacker_position_microfeet := Vector2i.ZERO
+var declared_target_position_microfeet := Vector2i.ZERO
+var declaration_line_of_sight_verified: Variant = null
 var resolved_at_us: Variant = null
+var final_attacker_position_microfeet: Variant = null
+var final_target_position_microfeet: Variant = null
+var final_distance_squared_microfeet: Variant = null
+var final_range_legal: Variant = null
+var final_line_of_sight_legal: Variant = null
+var final_legality_reason: String = ""
 var base_acc: int
 var base_acc_modifier: int
 var location_acc_modifier: int
@@ -94,7 +104,16 @@ func to_dictionary() -> Dictionary:
 		"ducking_policy": String(ducking_policy),
 		"is_back_attack": is_back_attack,
 		"declared_at_us": declared_at_us,
+		"declared_attacker_position_microfeet": [declared_attacker_position_microfeet.x, declared_attacker_position_microfeet.y],
+		"declared_target_position_microfeet": [declared_target_position_microfeet.x, declared_target_position_microfeet.y],
+		"declaration_line_of_sight_verified": declaration_line_of_sight_verified,
 		"resolved_at_us": resolved_at_us,
+		"final_attacker_position_microfeet": null if final_attacker_position_microfeet == null else [final_attacker_position_microfeet.x, final_attacker_position_microfeet.y],
+		"final_target_position_microfeet": null if final_target_position_microfeet == null else [final_target_position_microfeet.x, final_target_position_microfeet.y],
+		"final_distance_squared_microfeet": final_distance_squared_microfeet,
+		"final_range_legal": final_range_legal,
+		"final_line_of_sight_legal": final_line_of_sight_legal,
+		"final_legality_reason": final_legality_reason,
 		"base_acc": base_acc,
 		"base_acc_modifier": base_acc_modifier,
 		"location_acc_modifier": location_acc_modifier,

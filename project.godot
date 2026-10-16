@@ -11,14 +11,13 @@ config_version=5
 [application]
 
 config/name="ITank Prime Arena"
+config/version="0.1.0-phase1-task20"
 run/main_scene="res://scenes/test_arena.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [display]
 
-window/size/viewport_width=1152
-window/size/viewport_height=648
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 

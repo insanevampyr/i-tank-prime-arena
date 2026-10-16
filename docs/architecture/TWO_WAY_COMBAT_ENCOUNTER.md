@@ -24,8 +24,8 @@ At every authoritative decision boundary, the scripted opponent applies this sta
 1. Stop if the encounter is inactive, either combatant is defeated, or actor data is unavailable.
 2. Wait while unaware, critically staggered, or already executing/finalizing an attack.
 3. If prone, request the existing one-Act standing action.
-4. If alive, aware, equipped and in the verified three-foot range, request the same ordinary Battle Axe attack used by the player.
-5. If out of range in the Task 16 authored battlefield, request a deterministic legal path, spend actual MR while approaching, then re-evaluate range and line of sight before attacking.
+4. If alive, aware, equipped and otherwise action-eligible, request the same ordinary Battle Axe attack used by the player; current reach or obstruction does not prohibit this ordinary approach-attack declaration.
+5. During AT execution, if current geometry is not legal, request a deterministic path and spend actual MR while approaching. At final resolution, require legal three-foot reach and line of sight before ACC.
 
 The original Task 15 boundary remains for sessions that do not supply authoritative navigation facts: they expose `approach_blocked_unverified_path`. Task 16 supplies those facts only for its documented test arena; the opponent never treats visual pixels as authority. See `BATTLEFIELD_MOVEMENT_FOUNDATION.md`.
 

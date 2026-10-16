@@ -35,6 +35,8 @@ A natural or source-expanded ACC critical remains a recorded trigger, but physic
 
 Head and neck use Prime's `3/2` (`x1.5`) location factor. The prior `x2 head` example was illustrative and is not production data.
 
+Task 17 adds an explicitly experimental Arena `3/2` (`x1.5`) multiplier for qualifying incoming physical damage when the target is prone. It is a damage factor, not an automatic hit or ACC modifier. It joins every other legitimate exact rational factor before the engine's single floor, then TAL and NAL are subtracted before HPC changes. It is recorded as `arena_prone_target`, applied at most once per damage transaction, and is not extended to Specials, magical, or environmental damage.
+
 These boundaries deliberately permit the verified ordinary subset while preventing an implementation convenience from becoming a rule.
 
 ## Duck eligibility

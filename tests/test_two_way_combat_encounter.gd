@@ -70,8 +70,11 @@ func _test_out_of_range_and_restrictions() -> void:
 	var out_of_range := ArenaCombatSession.new(1)
 	_expect_true(out_of_range.initialize(PLAYER_POSITION, Vector2i(4_000_000, 0)).get("success", false), "Out-of-range fixture setup must initialize.")
 	out_of_range.set_opponent_behavior_enabled(true)
+	_expect_true(out_of_range.request_player_attack("unlock_simultaneous_opening").get("success", false), "The opening-eligible player must declare before the opponent's simultaneous rank is unlocked.")
 	_expect_equal(out_of_range.get_opponent_behavior_status(), "approach_blocked_unverified_path", "The opponent must block an unauthored approach path rather than teleport or ignore terrain.")
-	_expect_true(not out_of_range.is_opponent_attack_in_flight(), "An out-of-range opponent must not declare an attack.")
+	_expect_true(out_of_range.is_opponent_attack_in_flight(), "The opponent may declare outside reach even when movement remains blocked by unauthored navigation.")
+	out_of_range.advance_by(2_500_000)
+	_expect_true(not _has_event_from(out_of_range, "physical_attack_accuracy_resolved", Fixture.OPPONENT_ID), "A blocked opponent still outside reach at resolution must not roll ACC.")
 
 	var unaware := ArenaCombatSession.new(1)
 	unaware.initialize(PLAYER_POSITION, OPPONENT_POSITION)

@@ -34,7 +34,9 @@ func _test_target_selection_and_range() -> void:
 	session.select_target(Fixture.OPPONENT_ID)
 	_expect_true(session.get_attack_legality()["success"], "The initial three-foot fixture placement must be inside Battle Axe range.")
 	session.update_player_position(Vector2i(-1_000_000, 0))
-	_expect_equal(session.get_attack_legality().get("reason"), "target_out_of_range", "A target beyond the verified three-foot Battle Axe range must be rejected.")
+	var approach_legality := session.get_attack_legality()
+	_expect_true(approach_legality.get("success", false), "A target beyond three-foot Battle Axe reach must remain a legal approach-attack declaration.")
+	_expect_true(approach_legality.get("approach_required", false), "Current geometry must report that final reach still requires approach without rejecting declaration.")
 
 
 func _test_equipment_legality_and_single_flight() -> void:

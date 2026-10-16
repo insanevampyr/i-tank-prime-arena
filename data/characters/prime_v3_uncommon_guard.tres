@@ -1,0 +1,57 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_uncommon_guard"
+display_name = "Prime V3 Uncommon Guard"
+actor_kind = &"prime_v3_verified_vertical_slice_fixture"
+race_name = "Varies"
+class_names = PackedStringArray("Fighter")
+level = -1
+attributes = {
+"app": 8,
+"dex": 14,
+"end": 10,
+"int": 5,
+"luk": 1,
+"man": 12,
+"spd": 12,
+"str": 16,
+"wis": 8,
+"wit": 8
+}
+combat_stats = {
+"acc": 12,
+"at": 2,
+"dp": 6,
+"dt": 8,
+"hpm": 100,
+"init": 4,
+"mr": 12,
+"nal": 1,
+"physical_soak": 4,
+"rb": 0,
+"sb": 4
+}
+resource_maxima = {}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": true,
+"weapon_block": true
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": 3,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("PRIME-V3 p. 336, Uncommon Guard")
+field_sources = {
+"attributes": "PRIME-V3 p. 336, Uncommon Guard",
+"combat_stats": "PRIME-V3 p. 336, Uncommon Guard",
+"equipment": "Phase 1 Task 14 assembled Arena fixture; item fields are separately sourced",
+"running_profile": "Task 3 explicit movement-test profile; not printed in the Guard row"
+}
+unresolved_fields = PackedStringArray()

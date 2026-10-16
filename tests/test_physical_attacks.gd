@@ -83,16 +83,17 @@ func _test_attack_declaration_validation_and_torso_default() -> void:
 	_expect_equal(simulation.start_physical_attack(&"attacker", &"missing", definition, "missing_target", &"torso", true)["reason"], "unknown_target", "Unknown targets must be rejected.")
 	_expect_equal(simulation.start_physical_attack(&"attacker", &"attacker", definition, "self_target", &"torso", true)["reason"], "self_target_not_allowed", "Self-targeted physical attacks must be rejected by this pipeline.")
 	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", definition, "bad_location", &"head", true)["reason"], "illegal_target_location", "Unsourced aimed locations must fail closed.")
-	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", definition, "no_los", &"torso", null)["reason"], "line_of_sight_unverified", "Required line of sight must come from an authoritative validation result.")
 	var unresolved_range := _make_attack(&"unresolved_range", 1, 0, null)
 	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", unresolved_range, "unresolved_range", &"torso", true)["reason"], "unresolved_attack_range", "Attacks without sourced range data must fail closed.")
 	simulation.apply_authoritative_position(&"target", Vector2i(6_000_000, 0), 0)
-	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", definition, "out_of_range", &"torso", true)["reason"], "target_out_of_range", "Authoritative positions must enforce a resolved range boundary.")
-	simulation.apply_authoritative_position(&"target", Vector2i(4_000_000, 0), 0)
-	var valid := simulation.start_physical_attack(&"attacker", &"target", definition, "valid_attack", &"", true)
-	_expect_true(valid["success"], "A fully resolved legal physical attack declaration must be accepted.")
-	_expect_equal(String(simulation.get_attack(valid["attack_instance_id"]).target_location), "torso", "An omitted ordinary attack location must default to torso.")
-	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", definition, "valid_attack", &"torso", true)["reason"], "duplicate_request", "Duplicate attack requests must be rejected idempotently.")
+	var approach_attack := simulation.start_physical_attack(&"attacker", &"target", definition, "approach_attack", &"", false)
+	_expect_true(approach_attack["success"], "An ordinary melee attack may be declared outside reach or while its initial line of sight is obstructed.")
+	_expect_equal(String(simulation.get_attack(approach_attack["attack_instance_id"]).target_location), "torso", "An omitted ordinary attack location must default to torso.")
+	_expect_equal(simulation.start_physical_attack(&"attacker", &"target", definition, "approach_attack", &"torso", true)["reason"], "duplicate_request", "Duplicate attack requests must be rejected idempotently.")
+	simulation.advance_to(2_500_000)
+	var failed_approach := simulation.get_attack(approach_attack["attack_instance_id"])
+	_expect_equal(failed_approach.status, CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED, "An attacker still outside reach at final resolution must fail before ACC.")
+	_expect_equal(failed_approach.natural_roll, null, "Final geometry failure must consume no ACC roll.")
 
 
 func _test_accuracy_success_failure_and_natural_criticals() -> void:
@@ -280,7 +281,14 @@ func _make_attack(
 		0,
 		maximum_range_microfeet,
 		true,
-		PackedStringArray(["TEST-FIXTURE: explicit engine inputs; not production weapon data"])
+		PackedStringArray(["TEST-FIXTURE: explicit engine inputs; not production weapon data"]),
+		&"",
+		PackedStringArray(),
+		null,
+		CombatAttackDefinition.DUCKING_UNRESOLVED,
+		null,
+		null,
+		true
 	)
 
 

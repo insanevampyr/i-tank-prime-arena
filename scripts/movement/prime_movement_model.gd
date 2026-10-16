@@ -17,6 +17,7 @@ enum RunningRequestResult {
 	ALREADY_RUNNING,
 	COOLDOWN,
 	RECOVERY_REQUIRED,
+	PRONE,
 }
 
 enum RunningEndReason {
@@ -25,6 +26,7 @@ enum RunningEndReason {
 	INTENTIONAL_STOP,
 	MAINTENANCE_FAILURE,
 	DURATION_CAP,
+	PRONE,
 }
 
 const ROUND_DURATION_US: int = 5_000_000
@@ -55,6 +57,7 @@ var _last_end_reason: RunningEndReason = RunningEndReason.NONE
 var _last_run_duration_us: int = 0
 var _running_check_sequence: int = 0
 var _last_movement_direction: Vector2 = Vector2.ZERO
+var _is_prone: bool = false
 
 
 func _init(
@@ -107,7 +110,27 @@ func get_effective_mr() -> int:
 
 
 func get_speed_feet_per_second() -> float:
-	return float(get_effective_mr()) / 5.0
+	return float(get_effective_movement_allowance_microfeet()) / float(POSITION_UNITS_PER_FOOT) / 5.0
+
+
+func get_effective_movement_allowance_microfeet() -> int:
+	var allowance := get_effective_mr() * POSITION_UNITS_PER_FOOT
+	if _is_prone:
+		@warning_ignore("integer_division")
+		return allowance / 4
+	return allowance
+
+
+func set_prone(value: bool) -> void:
+	if _is_prone == value:
+		return
+	_is_prone = value
+	if _is_prone and _is_running:
+		_end_running(RunningEndReason.PRONE)
+
+
+func is_prone() -> bool:
+	return _is_prone
 
 
 func get_running_check_target() -> int:
@@ -169,6 +192,8 @@ func get_last_run_duration_us() -> int:
 
 
 func request_running() -> RunningRequestResult:
+	if _is_prone:
+		return RunningRequestResult.PRONE
 	if _is_running:
 		return RunningRequestResult.ALREADY_RUNNING
 	if _running_retry_cooldown_us > 0:
@@ -250,7 +275,13 @@ func to_dictionary() -> Dictionary:
 		"effective_spd": effective_spd,
 		"effective_end": effective_end,
 		"movement_modifier_mr": _movement_modifier_mr,
+		"walking_mr": get_walking_mr(),
+		"running_bonus_mr": get_running_bonus_mr(),
+		"effective_mr": get_effective_mr(),
+		"is_prone": _is_prone,
+		"effective_movement_allowance_microfeet": get_effective_movement_allowance_microfeet(),
 		"running_skill_investment": running_skill_investment,
+		"running_automatic": is_running_automatic(),
 		"skill_check_modifier": skill_check_modifier,
 		"roll_bonus": roll_bonus,
 		"running_check_target": get_running_check_target(),
@@ -263,6 +294,7 @@ func to_dictionary() -> Dictionary:
 		"maximum_running_duration_us": get_max_running_duration_us(),
 		"next_maintenance_at_us": _next_maintenance_at_us,
 		"recovery_remaining_units": _recovery_remaining_units,
+		"recovery_remaining_us": get_recovery_remaining_us(),
 		"running_retry_cooldown_us": _running_retry_cooldown_us,
 		"last_check_result": get_last_check_result_name(),
 		"last_check_evidence": _last_check_evidence.duplicate(true),
