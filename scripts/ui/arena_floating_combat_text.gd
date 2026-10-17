@@ -26,10 +26,13 @@ var _next_local_message_sequence: int = 0
 
 
 func present_authoritative_event(event: CombatEvent) -> void:
-	if event == null or _presented_event_ids.has(event.event_id):
+	if event == null or not Mapper.supports_event_type(event.event_type) or _presented_event_ids.has(event.event_id):
+		return
+	var intents: Array = Mapper.messages_for_event(event)
+	if intents.is_empty():
 		return
 	_presented_event_ids[event.event_id] = true
-	for intent: Dictionary in Mapper.messages_for_event(event):
+	for intent: Dictionary in intents:
 		_add_message(intent, event.event_id)
 
 
@@ -61,6 +64,10 @@ func get_active_messages_for_testing() -> Array[Dictionary]:
 			"lane": int(message.get("lane", 0)),
 		})
 	return snapshot
+
+
+func get_presented_event_id_count_for_testing() -> int:
+	return _presented_event_ids.size()
 
 
 func _process(delta: float) -> void:

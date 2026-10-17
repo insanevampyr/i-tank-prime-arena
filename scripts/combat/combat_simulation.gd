@@ -1118,6 +1118,26 @@ func get_resolved_events() -> Array:
 	return _resolved_events.duplicate()
 
 
+func get_resolved_event_count() -> int:
+	return _resolved_events.size()
+
+
+func get_resolved_events_from(cursor: int) -> Dictionary:
+	if cursor < 0 or cursor > _resolved_events.size():
+		return {
+			"success": false,
+			"reason": "resolved_event_cursor_invalid",
+			"next_cursor": _resolved_events.size(),
+			"events": [],
+		}
+	return {
+		"success": true,
+		"reason": "",
+		"next_cursor": _resolved_events.size(),
+		"events": _resolved_events.slice(cursor),
+	}
+
+
 func take_resolved_events() -> Array:
 	var events := _resolved_events.duplicate()
 	_resolved_events.clear()

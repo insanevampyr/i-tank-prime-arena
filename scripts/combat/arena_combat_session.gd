@@ -49,6 +49,7 @@ var _opponent_movement_round_index: int = -1
 var _opponent_movement_spent_microfeet: int = 0
 var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
+var _resolved_event_history_generation: int = 0
 
 
 func _init(
@@ -100,6 +101,7 @@ func initialize(
 		_opponent_movement_spent_microfeet = 0
 		_player_movement_round_index = simulation.clock.get_round_index()
 		_player_movement_spent_microfeet = 0
+		_resolved_event_history_generation += 1
 		_last_error = ""
 	else:
 		_initialized = false
@@ -540,6 +542,25 @@ func get_actor_state(actor_id: StringName) -> CombatActorState:
 
 func get_resolved_events() -> Array:
 	return simulation.get_resolved_events()
+
+
+func get_resolved_event_count() -> int:
+	return simulation.get_resolved_event_count()
+
+
+func get_resolved_event_history_generation() -> int:
+	return _resolved_event_history_generation
+
+
+func get_resolved_events_since(cursor: int, history_generation: int) -> Dictionary:
+	var generation_changed := history_generation != _resolved_event_history_generation
+	var effective_cursor := 0 if generation_changed else cursor
+	var result := simulation.get_resolved_events_from(effective_cursor)
+	result["history_generation"] = _resolved_event_history_generation
+	result["generation_changed"] = generation_changed
+	if not result.get("success", false):
+		result["next_cursor"] = 0
+	return result
 
 
 func get_state_snapshot() -> Dictionary:

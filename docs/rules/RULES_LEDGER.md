@@ -224,6 +224,7 @@ Phase 1 Task 19 adds presentation-only ATTACK and RUN readiness snapshots and tw
 | PRESENTATION | Defense success text appears only from `physical_defense_resolved` with a selected successful defense. Failed attempts are explicitly labeled failed and cannot claim a Block, Dodge, or Soak succeeded. | Existing defense event contract; Phase 1 Task 21 approved scope | Implemented |
 | PRESENTATION | Critical text uses the committed `critical_record.outcome_id`; Stagger and prone use the effect event's explicit `affected_actor_id`. No visual consequence is inferred from an attempted roll or formatted log string. | Existing critical event contract; Phase 1 Task 21 approved scope | Implemented |
 | PRESENTATION | Floating labels retain local visual lanes and priority caps only. Suppressed/expired labels never remove or alter authoritative records, FULL LOG, RNG, simulation order, or synchronization digest. | Phase 1 Task 21 approved scope | Implemented |
+| PRESENTATION | Task 30B consumes resolved events through a read-only append cursor with reset generation detection. The complete authoritative history remains retained; the cursor, floating-text filtering and transcript cache cannot alter event order, simulation state, RNG, replay, snapshots or synchronization digests. FULL LOG/COPY LOG/SAVE LOG rebuild from complete history only when its generation or event count changes. | Task 30A audit; Task 30B approved scope | Implemented |
 
 ## Phase 1 Task 22 implementation boundary
 

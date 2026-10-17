@@ -1,6 +1,12 @@
 class_name CombatFloatingTextMapper
 extends RefCounted
 
+## Declares whether an authoritative event can produce local floating feedback.
+static func supports_event_type(event_type: StringName) -> bool:
+	match String(event_type):
+		"physical_attack_accuracy_resolved", "physical_defense_attempted", "physical_defense_resolved", "physical_damage_resolved", "critical_trigger_recorded", "critical_perfect_evasion_applied", "critical_stagger_applied", "critical_prone_applied", "critical_reaction_started", "physical_attack_interrupted", "action_interrupted", "actor_stood_from_prone":
+			return true
+	return false
 ## Translates already-resolved authoritative events into brief presentation intents.
 ## This class neither schedules events nor reads or mutates simulation state.
 

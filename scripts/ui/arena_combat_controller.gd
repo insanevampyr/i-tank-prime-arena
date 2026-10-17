@@ -41,9 +41,19 @@ const TARGET_PICK_RADIUS_PIXELS := 40.0
 var _session: ArenaCombatSession
 var _delta_us_remainder: float = 0.0
 var _event_cursor: int = 0
+var _event_history_generation: int = -1
 var _log_lines: Array[String] = []
 var _debug_log_lines: Array[String] = []
 var _applied_displacement_event_ids: Dictionary = {}
+var _pending_player_displacement_event_ids: Array[String] = []
+var _cached_transcript_text := ""
+var _cached_transcript_event_count: int = -1
+var _cached_transcript_history_generation: int = -1
+var _transcript_view_event_count: int = -1
+var _transcript_view_history_generation: int = -1
+var _event_batch_read_count: int = 0
+var _last_event_batch_size: int = 0
+var _transcript_build_count: int = 0
 var _last_ui_message := "Press START to begin the deterministic test encounter."
 var _initial_player_position_pixels := Vector2.ZERO
 var _initial_opponent_position_pixels := Vector2.ZERO
@@ -221,7 +231,19 @@ func select_location_for_testing(number: int) -> Dictionary:
 
 
 func get_transcript_text_for_testing() -> String:
-	return _build_transcript_text()
+	_ensure_transcript_cache()
+	return _cached_transcript_text
+
+
+func get_event_consumption_metrics_for_testing() -> Dictionary:
+	return {
+		"event_cursor": _event_cursor,
+		"event_history_generation": _event_history_generation,
+		"event_batch_read_count": _event_batch_read_count,
+		"last_event_batch_size": _last_event_batch_size,
+		"transcript_build_count": _transcript_build_count,
+		"cached_transcript_event_count": _cached_transcript_event_count,
+	}
 
 
 func get_actor_label_rects_for_testing() -> Array[Rect2]:
@@ -259,7 +281,7 @@ func _on_copy_log_button_pressed() -> void:
 
 
 func _on_save_log_button_pressed() -> void:
-	var result := LogExporter.save_text(_build_transcript_text(), combat_seed, _session.get_resolved_events().size())
+	var result := LogExporter.save_text(_build_transcript_text(), combat_seed, _session.get_resolved_event_count())
 	if not result.get("success", false):
 		_set_transcript_feedback("Save failed: %s" % _friendly_reason(String(result.get("reason", "unknown"))))
 	elif OS.has_feature("web"):
@@ -324,9 +346,12 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	_player.reset_for_encounter(_initial_player_position_pixels / _player.pixels_per_foot)
 	_opponent.position = _initial_opponent_position_pixels
 	_event_cursor = 0
+	_event_history_generation = -1
 	_log_lines.clear()
 	_debug_log_lines.clear()
 	_applied_displacement_event_ids.clear()
+	_pending_player_displacement_event_ids.clear()
+	_invalidate_transcript_cache()
 	if _floating_combat_text != null:
 		_floating_combat_text.clear()
 	var result := _prepare_encounter_fixture()
@@ -365,10 +390,13 @@ func _reset_encounter() -> void:
 		_touch_controls.reset_input()
 	var result := _session.reset_encounter(false)
 	_event_cursor = 0
+	_event_history_generation = -1
 	_log_lines.clear()
 	_debug_log_lines.clear()
-	_web_copy_pending = false
 	_applied_displacement_event_ids.clear()
+	_pending_player_displacement_event_ids.clear()
+	_invalidate_transcript_cache()
+	_web_copy_pending = false
 	if _floating_combat_text != null:
 		_floating_combat_text.clear()
 	_delta_us_remainder = 0.0
@@ -460,12 +488,24 @@ static func location_number_for_key_event(event: InputEventKey) -> int:
 
 
 func _process_new_events() -> void:
-	var events := _session.get_resolved_events()
-	while _event_cursor < events.size():
-		var event: CombatEvent = events[_event_cursor]
-		_event_cursor += 1
+	var batch := _session.get_resolved_events_since(_event_cursor, _event_history_generation)
+	if not batch.get("success", false):
+		_event_cursor = 0
+		_event_history_generation = -1
+		batch = _session.get_resolved_events_since(_event_cursor, _event_history_generation)
+	if not batch.get("success", false):
+		return
+	_event_history_generation = int(batch.get("history_generation", _event_history_generation))
+	_event_cursor = int(batch.get("next_cursor", _event_cursor))
+	var events: Array = batch.get("events", [])
+	_event_batch_read_count += 1
+	_last_event_batch_size = events.size()
+	if not events.is_empty():
+		_invalidate_transcript_cache()
+	for event: CombatEvent in events:
 		if _floating_combat_text != null:
 			_floating_combat_text.present_authoritative_event(event)
+		_queue_player_dodge_displacement(event)
 		_update_last_message_for_event(event)
 		var line := EventPresenter.format_event(event)
 		if not line.is_empty():
@@ -499,19 +539,23 @@ func _apply_authoritative_combat_displacements() -> void:
 	var opponent_state := _session.get_actor_state(Fixture.OPPONENT_ID)
 	if opponent_state != null:
 		_opponent.position = _microfeet_to_pixels(opponent_state.position_microfeet)
-	var events := _session.get_resolved_events()
-	for index in range(_event_cursor - 1, -1, -1):
-		var event: CombatEvent = events[index]
-		if _applied_displacement_event_ids.has(event.event_id):
-			continue
-		if String(event.event_type) != "physical_defense_attempted":
-			continue
-		var attempt: Dictionary = event.payload.get("attempt", {})
-		if attempt.get("defense_type", "") == "dodge" and attempt.get("success", false) and event.source_actor_id == Fixture.PLAYER_ID:
-			var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
-			_player.apply_authoritative_combat_position(_microfeet_to_feet(player_state.position_microfeet))
-			_applied_displacement_event_ids[event.event_id] = true
-		break
+	if _pending_player_displacement_event_ids.is_empty():
+		return
+	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		return
+	_player.apply_authoritative_combat_position(_microfeet_to_feet(player_state.position_microfeet))
+	for event_id: String in _pending_player_displacement_event_ids:
+		_applied_displacement_event_ids[event_id] = true
+	_pending_player_displacement_event_ids.clear()
+
+
+func _queue_player_dodge_displacement(event: CombatEvent) -> void:
+	if String(event.event_type) != "physical_defense_attempted" or _applied_displacement_event_ids.has(event.event_id):
+		return
+	var attempt: Dictionary = event.payload.get("attempt", {})
+	if attempt.get("defense_type", "") == "dodge" and attempt.get("success", false) and event.source_actor_id == Fixture.PLAYER_ID:
+		_pending_player_displacement_event_ids.append(event.event_id)
 
 
 func _update_combat_movement_lock() -> void:
@@ -600,7 +644,7 @@ func _update_presentation() -> void:
 			+ "Clock %.3f s | Round %d | Events %d\n" % [
 				float(_session.simulation.clock.get_elapsed_us()) / 1_000_000.0,
 				_session.simulation.clock.get_round_index() + 1,
-				_session.get_resolved_events().size(),
+				_session.get_resolved_event_count(),
 			]
 			+ "Opponent driver: %s | Path rebuilds: %d\n" % [opponent_behavior, _session.get_opponent_path_rebuild_count_for_testing()]
 			+ "Opponent movement: %s\n" % JSON.stringify(_session.get_state_snapshot().get("opponent_movement", {}))
@@ -654,14 +698,40 @@ func _append_debug_log(line: String) -> void:
 
 
 func _build_transcript_text() -> String:
-	var build_version := String(ProjectSettings.get_setting("application/config/version", "development"))
-	return EncounterTranscript.build_text(_session, combat_seed, build_version)
+	_ensure_transcript_cache()
+	return _cached_transcript_text
 
 
 func _refresh_transcript_view() -> void:
 	if _transcript_body == null:
 		return
-	_transcript_body.text = _build_transcript_text()
+	_ensure_transcript_cache()
+	if _transcript_view_history_generation != _cached_transcript_history_generation or _transcript_view_event_count != _cached_transcript_event_count:
+		_transcript_body.text = _cached_transcript_text
+		_transcript_view_history_generation = _cached_transcript_history_generation
+		_transcript_view_event_count = _cached_transcript_event_count
+
+
+func _ensure_transcript_cache() -> void:
+	if _session == null:
+		return
+	var event_count := _session.get_resolved_event_count()
+	var history_generation := _session.get_resolved_event_history_generation()
+	if _cached_transcript_history_generation == history_generation and _cached_transcript_event_count == event_count:
+		return
+	var build_version := String(ProjectSettings.get_setting("application/config/version", "development"))
+	_cached_transcript_text = EncounterTranscript.build_text(_session, combat_seed, build_version)
+	_cached_transcript_history_generation = history_generation
+	_cached_transcript_event_count = event_count
+	_transcript_build_count += 1
+
+
+func _invalidate_transcript_cache() -> void:
+	_cached_transcript_text = ""
+	_cached_transcript_event_count = -1
+	_cached_transcript_history_generation = -1
+	_transcript_view_event_count = -1
+	_transcript_view_history_generation = -1
 
 
 func _set_transcript_feedback(message: String) -> void:

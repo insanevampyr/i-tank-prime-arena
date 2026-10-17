@@ -25,7 +25,7 @@ Unavailable or blocked effects remain in the transcript rather than generating s
 
 Messages use a restrained semantic palette: green defenses, gold critical successes, red critical failures and harmful conditions, orange damage, and light neutral ordinary outcomes. Labels have a dark outline, rise slightly, fade after 0.9 seconds (1.15 seconds for important outcomes), ignore pointer input, and do not change gameplay timing.
 
-Each actor has three stable vertical lanes. The layer permits up to four active labels per actor and ten overall. A higher-priority outcome may replace a lower-priority local visual when necessary; this never deletes the authoritative event or transcript record. Event delivery is deduplicated by authoritative event ID, so duplicate network-style delivery cannot duplicate a label. Distinct out-of-order committed events remain distinct.
+Each actor has three stable vertical lanes. The layer permits up to four active labels per actor and ten overall. A higher-priority outcome may replace a lower-priority local visual when necessary; this never deletes the authoritative event or transcript record. Event delivery is deduplicated by authoritative event ID only after the event type can produce floating feedback and the mapped result is nonempty. Movement and other non-presentable records are therefore not retained in local duplicate bookkeeping. Distinct out-of-order committed combat events remain distinct.
 
 Labels follow their actor each rendered frame, including walking, Running, Dodge displacement, prone, and Stagger. Their position is clamped to the visible canvas with a top safe region so they do not cover the toolbar. Actor/HPC label separation from Task 20 is unchanged.
 

@@ -22,6 +22,8 @@ Path selection still uses current authoritative target position, obstacle/occupa
 
 Retention is explicit: the full current encounter remains available until RESET; RESET starts a new transcript. The compact `RECENT RESULTS` panel intentionally retains only eight player-facing summaries and labels itself accordingly.
 
+Task 30B keeps this complete-history contract while avoiding repeated presentation copies: the scene consumes only the newly appended event suffix through a read-only cursor. An encounter-history generation invalidates that cursor on RESET or fixture replacement. The FULL LOG cache is keyed by that generation and authoritative event count, so visible-frame refreshes, COPY LOG and SAVE LOG reuse a complete cached transcript until the history changes. No authoritative event is coalesced, removed or reordered.
+
 - Desktop `COPY LOG` writes the complete transcript to the system clipboard. `SAVE LOG` writes to Godot's safe per-user `user://encounter_logs` directory and reports the resolved local path only to the local player.
 - Web `COPY LOG` requests `navigator.clipboard.writeText` from the button's user gesture. Success or denial is reported. If denied or unavailable, use `SAVE LOG`.
 - Web `SAVE LOG` invokes Godot's browser download API and downloads a UTF-8 `.txt` file. The exported transcript contains no local filesystem paths.
