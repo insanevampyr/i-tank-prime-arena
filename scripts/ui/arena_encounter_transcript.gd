@@ -14,7 +14,7 @@ static func build_text(session: ArenaCombatSession, seed_value: int, build_versi
 		"Build: %s" % build_version,
 		"Godot: %s" % Engine.get_version_info().get("string", "unknown"),
 		"Seed: %d" % seed_value,
-		"Fixture: %s" % FIXTURE_ID,
+		"Fixture: %s (%s)" % [FIXTURE_ID, String(session.get_encounter_fixture_id())],
 		"Transcript schema: %d" % SCHEMA_VERSION,
 		"Simulation schema: %s" % session.simulation.get_state_snapshot().get("schema_version", "unknown"),
 		"Retention: complete current encounter; RESET starts a new transcript",

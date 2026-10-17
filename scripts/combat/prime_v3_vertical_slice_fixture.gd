@@ -11,6 +11,8 @@ const SHIELD_REF := &"prime_v3_metal_buckler"
 const ARMOR_REF := &"prime_v3_plate_torso"
 const CHARACTER_DEFINITION_ID := &"prime_v3_uncommon_guard"
 const LOADOUT_DEFINITION_ID := &"arena_guard_plate_buckler"
+const ENCOUNTER_MEDIUM_GUARDS := &"medium_guard_vs_medium_guard"
+const ENCOUNTER_SYNTHETIC_SMALL_GUARD := &"medium_guard_vs_synthetic_small_guard"
 
 const PRIME_GUARD_SOURCE := "PRIME-V3 p. 336, Uncommon Guard"
 const PRIME_BATTLE_AXE_SOURCE := "PRIME-V3 p. 127, Battle Axe"
@@ -32,7 +34,8 @@ const PLAYER_RUNNING_RNG_SEED := 1_337
 static func configure_simulation(
 	simulation: CombatSimulation,
 	player_position_microfeet: Vector2i,
-	opponent_position_microfeet: Vector2i
+	opponent_position_microfeet: Vector2i,
+	encounter_fixture_id: StringName = ENCOUNTER_MEDIUM_GUARDS
 ) -> Dictionary:
 	if simulation == null:
 		return {"success": false, "reason": "missing_simulation"}
@@ -41,9 +44,14 @@ static func configure_simulation(
 	if not catalog_validation.get("success", false):
 		return {"success": false, "reason": "fixture_catalog_invalid", "issues": catalog_validation.get("issues", [])}
 	var attack_definition := make_attack_definition()
+	if not [ENCOUNTER_MEDIUM_GUARDS, ENCOUNTER_SYNTHETIC_SMALL_GUARD].has(encounter_fixture_id):
+		return {"success": false, "reason": "unsupported_encounter_fixture"}
 	for actor_id: StringName in [PLAYER_ID, OPPONENT_ID]:
-		var display_name := "Player Guard Fixture" if actor_id == PLAYER_ID else "Opponent Guard Fixture"
-		var actor := make_guard_actor(actor_id, display_name)
+		var actor := (
+			make_synthetic_small_guard_actor(actor_id)
+			if actor_id == OPPONENT_ID and encounter_fixture_id == ENCOUNTER_SYNTHETIC_SMALL_GUARD
+			else make_guard_actor(actor_id, "Player Guard Fixture" if actor_id == PLAYER_ID else "Opponent Guard Fixture")
+		)
 		var defense_profile := make_defense_profile(actor_id)
 		var protection_profile := make_damage_protection_profile(actor_id)
 		var validation := validate_combatant_fixture(actor, defense_profile, protection_profile, attack_definition)
@@ -75,6 +83,7 @@ static func configure_simulation(
 		"success": true,
 		"attack_definition": attack_definition,
 		"opening_order": opening_result["opening_order"],
+		"encounter_fixture_id": String(encounter_fixture_id),
 	}
 
 
@@ -132,6 +141,17 @@ static func make_guard_actor(actor_id: StringName, display_name: String) -> Comb
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
 	var result := catalog.instantiate_actor(CHARACTER_DEFINITION_ID, LOADOUT_DEFINITION_ID, actor_id, display_name)
 	return result.get("actor") as CombatActorDefinition
+
+
+static func make_synthetic_small_guard_actor(actor_id: StringName = OPPONENT_ID) -> CombatActorDefinition:
+	var actor := make_guard_actor(actor_id, "Synthetic Small Guard Test Fixture")
+	if actor == null:
+		return null
+	actor.actor_kind = &"arena_synthetic_size_test_fixture"
+	actor.size_category = HitLocations.SIZE_SMALL
+	actor.field_sources["size_category"] = "TASK-29 approved synthetic Arena test assignment; not a printed Prime creature"
+	actor.field_sources["fixture_identity"] = "Reuses verified Prime V3 Uncommon Guard statistics and existing Arena loadout solely to test Medium/Small directional ACC"
+	return actor
 
 
 static func make_attack_definition() -> CombatAttackDefinition:

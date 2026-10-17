@@ -25,6 +25,7 @@ const TARGET_PICK_RADIUS_PIXELS := 40.0
 @export var developer_debug_path: NodePath
 @export var target_indicator_path: NodePath
 @export var encounter_button_path: NodePath
+@export var encounter_selector_path: NodePath
 @export var debug_button_path: NodePath
 @export var attack_readiness_path: NodePath
 @export var run_readiness_path: NodePath
@@ -51,6 +52,7 @@ var _application_has_focus := true
 var _last_attack_readiness: Dictionary = {}
 var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
+var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -62,6 +64,7 @@ var _web_copy_pending := false
 @onready var _developer_debug: RichTextLabel = get_node_or_null(developer_debug_path)
 @onready var _target_indicator: Line2D = get_node_or_null(target_indicator_path)
 @onready var _encounter_button: Button = get_node_or_null(encounter_button_path)
+@onready var _encounter_selector: Button = get_node_or_null(encounter_selector_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
 @onready var _attack_readiness = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness = get_node_or_null(run_readiness_path)
@@ -81,21 +84,12 @@ func _ready() -> void:
 	_place_initial_combatants()
 	_initial_player_position_pixels = _player.position
 	_initial_opponent_position_pixels = _opponent.position
-	_session = ArenaCombatSession.new(combat_seed)
-	_session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
-	_session.set_opponent_behavior_enabled(true)
-	var setup := _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
-	if not setup.get("success", false):
-		_last_ui_message = "Combat fixture blocked: %s" % String(setup.get("reason", "unknown setup failure"))
-	else:
-		_session.select_target(Fixture.OPPONENT_ID)
-		_append_log("Verified Prime V3 fixture ready; no production character data is claimed.")
-		var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
-		if not running_validation.get("success", false):
-			_last_ui_message = "Running fixture blocked: %s" % _friendly_reason(String(running_validation.get("reason", "unresolved running profile")))
+	_prepare_encounter_fixture()
 	_player.set_authoritative_movement_resolver(_resolve_player_movement)
 	if _encounter_button != null and not _encounter_button.pressed.is_connected(_on_encounter_button_pressed):
 		_encounter_button.pressed.connect(_on_encounter_button_pressed)
+	if _encounter_selector != null and not _encounter_selector.pressed.is_connected(_on_encounter_selector_pressed):
+		_encounter_selector.pressed.connect(_on_encounter_selector_pressed)
 	if _debug_button != null and not _debug_button.pressed.is_connected(_on_debug_button_pressed):
 		_debug_button.pressed.connect(_on_debug_button_pressed)
 	if _log_button != null and not _log_button.pressed.is_connected(_on_log_button_pressed):
@@ -180,6 +174,10 @@ func request_pointer_action_for_testing(screen_position: Vector2, desktop_click:
 
 func press_encounter_control_for_testing() -> void:
 	_on_encounter_button_pressed()
+
+
+func select_encounter_fixture_for_testing(encounter_fixture_id: StringName) -> Dictionary:
+	return _select_encounter_fixture(encounter_fixture_id)
 
 
 func set_debug_overlay_visible(visible: bool) -> void:
@@ -306,6 +304,58 @@ func _on_encounter_button_pressed() -> void:
 	else:
 		_reset_encounter()
 	_update_presentation()
+
+
+func _on_encounter_selector_pressed() -> void:
+	var next_fixture := (
+		Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD
+		if _encounter_fixture_id == Fixture.ENCOUNTER_MEDIUM_GUARDS
+		else Fixture.ENCOUNTER_MEDIUM_GUARDS
+	)
+	_select_encounter_fixture(next_fixture)
+
+
+func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
+	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
+		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
+	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD].has(encounter_fixture_id):
+		return {"success": false, "reason": "unsupported_encounter_fixture"}
+	_encounter_fixture_id = encounter_fixture_id
+	_player.reset_for_encounter(_initial_player_position_pixels / _player.pixels_per_foot)
+	_opponent.position = _initial_opponent_position_pixels
+	_event_cursor = 0
+	_log_lines.clear()
+	_debug_log_lines.clear()
+	_applied_displacement_event_ids.clear()
+	if _floating_combat_text != null:
+		_floating_combat_text.clear()
+	var result := _prepare_encounter_fixture()
+	if result.get("success", false):
+		_last_ui_message = "%s selected. Press START." % _session.get_encounter_display_name()
+	_update_combat_movement_lock()
+	_update_presentation()
+	return result
+
+
+func _prepare_encounter_fixture() -> Dictionary:
+	_session = ArenaCombatSession.new(combat_seed, null, _encounter_fixture_id)
+	_session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
+	_session.set_opponent_behavior_enabled(true)
+	var setup := _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
+	if not setup.get("success", false):
+		_last_ui_message = "Combat fixture blocked: %s" % String(setup.get("reason", "unknown setup failure"))
+		return setup
+	_session.select_target(Fixture.OPPONENT_ID)
+	_append_log(
+		"Synthetic Small Guard size test ready; Guard statistics/loadout are reused and no printed creature identity is claimed."
+		if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD
+		else "Verified Prime V3 Guard fixture ready."
+	)
+	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
+	if not running_validation.get("success", false):
+		_last_ui_message = "Running fixture blocked: %s" % _friendly_reason(String(running_validation.get("reason", "unresolved running profile")))
+		return running_validation
+	return setup
 
 
 func _reset_encounter() -> void:
@@ -494,7 +544,8 @@ func _update_presentation() -> void:
 	if _player_hpc_label != null:
 		_player_hpc_label.text = "PLAYER\nHPC %s / 100%s" % [player_state.current_hpc, _condition_suffix(player_state)]
 	if _opponent_hpc_label != null:
-		_opponent_hpc_label.text = "OPPONENT\nHPC %s / 100%s" % [opponent_state.current_hpc, _condition_suffix(opponent_state)]
+		var opponent_label := "SYNTHETIC SMALL*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "OPPONENT"
+		_opponent_hpc_label.text = "%s\nHPC %s / 100%s" % [opponent_label, opponent_state.current_hpc, _condition_suffix(opponent_state)]
 	_update_actor_label_layout()
 	if _target_indicator != null:
 		_target_indicator.visible = _session.get_selected_target_id() == Fixture.OPPONENT_ID and int(opponent_state.current_hpc) > 0
@@ -522,9 +573,10 @@ func _update_presentation() -> void:
 			_append_log(blocked_line)
 	if _combat_status != null:
 		_combat_status.text = (
-			"%s | TARGET: %s\nBATTLE AXE: %s | Range %s\n%s"
+			"%s | %s | TARGET: %s\nBATTLE AXE: %s | Range %s\n%s"
 			% [
 				_session.get_encounter_state().replace("_", " ").to_upper(),
+				_session.get_encounter_display_name(),
 				"Opponent" if _session.get_selected_target_id() == Fixture.OPPONENT_ID else "None",
 				readiness,
 				distance_text,
@@ -534,6 +586,9 @@ func _update_presentation() -> void:
 	if _encounter_button != null:
 		_encounter_button.text = "START" if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY else "RESET"
 		_encounter_button.disabled = false
+	if _encounter_selector != null:
+		_encounter_selector.text = "DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M"
+		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	if _event_log != null:
 		_event_log.text = "\n[b]RECENT RESULTS[/b]  (FULL LOG / F4 for complete transcript)\n" + "\n".join(PackedStringArray(_log_lines))
 		_event_log.scroll_to_line(maxi(0, _event_log.get_line_count() - 1))

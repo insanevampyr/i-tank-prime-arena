@@ -30,6 +30,7 @@ var _last_error: String = ""
 var _arena_bounds_microfeet := Rect2i(-100_000_000, -100_000_000, 200_000_000, 200_000_000)
 var _battlefield: ArenaBattlefield = ArenaBattlefield.create_open(_arena_bounds_microfeet)
 var _seed_value: int
+var _encounter_fixture_id: StringName
 var _uses_external_simulation: bool = false
 var _initialized: bool = false
 var _encounter_active: bool = true
@@ -50,8 +51,13 @@ var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
 
 
-func _init(seed_value: int = DEFAULT_SEED, existing_simulation: CombatSimulation = null) -> void:
+func _init(
+	seed_value: int = DEFAULT_SEED,
+	existing_simulation: CombatSimulation = null,
+	encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
+) -> void:
 	_seed_value = seed_value
+	_encounter_fixture_id = encounter_fixture_id
 	_uses_external_simulation = existing_simulation != null
 	simulation = existing_simulation if existing_simulation != null else CombatSimulation.new(seed_value)
 
@@ -73,7 +79,7 @@ func initialize(
 	var opponent_position_check := _battlefield.is_position_legal(Fixture.OPPONENT_ID, opponent_position_microfeet, initial_occupancy)
 	if not opponent_position_check["legal"]:
 		return _failure("opponent_%s" % opponent_position_check["reason"])
-	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet)
+	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet, _encounter_fixture_id)
 	if result.get("success", false):
 		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
 		_attack_definition = result["attack_definition"]
@@ -504,6 +510,14 @@ func get_encounter_state() -> String:
 	return _encounter_state
 
 
+func get_encounter_fixture_id() -> StringName:
+	return _encounter_fixture_id
+
+
+func get_encounter_display_name() -> String:
+	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
+
+
 func get_opponent_behavior_status() -> String:
 	return _opponent_behavior_status
 
@@ -531,6 +545,7 @@ func get_resolved_events() -> Array:
 func get_state_snapshot() -> Dictionary:
 	var snapshot := simulation.get_state_snapshot()
 	snapshot["battlefield"] = _battlefield.to_dictionary()
+	snapshot["encounter_fixture_id"] = String(_encounter_fixture_id)
 	snapshot["opponent_behavior_status"] = _opponent_behavior_status
 	snapshot["opponent_path"] = _serialize_vector_path(_opponent_path)
 	snapshot["opponent_path_target_microfeet"] = (

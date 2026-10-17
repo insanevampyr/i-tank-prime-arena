@@ -48,15 +48,22 @@ static func format_event(event: CombatEvent) -> String:
 		"action_completed":
 			return prefix + "%s action completed." % _display_actor(event.source_actor_id)
 		"physical_attack_declared":
-			return prefix + "%s begins Battle Axe attack on %s." % [
+			return prefix + "%s begins Battle Axe attack on %s [%s -> %s; %s; location ACC %s; final target %s]." % [
 				_display_actor(event.source_actor_id),
 				_pretty_name(String(payload.get("target_location", "torso"))),
+				String(payload.get("attacker_size_category", "?")),
+				String(payload.get("target_size_category", "?")),
+				String(payload.get("size_relationship", "unresolved")),
+				payload.get("location_acc_modifier", "?"),
+				payload.get("acc_target", "?"),
 			]
 		"physical_attack_accuracy_resolved":
 			var outcome := "HIT" if payload.get("accuracy_success", false) else "MISS"
-			return prefix + "%s ACC d20 %s vs %s: %s%s" % [
-				_display_actor(event.source_actor_id), payload.get("natural_d20", "?"), payload.get("acc_target", "?"), outcome,
-				_critical_suffix(payload),
+			return prefix + "%s ACC d20 %s vs %s (%s -> %s; %s; location %s): %s%s" % [
+				_display_actor(event.source_actor_id), payload.get("natural_d20", "?"), payload.get("acc_target", "?"),
+				String(payload.get("attacker_size_category", "?")), String(payload.get("target_size_category", "?")),
+				String(payload.get("size_relationship", "unresolved")), payload.get("location_acc_modifier", "?"),
+				outcome, _critical_suffix(payload),
 			]
 		"physical_attack_final_legality_failed":
 			return prefix + "%s attack cannot connect at resolution: %s (ACC not rolled)." % [

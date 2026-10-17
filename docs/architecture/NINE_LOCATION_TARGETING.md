@@ -52,3 +52,5 @@ Both subdivisions retain Prime's same-size location 8 ACC modifier of -3. Knee a
 ## Determinism
 
 Location identifiers, source-resolved size relationship, ACC modifiers and rational location multipliers live in the attack definition and instance used by the authority. The declared event carries the locked location and size context. Replay and simulated clients consume that event stream; UI selection notifications are deliberately excluded from authoritative logs and digests.
+
+Task 29 exposes this same authority path through an opt-in `MEDIUM vs SYNTHETIC SMALL` development encounter. The synthetic fixture and launch controls are documented in `PLAYABLE_DIFFERENT_SIZE_COMBAT.md`; it does not change this targeting model or claim a printed Prime creature identity.

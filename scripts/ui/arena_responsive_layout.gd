@@ -11,6 +11,7 @@ const MobileTouchControlsClass = preload("res://scripts/ui/mobile_touch_controls
 @export var combat_log_path: NodePath
 @export var developer_debug_path: NodePath
 @export var encounter_button_path: NodePath
+@export var encounter_selector_path: NodePath
 @export var debug_button_path: NodePath
 @export var attack_readiness_path: NodePath
 @export var run_readiness_path: NodePath
@@ -25,6 +26,7 @@ const MobileTouchControlsClass = preload("res://scripts/ui/mobile_touch_controls
 @onready var _combat_log: RichTextLabel = get_node_or_null(combat_log_path)
 @onready var _developer_debug: RichTextLabel = get_node_or_null(developer_debug_path)
 @onready var _encounter_button: Button = get_node_or_null(encounter_button_path)
+@onready var _encounter_selector: Button = get_node_or_null(encounter_selector_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
 @onready var _attack_readiness: Control = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness: Control = get_node_or_null(run_readiness_path)
@@ -89,6 +91,13 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		log_button_size.x,
 		log_button_size.y
 	)
+	var selector_button_size := Vector2((104.0 if compact else 132.0) / canvas_scale, encounter_button_size.y)
+	var selector_button_rect := Rect2(
+		log_button_rect.position.x - toolbar_gap - selector_button_size.x,
+		encounter_button_rect.position.y,
+		selector_button_size.x,
+		selector_button_size.y
+	)
 	var debug_y := instructions_rect.end.y + ((6.0 if compact else 14.0) / canvas_scale)
 	var touch_layout := MobileTouchControlsClass.calculate_layout(safe_size, safe_display_size)
 	var debug_bottom_limit: float = touch_layout["control_top"] - (10.0 / canvas_scale)
@@ -151,6 +160,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"combat_log_rect": combat_log_rect,
 		"developer_debug_rect": developer_debug_rect,
 		"encounter_button_rect": encounter_button_rect,
+		"encounter_selector_rect": selector_button_rect,
 		"debug_button_rect": debug_button_rect,
 		"log_button_rect": log_button_rect,
 		"transcript_panel_rect": transcript_panel_rect,
@@ -181,6 +191,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_apply_control_rect(_combat_log, metrics["combat_log_rect"])
 	_apply_control_rect(_developer_debug, metrics["developer_debug_rect"])
 	_apply_control_rect(_encounter_button, metrics["encounter_button_rect"])
+	_apply_control_rect(_encounter_selector, metrics["encounter_selector_rect"])
 	_apply_control_rect(_debug_button, metrics["debug_button_rect"])
 	_apply_control_rect(_attack_readiness, metrics["attack_readiness_rect"])
 	_apply_control_rect(_run_readiness, metrics["run_readiness_rect"])
