@@ -37,6 +37,7 @@ var _accepted_request_ids: Dictionary = {}
 var _accepted_defense_request_ids: Dictionary = {}
 var _accepted_damage_request_ids: Dictionary = {}
 var _resolved_events: Array = []
+var _arena_wave_state: Dictionary = {}
 var _combat_started: bool = false
 var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
@@ -1138,6 +1139,46 @@ func get_resolved_events_from(cursor: int) -> Dictionary:
 	}
 
 
+func record_arena_wave_event(event_type: StringName, payload: Dictionary = {}) -> CombatEvent:
+	assert(String(event_type).begins_with("arena_wave_"), "Arena wave events must use the reserved arena_wave_ prefix.")
+	return _record_resolved_event(
+		clock.get_elapsed_us(),
+		event_type,
+		0,
+		&"",
+		&"",
+		payload.duplicate(true)
+	)
+
+
+func set_arena_wave_state_snapshot(wave_state: Dictionary) -> void:
+	_arena_wave_state = wave_state.duplicate(true)
+	_state_revision += 1
+
+
+func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
+	var actor_key := String(actor_id)
+	if not _actor_states.has(actor_key) or not _actor_definitions.has(actor_key):
+		return _failure("unknown_actor")
+	var state: CombatActorState = _actor_states[actor_key]
+	var definition: CombatActorDefinition = _actor_definitions[actor_key]
+	if not state.current_action_instance_id.is_empty():
+		return _failure("actor_action_in_progress")
+	var previous_hpc: Variant = state.current_hpc
+	var previous_resources := state.resources.duplicate(true)
+	state.current_hpc = definition.get_combat_stat("hpm")
+	state.resources = definition.resource_maxima.duplicate(true)
+	state.revision += 1
+	_state_revision += 1
+	return _success({
+		"actor_id": actor_key,
+		"previous_hpc": previous_hpc,
+		"restored_hpc": state.current_hpc,
+		"previous_resources": previous_resources,
+		"restored_resources": state.resources.duplicate(true),
+	})
+
+
 func take_resolved_events() -> Array:
 	var events := _resolved_events.duplicate()
 	_resolved_events.clear()
@@ -1241,6 +1282,7 @@ func get_state_snapshot() -> Dictionary:
 		"next_defense_sequence": _next_defense_sequence,
 		"next_damage_sequence": _next_damage_sequence,
 		"next_critical_sequence": _next_critical_sequence,
+		"arena_wave_state": _arena_wave_state.duplicate(true),
 		"combat_started": _combat_started,
 		"opening_sequence_complete": _opening_sequence_complete,
 		"current_opening_rank": _current_opening_rank,

@@ -5,6 +5,7 @@ const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd
 const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
+const ArenaWaveStateMachine = preload("res://scripts/combat/arena_wave_state_machine.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -50,6 +51,7 @@ var _opponent_movement_spent_microfeet: int = 0
 var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
 var _resolved_event_history_generation: int = 0
+var _arena_wave_state_machine: ArenaWaveStateMachine
 
 
 func _init(
@@ -120,6 +122,8 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 func start_encounter() -> Dictionary:
 	if not _initialized:
 		return _failure("encounter_not_initialized")
+	if _arena_wave_state_machine != null:
+		return _failure("wave_circuit_requires_creature_activation")
 	if _encounter_active:
 		return _failure("encounter_already_running")
 	if _encounter_state != ENCOUNTER_READY:
@@ -148,6 +152,7 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_encounter_state = ENCOUNTER_READY
 	_opponent_behavior_status = "idle" if _opponent_behavior_enabled else "disabled"
 	_opponent_movement_model = null
+	_arena_wave_state_machine = null
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
@@ -536,6 +541,93 @@ func get_last_error() -> String:
 	return _last_error
 
 
+func initialize_five_wave_arena() -> Dictionary:
+	if not _initialized:
+		return _failure("encounter_not_initialized")
+	if _encounter_active:
+		return _failure("wave_framework_requires_ready_encounter")
+	if _arena_wave_state_machine != null:
+		return _failure("wave_circuit_already_initialized")
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var result := _arena_wave_state_machine.initialize(_roll_wave_quantity)
+	_publish_wave_transition(result)
+	return result
+
+
+func reset_five_wave_arena() -> Dictionary:
+	var reset_result := reset_encounter(false)
+	if not reset_result.get("success", false):
+		return reset_result
+	return initialize_five_wave_arena()
+
+
+func set_wave_creature_integration_available(creature_id: StringName, available: bool) -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	_arena_wave_state_machine.set_creature_integration_available(creature_id, available)
+	simulation.record_arena_wave_event(&"arena_wave_creature_integration_registered", {
+		"creature_id": String(creature_id),
+		"available": available,
+	})
+	_sync_wave_snapshot()
+	return {"success": true}
+
+
+func activate_current_wave(active_enemy_ids: PackedStringArray) -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	for actor_id: String in active_enemy_ids:
+		if simulation.get_actor_state(StringName(actor_id)) == null:
+			return _failure("active_wave_enemy_not_registered")
+	var result := _arena_wave_state_machine.activate_current_wave(active_enemy_ids)
+	_publish_wave_transition(result)
+	return result
+
+
+func evaluate_current_wave_victory() -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	var states := {}
+	for actor_id: String in _arena_wave_state_machine.get_active_enemy_ids():
+		var actor_state := simulation.get_actor_state(StringName(actor_id))
+		if actor_state == null:
+			return _failure("active_wave_enemy_not_registered")
+		states[actor_id] = {
+			"defeated": actor_state.current_hpc != null and int(actor_state.current_hpc) <= 0,
+		}
+	var result := _arena_wave_state_machine.observe_active_enemy_states(states)
+	_publish_wave_transition(result)
+	return result
+
+
+func recover_and_advance_wave() -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	var transition := _arena_wave_state_machine.begin_between_wave_recovery()
+	if not transition.get("success", false):
+		return transition
+	_publish_wave_transition(transition)
+	if _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE:
+		return transition
+	var recovery := simulation.restore_actor_between_wave_resources(Fixture.PLAYER_ID)
+	if not recovery.get("success", false):
+		return recovery
+	simulation.record_arena_wave_event(&"arena_wave_recovery_applied", recovery)
+	var advance := _arena_wave_state_machine.complete_between_wave_recovery(_roll_wave_quantity)
+	_publish_wave_transition(advance)
+	if not advance.get("success", false):
+		return advance
+	return {
+		"success": true,
+		"recovery": recovery,
+		"next_wave_id": _arena_wave_state_machine.get_current_wave_id(),
+	}
+
+
+func get_arena_wave_state() -> Dictionary:
+	return {} if _arena_wave_state_machine == null else _arena_wave_state_machine.to_dictionary()
+
+
 func get_actor_state(actor_id: StringName) -> CombatActorState:
 	return simulation.get_actor_state(actor_id)
 
@@ -581,7 +673,30 @@ func get_state_snapshot() -> Dictionary:
 	snapshot["opponent_movement_spent_microfeet"] = _opponent_movement_spent_microfeet
 	snapshot["player_movement_round_index"] = _player_movement_round_index
 	snapshot["player_movement_spent_microfeet"] = _player_movement_spent_microfeet
+	snapshot["arena_wave_state"] = get_arena_wave_state()
 	return snapshot
+
+
+func _roll_wave_quantity(dice_sides: int) -> Dictionary:
+	var value := simulation.roll_int(1, dice_sides)
+	return {"value": value, "rng_draw_index": simulation.random.get_draw_count()}
+
+
+func _publish_wave_transition(result: Dictionary) -> void:
+	if _arena_wave_state_machine == null:
+		return
+	if result.get("success", false):
+		for transition_event: Dictionary in result.get("events", []):
+			simulation.record_arena_wave_event(
+				StringName(transition_event["event_type"]),
+				transition_event["payload"] as Dictionary
+			)
+	_sync_wave_snapshot()
+
+
+func _sync_wave_snapshot() -> void:
+	if _arena_wave_state_machine != null:
+		simulation.set_arena_wave_state_snapshot(_arena_wave_state_machine.to_dictionary())
 
 
 func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String, target_location: StringName = &"torso") -> Dictionary:

@@ -24,6 +24,7 @@ const NineLocationTargetingTests = preload("res://tests/test_nine_location_targe
 const SizeBasedTargetingTests = preload("res://tests/test_size_based_targeting.gd")
 const PlayableDifferentSizeCombatTests = preload("res://tests/test_playable_different_size_combat.gd")
 const PresentationEventConsumptionTests = preload("res://tests/test_presentation_event_consumption.gd")
+const FiveWaveEncounterFrameworkTests = preload("res://tests/test_five_wave_encounter_framework.gd")
 
 
 func _initialize() -> void:
@@ -32,6 +33,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 31B deterministic five-wave framework", "instance": FiveWaveEncounterFrameworkTests.new()},
 		{"name": "Task 30 presentation event consumption", "instance": PresentationEventConsumptionTests.new()},
 		{"name": "Task 29 playable different-size combat", "instance": PlayableDifferentSizeCombatTests.new()},
 		{"name": "combat foundation", "instance": CombatFoundationTests.new()},
