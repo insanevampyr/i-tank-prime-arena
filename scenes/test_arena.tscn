@@ -30,6 +30,9 @@ content_margin_top = 20.0
 script = ExtResource("2_layout")
 title_path = NodePath("HUD/UI/Title")
 instructions_path = NodePath("HUD/UI/Instructions")
+seed_label_path = NodePath("HUD/UI/SeedLabel")
+seed_input_path = NodePath("HUD/UI/SeedInput")
+seed_apply_button_path = NodePath("HUD/UI/SeedApplyButton")
 movement_debug_path = NodePath("HUD/UI/MovementDebug")
 orientation_warning_path = NodePath("HUD/UI/OrientationWarning")
 combat_status_path = NodePath("HUD/UI/CombatStatus")
@@ -42,6 +45,8 @@ attack_readiness_path = NodePath("HUD/UI/AttackReadiness")
 run_readiness_path = NodePath("HUD/UI/RunReadiness")
 log_button_path = NodePath("HUD/UI/LogButton")
 transcript_panel_path = NodePath("HUD/UI/TranscriptPanel")
+battlefield_path = NodePath("Battlefield")
+combat_controller_path = NodePath("CombatController")
 
 [node name="Background" type="ColorRect" parent="."]
 anchors_preset = 15
@@ -85,6 +90,39 @@ offset_bottom = 88.0
 theme_override_colors/font_color = Color(0.62, 0.69, 0.76, 1)
 theme_override_font_sizes/font_size = 16
 text = "START; WASD/touch moves; Shift/RUN runs; left-click enemy attacks; tap + ATTACK on touch; F3 debug"
+
+[node name="SeedLabel" type="Label" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 34.0
+offset_top = 94.0
+offset_right = 142.0
+offset_bottom = 126.0
+theme_override_colors/font_color = Color(0.78, 0.86, 0.94, 1)
+theme_override_font_sizes/font_size = 14
+text = "SEED 1"
+vertical_alignment = 1
+
+[node name="SeedInput" type="LineEdit" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 150.0
+offset_top = 94.0
+offset_right = 282.0
+offset_bottom = 126.0
+theme_override_font_sizes/font_size = 14
+text = "1"
+max_length = 20
+placeholder_text = "signed seed"
+
+[node name="SeedApplyButton" type="Button" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 290.0
+offset_top = 94.0
+offset_right = 362.0
+offset_bottom = 126.0
+mouse_default_cursor_shape = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "APPLY"
 
 [node name="MovementDebug" type="Label" parent="HUD/UI"]
 layout_mode = 0
@@ -386,6 +424,9 @@ developer_debug_path = NodePath("../HUD/UI/DeveloperDebugOverlay")
 target_indicator_path = NodePath("../TargetIndicator")
 encounter_button_path = NodePath("../HUD/UI/EncounterButton")
 encounter_selector_path = NodePath("../HUD/UI/EncounterSelector")
+seed_label_path = NodePath("../HUD/UI/SeedLabel")
+seed_input_path = NodePath("../HUD/UI/SeedInput")
+seed_apply_button_path = NodePath("../HUD/UI/SeedApplyButton")
 debug_button_path = NodePath("../HUD/UI/DebugButton")
 attack_readiness_path = NodePath("../HUD/UI/AttackReadiness")
 run_readiness_path = NodePath("../HUD/UI/RunReadiness")

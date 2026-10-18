@@ -16,6 +16,7 @@ const INVALID_HAND_REQUIREMENT := -1
 @export_range(1, 2) var base_hands_required: int = 1
 @export var block_target: int = -1
 @export var required_acts: int = 1
+@export var strikes_per_act: int = 1
 @export var critical_success_max_natural: int = 1
 @export var approach_attack_eligible: bool = false
 @export var ducking_policy: StringName = &"unresolved"
@@ -54,6 +55,8 @@ func validate_definition() -> Array[Dictionary]:
 		issues.append(_issue("requires_source_verification", "weapon_block_unresolved"))
 	if required_acts <= 0:
 		issues.append(_issue("invalid", "invalid_weapon_act_requirement"))
+	if strikes_per_act <= 0:
+		issues.append(_issue("invalid", "invalid_weapon_strikes_per_act"))
 	if critical_success_max_natural < 1 or critical_success_max_natural > 19:
 		issues.append(_issue("invalid", "invalid_weapon_critical_range"))
 	if not [CombatAttackDefinition.DUCKING_ALLOWED, CombatAttackDefinition.DUCKING_PROHIBITED, CombatAttackDefinition.DUCKING_UNRESOLVED].has(ducking_policy):
@@ -142,7 +145,8 @@ func make_attack_definition(attack_definition_id: StringName, targeting_profile:
 		damage,
 		critical_policy,
 		approach_attack_eligible,
-		uses_size_based_location_acc
+		uses_size_based_location_acc,
+		strikes_per_act
 	)
 
 
@@ -169,7 +173,7 @@ func to_dictionary() -> Dictionary:
 		"damage_types": Array(damage_types), "reach_microfeet": reach_microfeet,
 		"strength_requirement": strength_requirement, "one_hand_strength_requirement": one_hand_strength_requirement,
 		"base_hands_required": base_hands_required,
-		"block_target": block_target, "required_acts": required_acts,
+		"block_target": block_target, "required_acts": required_acts, "strikes_per_act": strikes_per_act,
 		"critical_success_max_natural": critical_success_max_natural,
 		"approach_attack_eligible": approach_attack_eligible, "ducking_policy": String(ducking_policy),
 		"combat_ready": combat_ready, "blocked_capabilities": Array(blocked_capabilities),

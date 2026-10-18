@@ -160,6 +160,17 @@ func is_path_clear(
 	return resolved.get("success", false) and resolved["position_microfeet"] == end_microfeet
 
 
+func is_direct_path_clear(
+	actor_id: StringName,
+	start_microfeet: Vector2i,
+	end_microfeet: Vector2i,
+	occupancy: Dictionary
+) -> bool:
+	if not is_position_legal(actor_id, end_microfeet, occupancy)["legal"]:
+		return false
+	return _furthest_legal_on_segment(actor_id, start_microfeet, end_microfeet, occupancy) == end_microfeet
+
+
 func has_line_of_sight(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bool:
 	for obstacle: Dictionary in _obstacles:
 		if _segment_intersects_rect(start_microfeet, end_microfeet, obstacle["rect_microfeet"]):
@@ -180,6 +191,11 @@ func find_path_to_attack_position(
 ) -> Dictionary:
 	if _within_reach_and_visible(start_microfeet, target_microfeet, attack_range_microfeet):
 		return {"success": true, "waypoints": [], "reason": "already_in_range"}
+	var attack_positions := _legal_attack_position_candidates(
+		mover_id, start_microfeet, target_microfeet, attack_range_microfeet, occupancy
+	)
+	if attack_positions.is_empty():
+		return {"success": false, "reason": "no_legal_attack_position", "waypoints": []}
 	var start_node_result: Variant = _nearest_legal_navigation_node(mover_id, start_microfeet, occupancy)
 	if start_node_result == null:
 		return {"success": false, "reason": "no_legal_navigation_start", "waypoints": []}
@@ -188,11 +204,13 @@ func find_path_to_attack_position(
 	var came_from: Dictionary = {start_node: start_node}
 	var directions: Array[Vector2i] = [Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN]
 	var goal: Variant = null
+	var final_attack_position: Variant = null
 	var index := 0
 	while index < frontier.size() and index < 10_000:
 		var current: Vector2i = frontier[index]
 		index += 1
-		if _within_reach_and_visible(current, target_microfeet, attack_range_microfeet):
+		final_attack_position = _first_reachable_attack_position(mover_id, current, attack_positions, occupancy)
+		if final_attack_position != null:
 			goal = current
 			break
 		for direction: Vector2i in directions:
@@ -215,7 +233,53 @@ func find_path_to_attack_position(
 	reversed.reverse()
 	if start_microfeet != start_node:
 		reversed.push_front(start_node)
+	if final_attack_position != goal:
+		reversed.append(final_attack_position)
 	return {"success": true, "reason": "legal_path", "waypoints": reversed}
+
+
+func _legal_attack_position_candidates(
+	mover_id: StringName,
+	start_microfeet: Vector2i,
+	target_microfeet: Vector2i,
+	attack_range_microfeet: int,
+	occupancy: Dictionary
+) -> Array[Vector2i]:
+	var directions: Array[Vector2i] = [Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN]
+	var candidates: Array[Dictionary] = []
+	for direction_index in range(directions.size()):
+		var position := target_microfeet + directions[direction_index] * attack_range_microfeet
+		if not is_position_legal(mover_id, position, occupancy).get("legal", false):
+			continue
+		if not _within_reach_and_visible(position, target_microfeet, attack_range_microfeet):
+			continue
+		var offset := position - start_microfeet
+		candidates.append({
+			"position": position,
+			"distance_squared": offset.length_squared(),
+			"direction_index": direction_index,
+		})
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		if int(left["distance_squared"]) != int(right["distance_squared"]):
+			return int(left["distance_squared"]) < int(right["distance_squared"])
+		return int(left["direction_index"]) < int(right["direction_index"])
+	)
+	var positions: Array[Vector2i] = []
+	for candidate: Dictionary in candidates:
+		positions.append(candidate["position"])
+	return positions
+
+
+func _first_reachable_attack_position(
+	mover_id: StringName,
+	start_microfeet: Vector2i,
+	attack_positions: Array[Vector2i],
+	occupancy: Dictionary
+) -> Variant:
+	for attack_position: Vector2i in attack_positions:
+		if is_direct_path_clear(mover_id, start_microfeet, attack_position, occupancy):
+			return attack_position
+	return null
 
 
 func build_dodge_candidate_facts(
@@ -266,7 +330,7 @@ func _nearest_legal_navigation_node(actor_id: StringName, position_microfeet: Ve
 	var offsets: Array[Vector2i] = [Vector2i.ZERO, Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN]
 	for offset: Vector2i in offsets:
 		var candidate := base + offset * NAVIGATION_STEP_MICROFEET
-		if is_position_legal(actor_id, candidate, occupancy)["legal"] and is_path_clear(actor_id, position_microfeet, candidate, occupancy):
+		if is_position_legal(actor_id, candidate, occupancy)["legal"] and is_direct_path_clear(actor_id, position_microfeet, candidate, occupancy):
 			return candidate
 	return null
 

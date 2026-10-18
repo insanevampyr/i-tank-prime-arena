@@ -65,15 +65,6 @@ static func get_attack_readiness(session: ArenaCombatSession, presentation_avail
 		return _state(STATE_BLOCKED, "BLOCKED", "STAND FIRST", 0.0, 0, 0, "actor_prone")
 	if not player_state.current_action_instance_id.is_empty():
 		return _state(STATE_BLOCKED, "BLOCKED", "ACTION ACTIVE", 0.0, 0, 0, "actor_action_in_progress")
-	var simulation_snapshot := session.simulation.get_state_snapshot()
-	if (
-		bool(simulation_snapshot.get("combat_started", false))
-		and not bool(simulation_snapshot.get("opening_sequence_complete", false))
-		and not player_state.opening_action_declared
-		and player_state.opening_order_rank != int(simulation_snapshot.get("current_opening_rank", -1))
-	):
-		return _state(STATE_BLOCKED, "BLOCKED", "WAIT INIT", 0.0, 0, 0, "opening_initiative_wait")
-
 	var legality := session.get_attack_legality()
 	if legality.get("success", false):
 		var approach_required := bool(legality.get("approach_required", false))

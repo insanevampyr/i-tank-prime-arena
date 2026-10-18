@@ -3,8 +3,13 @@ extends Node
 
 const MobileTouchControlsClass = preload("res://scripts/ui/mobile_touch_controls.gd")
 
+const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
+
 @export var title_path: NodePath
 @export var instructions_path: NodePath
+@export var seed_label_path: NodePath
+@export var seed_input_path: NodePath
+@export var seed_apply_button_path: NodePath
 @export var movement_debug_path: NodePath
 @export var orientation_warning_path: NodePath
 @export var combat_status_path: NodePath
@@ -17,9 +22,14 @@ const MobileTouchControlsClass = preload("res://scripts/ui/mobile_touch_controls
 @export var run_readiness_path: NodePath
 @export var log_button_path: NodePath
 @export var transcript_panel_path: NodePath
+@export var battlefield_path: NodePath
+@export var combat_controller_path: NodePath
 
 @onready var _title: Label = get_node_or_null(title_path)
 @onready var _instructions: Label = get_node_or_null(instructions_path)
+@onready var _seed_label: Label = get_node_or_null(seed_label_path)
+@onready var _seed_input: LineEdit = get_node_or_null(seed_input_path)
+@onready var _seed_apply_button: Button = get_node_or_null(seed_apply_button_path)
 @onready var _movement_debug: Label = get_node_or_null(movement_debug_path)
 @onready var _orientation_warning: Label = get_node_or_null(orientation_warning_path)
 @onready var _combat_status: Label = get_node_or_null(combat_status_path)
@@ -32,6 +42,8 @@ const MobileTouchControlsClass = preload("res://scripts/ui/mobile_touch_controls
 @onready var _run_readiness: Control = get_node_or_null(run_readiness_path)
 @onready var _log_button: Button = get_node_or_null(log_button_path)
 @onready var _transcript_panel: Control = get_node_or_null(transcript_panel_path)
+@onready var _battlefield: ArenaBattlefieldView = get_node_or_null(battlefield_path)
+@onready var _combat_controller: ArenaCombatController = get_node_or_null(combat_controller_path)
 
 var _last_viewport_size: Vector2 = Vector2.ZERO
 var _last_display_size: Vector2 = Vector2.ZERO
@@ -69,6 +81,15 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		next_y = warning_rect.end.y + line_gap
 	var instructions_height := (20.0 if compact else 26.0) / canvas_scale
 	var instructions_rect := Rect2(margin, next_y, safe_size.x - margin * 2.0, instructions_height)
+	var seed_y := instructions_rect.end.y + line_gap
+	var seed_height := (28.0 if compact else 32.0) / canvas_scale
+	var seed_gap := (6.0 if compact else 8.0) / canvas_scale
+	var seed_label_width := (92.0 if compact else 108.0) / canvas_scale
+	var seed_input_width := (116.0 if compact else 132.0) / canvas_scale
+	var seed_button_width := (64.0 if compact else 72.0) / canvas_scale
+	var seed_label_rect := Rect2(margin, seed_y, seed_label_width, seed_height)
+	var seed_input_rect := Rect2(seed_label_rect.end.x + seed_gap, seed_y, seed_input_width, seed_height)
+	var seed_apply_button_rect := Rect2(seed_input_rect.end.x + seed_gap, seed_y, seed_button_width, seed_height)
 	var encounter_button_size := Vector2((104.0 if compact else 120.0) / canvas_scale, (48.0 if compact else 52.0) / canvas_scale)
 	var encounter_button_rect := Rect2(
 		safe_size.x - margin - encounter_button_size.x,
@@ -98,21 +119,27 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		selector_button_size.x,
 		selector_button_size.y
 	)
-	var debug_y := instructions_rect.end.y + ((6.0 if compact else 14.0) / canvas_scale)
+	var debug_y := seed_label_rect.end.y + ((6.0 if compact else 14.0) / canvas_scale)
 	var touch_layout := MobileTouchControlsClass.calculate_layout(safe_size, safe_display_size)
 	var debug_bottom_limit: float = touch_layout["control_top"] - (10.0 / canvas_scale)
 	var debug_width := minf(safe_size.x * 0.5, (520.0 / canvas_scale))
 	var debug_height := (44.0 if compact else 56.0) / canvas_scale
 	var debug_rect := Rect2(margin, debug_y, debug_width, debug_height)
 	var combat_gap := (12.0 / canvas_scale)
-	var combat_status_height := (72.0 if compact else 88.0) / canvas_scale
+	var combat_status_height := (92.0 if compact else 112.0) / canvas_scale
 	var combat_x := margin
-	var combat_width := debug_width
+	# Keep the player-facing status inside the left HUD lane. The battlefield's
+	# actor labels enter the center lane first on compact landscape viewports.
+	var combat_width := minf(debug_width, safe_size.x * 0.28)
 	var combat_y := debug_rect.end.y + line_gap
-	var combat_log_x := maxf(safe_size.x * 0.62, combat_x + combat_width + combat_gap)
-	var combat_log_width := maxf(120.0 / canvas_scale, safe_size.x - combat_log_x - margin)
 	var readiness_size := Vector2((104.0 if compact else 116.0) / canvas_scale, (100.0 if compact else 112.0) / canvas_scale)
 	var readiness_gap := (6.0 if compact else 10.0) / canvas_scale
+	var readiness_pair_width := readiness_size.x * 2.0 + readiness_gap
+	var combat_log_x := minf(
+		maxf(safe_size.x * 0.72, combat_x + combat_width + combat_gap),
+		safe_size.x - margin - readiness_pair_width
+	)
+	var combat_log_width := maxf(120.0 / canvas_scale, safe_size.x - combat_log_x - margin)
 	var readiness_y := debug_y
 	var attack_readiness_rect := Rect2(combat_log_x, readiness_y, readiness_size.x, readiness_size.y)
 	var run_readiness_rect := Rect2(attack_readiness_rect.end.x + readiness_gap, readiness_y, readiness_size.x, readiness_size.y)
@@ -142,9 +169,9 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	)
 	var transcript_panel_rect := Rect2(
 		margin,
-		instructions_rect.end.y + line_gap,
+		seed_label_rect.end.y + line_gap,
 		safe_size.x - margin * 2.0,
-		maxf(120.0 / canvas_scale, debug_bottom_limit - instructions_rect.end.y - line_gap)
+		maxf(120.0 / canvas_scale, debug_bottom_limit - seed_label_rect.end.y - line_gap)
 	)
 	return {
 		"viewport_size": safe_size,
@@ -154,6 +181,9 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"portrait": portrait,
 		"title_rect": title_rect,
 		"instructions_rect": instructions_rect,
+		"seed_label_rect": seed_label_rect,
+		"seed_input_rect": seed_input_rect,
+		"seed_apply_button_rect": seed_apply_button_rect,
 		"movement_debug_rect": debug_rect,
 		"orientation_warning_rect": warning_rect,
 		"combat_status_rect": combat_status_rect,
@@ -175,6 +205,21 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	}
 
 
+static func calculate_battlefield_presentation(viewport_size: Vector2) -> Dictionary:
+	var safe_size := Vector2(maxf(viewport_size.x, 1.0), maxf(viewport_size.y, 1.0))
+	var pixels_per_foot := minf(
+		safe_size.x / WORLD_PRESENTATION_EXTENT_FEET.x,
+		safe_size.y / WORLD_PRESENTATION_EXTENT_FEET.y
+	)
+	return {
+		"pixels_per_foot": pixels_per_foot,
+		"arena_rect": Rect2(
+			Vector2(2.0, 2.0) * pixels_per_foot,
+			Vector2(44.0, 23.0) * pixels_per_foot
+		),
+	}
+
+
 func _on_viewport_size_changed() -> void:
 	_apply_layout(get_viewport().get_visible_rect().size, Vector2(DisplayServer.window_get_size()))
 
@@ -183,8 +228,18 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_last_viewport_size = viewport_size
 	_last_display_size = viewport_size if display_size.is_zero_approx() else display_size
 	var metrics := calculate_layout(viewport_size, display_size)
+	var battlefield_metrics := calculate_battlefield_presentation(viewport_size)
+	var pixels_per_foot := float(battlefield_metrics["pixels_per_foot"])
+	if _battlefield != null:
+		_battlefield.pixels_per_foot = pixels_per_foot
+		_battlefield.queue_redraw()
+	if _combat_controller != null:
+		_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot)
 	_apply_control_rect(_title, metrics["title_rect"])
 	_apply_control_rect(_instructions, metrics["instructions_rect"])
+	_apply_control_rect(_seed_label, metrics["seed_label_rect"])
+	_apply_control_rect(_seed_input, metrics["seed_input_rect"])
+	_apply_control_rect(_seed_apply_button, metrics["seed_apply_button_rect"])
 	_apply_control_rect(_movement_debug, metrics["movement_debug_rect"])
 	_apply_control_rect(_orientation_warning, metrics["orientation_warning_rect"])
 	_apply_control_rect(_combat_status, metrics["combat_status_rect"])
@@ -206,6 +261,12 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 			if metrics["compact"]
 			else "START; WASD/touch moves; Shift/RUN runs; left-click enemy attacks; tap selects + ATTACK; Space/Enter acts; R resets; F3 debug; F4 full log"
 		)
+	if _seed_label != null:
+		_seed_label.add_theme_font_size_override("font_size", metrics["instructions_font_size"])
+	if _seed_input != null:
+		_seed_input.add_theme_font_size_override("font_size", metrics["instructions_font_size"])
+	if _seed_apply_button != null:
+		_seed_apply_button.add_theme_font_size_override("font_size", metrics["instructions_font_size"])
 	if _movement_debug != null:
 		_movement_debug.add_theme_font_size_override("font_size", metrics["debug_font_size"])
 	if _orientation_warning != null:

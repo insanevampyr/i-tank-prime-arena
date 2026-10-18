@@ -29,7 +29,7 @@ At every authoritative decision boundary, the scripted opponent applies this sta
 
 The original Task 15 boundary remains for sessions that do not supply authoritative navigation facts: they expose `approach_blocked_unverified_path`. Task 16 supplies those facts only for its documented test arena; the opponent never treats visual pixels as authority. See `BATTLEFIELD_MOVEMENT_FOUNDATION.md`.
 
-Opening Initiative remains `1d10 + INIT`. A lower opening rank waits for the higher rank's declaration without an invented time delay. Once legally released, both actions can begin at the same simulation timestamp and execute concurrently. After opening, ordinary attacks continue sequentially at the existing `5 seconds / AT` cadence. Critical Reactions remain separate zero-Act events.
+Opening Initiative remains `1d10 + INIT`, but the Task 31E Option B ruling removes declaration gating: lower-Initiative actors do not wait for a higher result to act. Every actor may move and independently declare a legal action at time zero. INIT continues to order genuinely simultaneous effect events through the existing event queue. Ordinary actions retain the existing `5 seconds / AT` cadence, and Critical Reactions remain separate zero-Act events.
 
 ## Encounter lifecycle
 

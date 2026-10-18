@@ -58,6 +58,8 @@ var damage_resolution_id: String = ""
 var consequence_damage_multipliers: Array[Dictionary] = []
 var same_attack_condition_protected_actor_id: StringName = &""
 var revision: int = 0
+var strike_index: int = 1
+var strikes_per_act: int = 1
 
 
 func _init(
@@ -75,7 +77,9 @@ func _init(
 	p_size_relationship: StringName = &"",
 	p_attacker_size_category: StringName = &"",
 	p_target_size_category: StringName = &"",
-	p_tiny_target_dodge_bonus: int = 0
+	p_tiny_target_dodge_bonus: int = 0,
+	p_strike_index: int = 1,
+	p_strikes_per_act: int = 1
 ) -> void:
 	attack_instance_id = p_attack_instance_id
 	attack_definition_id = p_definition.attack_definition_id
@@ -99,6 +103,8 @@ func _init(
 	location_acc_modifier = p_location_acc_modifier
 	acc_target = base_acc + base_acc_modifier + location_acc_modifier
 	roll_bonus = p_roll_bonus
+	strike_index = p_strike_index
+	strikes_per_act = p_strikes_per_act
 
 
 func to_dictionary() -> Dictionary:
@@ -150,4 +156,6 @@ func to_dictionary() -> Dictionary:
 		"consequence_damage_multipliers": consequence_damage_multipliers.duplicate(true),
 		"same_attack_condition_protected_actor_id": String(same_attack_condition_protected_actor_id),
 		"revision": revision,
+		"strike_index": strike_index,
+		"strikes_per_act": strikes_per_act,
 	}

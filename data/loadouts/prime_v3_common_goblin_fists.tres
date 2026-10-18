@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CombatLoadoutDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_loadout_definition_resource.gd" id="1_loadout"]
+
+[resource]
+script = ExtResource("1_loadout")
+definition_id = &"prime_v3_common_goblin_fists"
+display_name = "Common Goblin Natural Fists"
+primary_weapon_ref = &"prime_v3_common_goblin_fists"
+shield_ref = &""
+armor_refs = PackedStringArray()
+source_refs = PackedStringArray("Common Goblin.doc: two bashing fists; Armor X")

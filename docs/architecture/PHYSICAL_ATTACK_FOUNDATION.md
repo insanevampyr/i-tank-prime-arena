@@ -10,7 +10,7 @@ The Task 6 attack component stops after physical attack accuracy. Phase 1 Task 7
 
 `CombatSimulation.begin_combat()` validates that every registered actor has a resolved INIT, then draws one authoritative d10 per actor in stable actor-ID order. Each actor snapshot stores the natural d10, RNG draw index, base INIT, total and opening rank.
 
-Opening ranks sort by total descending and then base INIT descending. Actors tied on both values share a rank and are simultaneously eligible, matching Prime's detailed tie rule. Lower ranks remain blocked until every actor in the current rank has made a first declaration. Unlocking a later rank does not advance simulation time because neither Prime nor the approved Arena rules provide an Initiative-to-seconds formula. Same-timestamp effect events continue to use base INIT and the existing stable event fallback.
+Opening ranks sort by total descending and then base INIT descending and remain recorded as evidence. Under the controlling Task 31E Option B ruling, those ranks do not gate declarations: every actor may move and independently begin any legal action as soon as combat starts. INIT orders genuinely competing effect events at the same authoritative timestamp; the existing stable sequence and event identifier remain the fallback. No Initiative-to-seconds delay or priority window exists.
 
 This is a declaration-order gate, not a turn queue or arbitrary opening delay. A future input layer still needs an explicit pass/forfeit intention so combat cannot wait forever for a participant that chooses not to declare.
 
@@ -29,7 +29,7 @@ This is a declaration-order gate, not a turn queue or arbitrary opening delay. A
 
 The authority rejects an attack before action mutation or RNG use when any required fact is invalid or unresolved:
 
-- Opening Initiative has not been resolved or the attacker is not yet eligible by opening rank.
+- Opening Initiative has not been resolved. Once resolved, rank never delays an otherwise legal declaration.
 - Attacker or target is missing, identical, or has no positive current HPC.
 - The declared weapon reference is not equipped.
 - ACC, target location modifier or maximum range is unresolved.

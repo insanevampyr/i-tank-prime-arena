@@ -1,0 +1,62 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_common_goblin"
+display_name = "Common Goblin"
+actor_kind = &"prime_v3_creature"
+size_category = &"small"
+race_name = "Creature"
+class_names = PackedStringArray()
+level = -1
+attributes = {
+"app": 1,
+"dex": 6,
+"end": 1,
+"int": 1,
+"luk": 0,
+"man": 1,
+"spd": 7,
+"str": 3,
+"wis": 1,
+"wit": 6
+}
+combat_stats = {
+"acc": 7,
+"at": 1,
+"dp": 2,
+"dt": 4,
+"hpm": 1,
+"init": 3,
+"mr": 6,
+"nal": 0,
+"physical_soak": 0,
+"rb": 0,
+"sb": 0
+}
+resource_maxima = {
+"ap": 1
+}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": false,
+"weapon_block": false
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": -1,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("Common Goblin.doc, Common Goblin combat statistics and equipment entry")
+field_sources = {
+"attributes": "Common Goblin.doc, Common Goblin statistics entry",
+"combat_stats": "Common Goblin.doc, Common Goblin statistics entry",
+"equipment": "Common Goblin.doc: two bashing fists, 1d4, reach 1 foot; no armor/shield listed",
+"resource_maxima.ap": "Common Goblin.doc, AP 1",
+"running_profile": "Common Goblin.doc provides SCM 0 and RB 0, but no Running investment; Goblins do not use Running in Task 31C",
+"size_category": "Task 31C designer-approved Arena ruling: Common Goblins use the Small size category; this is not printed on Common Goblin.doc"
+}
+unresolved_fields = PackedStringArray("running_profile.running_skill_investment")

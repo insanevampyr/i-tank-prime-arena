@@ -25,6 +25,13 @@ const SizeBasedTargetingTests = preload("res://tests/test_size_based_targeting.g
 const PlayableDifferentSizeCombatTests = preload("res://tests/test_playable_different_size_combat.gd")
 const PresentationEventConsumptionTests = preload("res://tests/test_presentation_event_consumption.gd")
 const FiveWaveEncounterFrameworkTests = preload("res://tests/test_five_wave_encounter_framework.gd")
+const CommonGoblinWaveTests = preload("res://tests/test_common_goblin_wave.gd")
+const WavePerformanceHpcTests = preload("res://tests/test_wave_performance_hpc.gd")
+const IndependentInitiativePursuitLabelTests = preload("res://tests/test_independent_initiative_pursuit_labels.gd")
+const GoblinWallNavigationTests = preload("res://tests/test_goblin_wall_navigation.gd")
+const GoblinWallNavigationSeedControlsTests = preload("res://tests/test_goblin_wall_navigation_seed_controls.gd")
+const SeedFocusTargetHudTests = preload("res://tests/test_seed_focus_target_hud.gd")
+const MovementCongestionPresentationTests = preload("res://tests/test_movement_congestion_presentation.gd")
 
 
 func _initialize() -> void:
@@ -33,6 +40,13 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 31J movement congestion and presentation", "instance": MovementCongestionPresentationTests.new()},
+		{"name": "Task 31I seed focus, target cycling and HUD layout", "instance": SeedFocusTargetHudTests.new()},
+		{"name": "Task 31H wall navigation and seed controls", "instance": GoblinWallNavigationSeedControlsTests.new()},
+		{"name": "Task 31G Goblin wall navigation", "instance": GoblinWallNavigationTests.new()},
+		{"name": "Task 31E independent Initiative, pursuit and labels", "instance": IndependentInitiativePursuitLabelTests.new()},
+		{"name": "Task 31D Wave performance and HPC presentation", "instance": WavePerformanceHpcTests.new()},
+		{"name": "Task 31C Common Goblin Wave 1", "instance": CommonGoblinWaveTests.new()},
 		{"name": "Task 31B deterministic five-wave framework", "instance": FiveWaveEncounterFrameworkTests.new()},
 		{"name": "Task 30 presentation event consumption", "instance": PresentationEventConsumptionTests.new()},
 		{"name": "Task 29 playable different-size combat", "instance": PlayableDifferentSizeCombatTests.new()},

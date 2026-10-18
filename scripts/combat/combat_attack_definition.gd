@@ -25,6 +25,7 @@ var physical_damage: CombatPhysicalDamageDefinition
 var critical_trigger_policy: CombatCriticalTriggerPolicy
 var allows_approach_during_execution: bool
 var uses_size_based_location_acc: bool
+var strikes_per_act: int
 
 
 func _init(
@@ -47,11 +48,13 @@ func _init(
 	p_physical_damage: CombatPhysicalDamageDefinition = null,
 	p_critical_trigger_policy: CombatCriticalTriggerPolicy = null,
 	p_allows_approach_during_execution: bool = false,
-	p_uses_size_based_location_acc: bool = false
+	p_uses_size_based_location_acc: bool = false,
+	p_strikes_per_act: int = 1
 ) -> void:
 	assert(not String(p_attack_definition_id).is_empty(), "Physical attack definitions require a stable identifier.")
 	assert(not String(p_weapon_ref).is_empty(), "Physical attack definitions require an equipment reference.")
 	assert(p_required_acts > 0, "Physical attacks must require at least one Act interval.")
+	assert(p_strikes_per_act > 0, "Physical attacks must produce at least one strike per Act.")
 	assert(p_allowed_target_locations.has("torso"), "Ordinary physical attacks must support the default torso location.")
 	for location: Variant in p_acc_modifiers_by_location:
 		assert(typeof(p_acc_modifiers_by_location[location]) == TYPE_INT, "ACC modifiers must be integers.")
@@ -93,6 +96,7 @@ func _init(
 	critical_trigger_policy = p_critical_trigger_policy
 	allows_approach_during_execution = p_allows_approach_during_execution
 	uses_size_based_location_acc = p_uses_size_based_location_acc
+	strikes_per_act = p_strikes_per_act
 	if critical_trigger_policy == null:
 		critical_trigger_policy = CombatCriticalTriggerPolicy.new()
 
@@ -146,4 +150,5 @@ func to_dictionary() -> Dictionary:
 		"critical_trigger_policy": critical_trigger_policy.to_dictionary(),
 		"allows_approach_during_execution": allows_approach_during_execution,
 		"uses_size_based_location_acc": uses_size_based_location_acc,
+		"strikes_per_act": strikes_per_act,
 	}

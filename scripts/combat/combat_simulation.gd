@@ -124,8 +124,11 @@ func begin_combat() -> Dictionary:
 		previous_total = actor_state.opening_initiative_total
 		previous_init = base_init
 	_opening_rank_count = rank + 1
-	_current_opening_rank = 0
-	_opening_sequence_complete = false
+	# Task 31E designer ruling: opening Initiative records priority but never
+	# gates an actor's first legal declaration. INIT still orders genuinely
+	# simultaneous queued effects through CombatEventQueue.
+	_current_opening_rank = _opening_rank_count
+	_opening_sequence_complete = true
 	_combat_started = true
 	_state_revision += 1
 
@@ -312,8 +315,6 @@ func start_action(
 		return _failure("actor_prone")
 	if not actor_state.current_action_instance_id.is_empty():
 		return _failure("actor_action_in_progress")
-	if not _can_begin_opening_action(actor_state):
-		return _failure("opening_initiative_wait")
 	for dependency_id: String in dependency_action_ids:
 		if not _actions.has(dependency_id):
 			return _failure("unknown_dependency")
@@ -503,60 +504,43 @@ func start_physical_attack(
 	if not _attack_definitions.has(definition_key):
 		_attack_definitions[definition_key] = definition
 	var action_instance_id: String = action_result["action_instance_id"]
-	var attack_instance_id := _make_attack_instance_id(_next_attack_sequence)
-	_next_attack_sequence += 1
-	var attack := CombatAttackInstance.new(
-		attack_instance_id,
-		definition,
-		action_instance_id,
-		attacker_id,
-		target_id,
-		resolved_location,
-		clock.get_elapsed_us(),
-		int(base_acc_value),
-		location_modifier,
-		roll_bonus,
-		is_back_attack,
-		StringName(location_context.get("size_relationship", "")),
-		StringName(location_context.get("attacker_size_category", "")),
-		StringName(location_context.get("target_size_category", "")),
-		int(location_context.get("tiny_target_dodge_bonus", 0))
-	)
-	attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
-	attack.declared_target_position_microfeet = target_state.position_microfeet
-	attack.declaration_line_of_sight_verified = authoritative_line_of_sight
 	var declared_offset := target_state.position_microfeet - attacker_state.position_microfeet
 	var distance_squared := declared_offset.x * declared_offset.x + declared_offset.y * declared_offset.y
-	_attacks[attack_instance_id] = attack
-	_attack_by_action_id[action_instance_id] = attack_instance_id
+	var attack_instance_ids: Array[String] = []
+	for strike_index in range(1, definition.strikes_per_act + 1):
+		var attack_instance_id := _make_attack_instance_id(_next_attack_sequence)
+		_next_attack_sequence += 1
+		var attack := CombatAttackInstance.new(
+			attack_instance_id, definition, action_instance_id, attacker_id, target_id,
+			resolved_location, clock.get_elapsed_us(), int(base_acc_value), location_modifier,
+			roll_bonus, is_back_attack,
+			StringName(location_context.get("size_relationship", "")),
+			StringName(location_context.get("attacker_size_category", "")),
+			StringName(location_context.get("target_size_category", "")),
+			int(location_context.get("tiny_target_dodge_bonus", 0)), strike_index, definition.strikes_per_act
+		)
+		attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
+		attack.declared_target_position_microfeet = target_state.position_microfeet
+		attack.declaration_line_of_sight_verified = authoritative_line_of_sight
+		_attacks[attack_instance_id] = attack
+		attack_instance_ids.append(attack_instance_id)
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"physical_attack_declared", _get_actor_initiative(attacker_key), attacker_id, target_id,
+			{
+				"attack_instance_id": attack_instance_id, "action_instance_id": action_instance_id,
+				"attack_definition_id": definition_key, "weapon_ref": String(definition.weapon_ref),
+				"target_location": String(resolved_location), "size_relationship": String(attack.size_relationship),
+				"attacker_size_category": String(attack.attacker_size_category), "target_size_category": String(attack.target_size_category),
+				"tiny_target_dodge_bonus": attack.tiny_target_dodge_bonus, "location_acc_modifier": attack.location_acc_modifier,
+				"acc_target": attack.acc_target, "distance_squared_microfeet": distance_squared, "request_id": request_id,
+				"delivery_class": String(definition.delivery_class), "damage_types": Array(definition.damage_types),
+				"physical_soak_eligible": definition.physical_soak_eligible, "is_back_attack": is_back_attack,
+				"strike_index": strike_index, "strikes_per_act": definition.strikes_per_act,
+			}
+		)
+	_attack_by_action_id[action_instance_id] = attack_instance_ids
 	_state_revision += 1
-	_record_resolved_event(
-		clock.get_elapsed_us(),
-		&"physical_attack_declared",
-		_get_actor_initiative(attacker_key),
-		attacker_id,
-		target_id,
-		{
-			"attack_instance_id": attack_instance_id,
-			"action_instance_id": action_instance_id,
-			"attack_definition_id": definition_key,
-			"weapon_ref": String(definition.weapon_ref),
-			"target_location": String(resolved_location),
-			"size_relationship": String(attack.size_relationship),
-			"attacker_size_category": String(attack.attacker_size_category),
-			"target_size_category": String(attack.target_size_category),
-			"tiny_target_dodge_bonus": attack.tiny_target_dodge_bonus,
-			"location_acc_modifier": attack.location_acc_modifier,
-			"acc_target": attack.acc_target,
-			"distance_squared_microfeet": distance_squared,
-			"request_id": request_id,
-			"delivery_class": String(definition.delivery_class),
-			"damage_types": Array(definition.damage_types),
-			"physical_soak_eligible": definition.physical_soak_eligible,
-			"is_back_attack": is_back_attack,
-		}
-	)
-	return _success({"attack_instance_id": attack_instance_id, "action_instance_id": action_instance_id})
+	return _success({"attack_instance_id": attack_instance_ids[0], "attack_instance_ids": attack_instance_ids, "action_instance_id": action_instance_id})
 
 
 func _resolve_location_acc_context(
@@ -1086,6 +1070,10 @@ func get_actor_state(actor_id: StringName) -> CombatActorState:
 	return _actor_states.get(String(actor_id)) as CombatActorState
 
 
+func get_actor_definition(actor_id: StringName) -> CombatActorDefinition:
+	return _actor_definitions.get(String(actor_id)) as CombatActorDefinition
+
+
 func get_action(action_instance_id: String) -> CombatActionInstance:
 	return _actions.get(action_instance_id) as CombatActionInstance
 
@@ -1464,8 +1452,12 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_id: String) -> void:
 	if not _attack_by_action_id.has(action.action_instance_id):
 		return
-	var attack_instance_id: String = _attack_by_action_id[action.action_instance_id]
-	var attack: CombatAttackInstance = _attacks[attack_instance_id]
+	for attack_instance_id: String in _get_linked_attack_instance_ids(action.action_instance_id):
+		var attack: CombatAttackInstance = _attacks[attack_instance_id]
+		_resolve_single_linked_attack_accuracy(action, attack, parent_event_id)
+
+
+func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack: CombatAttackInstance, parent_event_id: String) -> void:
 	if attack.status != CombatAttackInstance.STATUS_EXECUTING:
 		return
 	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
@@ -1493,6 +1485,8 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 				"accuracy_rolled": false,
 				"elapsed_action_time_refunded": false,
 				"damage_applied": false,
+				"strike_index": attack.strike_index,
+				"strikes_per_act": attack.strikes_per_act,
 			},
 			parent_event_id
 		)
@@ -1541,6 +1535,8 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 			"critical_failure": attack.critical_failure,
 			"result_state": attack.status,
 			"damage_applied": false,
+			"strike_index": attack.strike_index,
+			"strikes_per_act": attack.strikes_per_act,
 		},
 		parent_event_id
 	)
@@ -1571,6 +1567,10 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 		attack.final_range_legal = false
 		attack.final_line_of_sight_legal = null
 		return _failure("final_attack_actor_unavailable")
+	if attacker_state.current_hpc == null or int(attacker_state.current_hpc) <= 0:
+		return _failure("attacker_not_eligible_at_resolution")
+	if target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		return _failure("target_not_eligible_at_resolution")
 	attack.final_attacker_position_microfeet = attacker_state.position_microfeet
 	attack.final_target_position_microfeet = target_state.position_microfeet
 	var offset := target_state.position_microfeet - attacker_state.position_microfeet
@@ -1605,28 +1605,43 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 func _interrupt_linked_attack(action: CombatActionInstance, parent_event_id: String) -> void:
 	if not _attack_by_action_id.has(action.action_instance_id):
 		return
-	var attack: CombatAttackInstance = _attacks[_attack_by_action_id[action.action_instance_id]]
-	if attack.status != CombatAttackInstance.STATUS_EXECUTING:
-		return
-	attack.status = CombatAttackInstance.STATUS_INTERRUPTED
-	attack.resolved_at_us = clock.get_elapsed_us()
-	attack.revision += 1
-	_state_revision += 1
-	var interrupted := _record_resolved_event(
-		clock.get_elapsed_us(),
-		&"physical_attack_interrupted",
-		action.initiative,
-		attack.attacker_id,
-		attack.target_id,
-		{
-			"attack_instance_id": attack.attack_instance_id,
-			"action_instance_id": action.action_instance_id,
-			"natural_d20": null,
-			"damage_applied": false,
-		},
-		parent_event_id
-	)
-	attack.result_event_id = interrupted.event_id
+	for attack_instance_id: String in _get_linked_attack_instance_ids(action.action_instance_id):
+		var attack: CombatAttackInstance = _attacks[attack_instance_id]
+		if attack.status != CombatAttackInstance.STATUS_EXECUTING:
+			continue
+		attack.status = CombatAttackInstance.STATUS_INTERRUPTED
+		attack.resolved_at_us = clock.get_elapsed_us()
+		attack.revision += 1
+		_state_revision += 1
+		var interrupted := _record_resolved_event(
+			clock.get_elapsed_us(),
+			&"physical_attack_interrupted",
+			action.initiative,
+			attack.attacker_id,
+			attack.target_id,
+			{
+				"attack_instance_id": attack.attack_instance_id,
+				"action_instance_id": action.action_instance_id,
+				"natural_d20": null,
+				"damage_applied": false,
+				"strike_index": attack.strike_index,
+				"strikes_per_act": attack.strikes_per_act,
+			},
+			parent_event_id
+		)
+		attack.result_event_id = interrupted.event_id
+
+
+func _get_linked_attack_instance_ids(action_instance_id: String) -> Array[String]:
+	var linked: Variant = _attack_by_action_id.get(action_instance_id, [])
+	if linked is Array:
+		var result: Array[String] = []
+		for attack_instance_id: Variant in linked:
+			result.append(String(attack_instance_id))
+		return result
+	if linked is String:
+		return [linked]
+	return []
 
 
 func _dodge_needs_context(
@@ -2744,12 +2759,6 @@ func _opening_actor_precedes(left_key: String, right_key: String) -> bool:
 	return left_key < right_key
 
 
-func _can_begin_opening_action(actor_state: CombatActorState) -> bool:
-	if not _combat_started or _opening_sequence_complete or actor_state.opening_action_declared:
-		return true
-	return actor_state.opening_order_rank == _current_opening_rank
-
-
 func _mark_opening_action_declared(actor_state: CombatActorState, action_instance_id: String) -> void:
 	if not _combat_started or actor_state.opening_action_declared:
 		return
@@ -2767,18 +2776,6 @@ func _mark_opening_action_declared(actor_state: CombatActorState, action_instanc
 			"opening_order_rank": actor_state.opening_order_rank,
 		}
 	)
-	while _current_opening_rank < _opening_rank_count:
-		var rank_has_pending_actor := false
-		for state_value: Variant in _actor_states.values():
-			var state: CombatActorState = state_value
-			if state.opening_order_rank == _current_opening_rank and not state.opening_action_declared:
-				rank_has_pending_actor = true
-				break
-		if rank_has_pending_actor:
-			break
-		_current_opening_rank += 1
-	if _current_opening_rank >= _opening_rank_count:
-		_opening_sequence_complete = true
 
 
 func _make_attack_instance_id(sequence: int) -> String:

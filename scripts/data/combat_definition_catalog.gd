@@ -14,6 +14,9 @@ const LONG_STAFF_PATH := "res://data/equipment/weapons/prime_v3_long_staff.tres"
 const WOOD_BUCKLER_PATH := "res://data/equipment/shields/prime_v3_wood_buckler.tres"
 const LEATHER_TORSO_PATH := "res://data/equipment/armor/prime_v3_leather_torso.tres"
 const LEATHER_HEAD_PATH := "res://data/equipment/armor/prime_v3_leather_head.tres"
+const COMMON_GOBLIN_CHARACTER_PATH := "res://data/characters/prime_v3_common_goblin.tres"
+const COMMON_GOBLIN_FISTS_PATH := "res://data/equipment/weapons/prime_v3_common_goblin_fists.tres"
+const COMMON_GOBLIN_LOADOUT_PATH := "res://data/loadouts/prime_v3_common_goblin_fists.tres"
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -36,6 +39,9 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_armor(load(LEATHER_TORSO_PATH) as CombatArmorDefinitionResource)
 	catalog.register_armor(load(LEATHER_HEAD_PATH) as CombatArmorDefinitionResource)
 	catalog.register_loadout(load(DEFAULT_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
+	catalog.register_character(load(COMMON_GOBLIN_CHARACTER_PATH) as CombatCharacterDefinitionResource)
+	catalog.register_weapon(load(COMMON_GOBLIN_FISTS_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_loadout(load(COMMON_GOBLIN_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 
 

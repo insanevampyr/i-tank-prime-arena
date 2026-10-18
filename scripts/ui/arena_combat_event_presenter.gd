@@ -48,8 +48,14 @@ static func format_event(event: CombatEvent) -> String:
 		"action_completed":
 			return prefix + "%s action completed." % _display_actor(event.source_actor_id)
 		"physical_attack_declared":
-			return prefix + "%s begins Battle Axe attack on %s [%s -> %s; %s; location ACC %s; final target %s]." % [
+			var strike_label := ""
+			var strikes_per_act := int(payload.get("strikes_per_act", 1))
+			if strikes_per_act > 1:
+				strike_label = " %s/%s" % [payload.get("strike_index", "?"), strikes_per_act]
+			return prefix + "%s begins %s attack%s on %s [%s -> %s; %s; location ACC %s; final target %s]." % [
 				_display_actor(event.source_actor_id),
+				_weapon_display_name(String(payload.get("weapon_ref", "weapon"))),
+				strike_label,
 				_pretty_name(String(payload.get("target_location", "torso"))),
 				String(payload.get("attacker_size_category", "?")),
 				String(payload.get("target_size_category", "?")),
@@ -132,6 +138,15 @@ static func _critical_suffix(payload: Dictionary) -> String:
 
 static func _pretty_name(value: String) -> String:
 	return value.replace("_", " ").capitalize()
+
+
+static func _weapon_display_name(weapon_ref: String) -> String:
+	# The authoritative declaration already carries its actual weapon reference.
+	# Strip catalog namespaces only for presentation; never substitute actor data.
+	var label := weapon_ref.trim_prefix("prime_v3_")
+	if label.begins_with("common_goblin_"):
+		label = label.trim_prefix("common_goblin_")
+	return _pretty_name(label)
 
 
 static func _display_actor(actor_id: StringName) -> String:

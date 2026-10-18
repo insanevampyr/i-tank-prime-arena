@@ -25,14 +25,13 @@ func _test_opening_initiative_reproducibility_and_order() -> void:
 	var alpha_state := first.get_actor_state(&"alpha")
 	_expect_true(alpha_state.opening_initiative_roll >= 1 and alpha_state.opening_initiative_roll <= 10, "Opening Initiative must retain the original d10 result.")
 	_expect_equal(alpha_state.opening_initiative_total, alpha_state.opening_initiative_roll + 100, "Opening Initiative total must equal natural d10 plus base INIT.")
-	var blocked := first.start_action(&"beta", _make_generic_action(&"beta_first"), "beta_too_early")
-	_expect_equal(blocked["reason"], "opening_initiative_wait", "A lower opening rank must not declare before the higher rank.")
-	var alpha_start := first.start_action(&"alpha", _make_generic_action(&"alpha_first"), "alpha_first_request")
-	_expect_true(alpha_start["success"], "The highest opening rank must be allowed to declare first.")
 	var beta_start := first.start_action(&"beta", _make_generic_action(&"beta_first"), "beta_first_request")
-	_expect_true(beta_start["success"], "The next opening rank must unlock after the prior declaration without an invented time delay.")
+	_expect_true(beta_start["success"], "A lower opening rank must be independently eligible to declare immediately.")
+	var alpha_start := first.start_action(&"alpha", _make_generic_action(&"alpha_first"), "alpha_first_request")
+	_expect_true(alpha_start["success"], "The higher opening rank must remain independently eligible.")
 	_expect_equal(first.get_action(alpha_start["action_instance_id"]).started_at_us, 0, "Opening order must not create an arbitrary timestamp offset.")
-	_expect_equal(first.get_action(beta_start["action_instance_id"]).started_at_us, 0, "Lower opening ranks may begin at the same simulation timestamp after declaration order is satisfied.")
+	_expect_equal(first.get_action(beta_start["action_instance_id"]).started_at_us, 0, "Lower opening ranks may begin at the same simulation timestamp without waiting for another declaration.")
+	_expect_true(first.get_state_snapshot().get("opening_sequence_complete", false), "Opening Initiative must be fully resolved before independent declarations begin.")
 
 
 func _test_opening_initiative_ties() -> void:

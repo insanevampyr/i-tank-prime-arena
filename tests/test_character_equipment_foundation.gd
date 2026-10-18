@@ -224,9 +224,8 @@ func _test_opponent_activation_condition() -> void:
 	if player_first == null: return
 	_expect_equal(player_first.get_opponent_behavior_status(), "idle", "Before START, the enabled opponent driver must remain prepared but inactive.")
 	player_first.start_encounter()
-	_expect_equal(player_first.get_opponent_behavior_status(), "blocked_opening_initiative_wait", "After START, a lower-ranked opponent must wait only for the player's opening declaration.")
-	player_first.request_player_attack("unlock_opponent")
-	_expect_true(player_first.is_opponent_attack_in_flight(), "The opponent must declare immediately at the same simulation time once the higher opening rank declares.")
+	_expect_true(player_first.is_opponent_attack_in_flight(), "After START, a lower-ranked opponent must independently declare without waiting for player input.")
+	_expect_equal(player_first.simulation.clock.get_elapsed_us(), 0, "Independent opponent activation must not invent an Initiative delay.")
 
 
 func _test_hazard_and_wall_authority() -> void:

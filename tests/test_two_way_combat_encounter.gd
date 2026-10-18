@@ -52,10 +52,9 @@ func _test_fixture_validation() -> void:
 func _test_opening_and_overlapping_attacks() -> void:
 	var session := _make_two_way_session(ArenaCombatSession.DEFAULT_SEED)
 	_expect_equal(session.get_opponent_behavior_label(), "task15_deterministic_test_opponent", "Opponent behavior must be explicitly labeled as a controlled fixture, not general AI.")
-	_expect_equal(session.get_opponent_behavior_status(), "blocked_opening_initiative_wait", "The lower opening rank must wait without an invented real-time delay.")
+	_expect_true(session.is_opponent_attack_in_flight(), "The opponent must independently declare a legal opening action even before the player acts.")
 	var player_start := session.request_player_attack("keyboard")
-	_expect_true(player_start.get("success", false), "The opening-eligible player must be able to declare the first legal action.")
-	_expect_true(session.is_opponent_attack_in_flight(), "After the first opening declaration, the opponent must start its independently legal action at the same simulation timestamp.")
+	_expect_true(player_start.get("success", false), "The player must independently declare while the opponent's action is executing.")
 	var opponent_attack := session.simulation.get_attack(session.get_active_opponent_attack_id())
 	_expect_true(opponent_attack != null and opponent_attack.attacker_id == Fixture.OPPONENT_ID, "The scripted opponent must submit the ordinary attack through the shared authoritative attack pipeline.")
 	if opponent_attack != null:
@@ -70,9 +69,8 @@ func _test_out_of_range_and_restrictions() -> void:
 	var out_of_range := ArenaCombatSession.new(1)
 	_expect_true(out_of_range.initialize(PLAYER_POSITION, Vector2i(4_000_000, 0)).get("success", false), "Out-of-range fixture setup must initialize.")
 	out_of_range.set_opponent_behavior_enabled(true)
-	_expect_true(out_of_range.request_player_attack("unlock_simultaneous_opening").get("success", false), "The opening-eligible player must declare before the opponent's simultaneous rank is unlocked.")
 	_expect_equal(out_of_range.get_opponent_behavior_status(), "approach_blocked_unverified_path", "The opponent must block an unauthored approach path rather than teleport or ignore terrain.")
-	_expect_true(out_of_range.is_opponent_attack_in_flight(), "The opponent may declare outside reach even when movement remains blocked by unauthored navigation.")
+	_expect_true(out_of_range.is_opponent_attack_in_flight(), "The opponent may independently declare outside reach even when movement remains blocked by unauthored navigation.")
 	out_of_range.advance_by(2_500_000)
 	_expect_true(not _has_event_from(out_of_range, "physical_attack_accuracy_resolved", Fixture.OPPONENT_ID), "A blocked opponent still outside reach at resolution must not roll ACC.")
 

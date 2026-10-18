@@ -6,6 +6,7 @@ const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const ArenaWaveStateMachine = preload("res://scripts/combat/arena_wave_state_machine.gd")
+const CommonGoblinFixture = preload("res://scripts/creatures/common_goblin_fixture.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -21,6 +22,8 @@ const OPPONENT_REPATH_DISTANCE_MICROFEET := ArenaBattlefield.NAVIGATION_STEP_MIC
 var simulation: CombatSimulation
 
 var _attack_definition: CombatAttackDefinition
+var _attack_definitions_by_actor: Dictionary = {}
+var _active_attack_ids_by_actor: Dictionary = {}
 var _selected_target_id: StringName = &""
 var _selected_target_location: StringName = &"torso"
 var _next_location_8_is_knee: bool = true
@@ -52,6 +55,19 @@ var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
 var _resolved_event_history_generation: int = 0
 var _arena_wave_state_machine: ArenaWaveStateMachine
+var _is_wave_one_goblin_encounter: bool = false
+var _goblin_actor_ids := PackedStringArray()
+var _goblin_paths: Dictionary = {}
+var _goblin_path_targets: Dictionary = {}
+var _goblin_attack_destinations: Dictionary = {}
+var _goblin_path_rebuild_counts: Dictionary = {}
+var _goblin_failed_path_cache: Dictionary = {}
+var _goblin_failed_path_cache_hits: Dictionary = {}
+var _goblin_static_collision_counts: Dictionary = {}
+var _goblin_movement_models: Dictionary = {}
+var _goblin_movement_round_indices: Dictionary = {}
+var _goblin_movement_spent: Dictionary = {}
+var _goblin_last_movement_us: int = 0
 
 
 func _init(
@@ -86,6 +102,11 @@ func initialize(
 	if result.get("success", false):
 		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
 		_attack_definition = result["attack_definition"]
+		_attack_definitions_by_actor = {
+			String(Fixture.PLAYER_ID): _attack_definition,
+			String(Fixture.OPPONENT_ID): _attack_definition,
+		}
+		_active_attack_ids_by_actor.clear()
 		_selected_target_id = Fixture.OPPONENT_ID
 		_selected_target_location = &"torso"
 		_next_location_8_is_knee = true
@@ -112,6 +133,146 @@ func initialize(
 	return result
 
 
+func initialize_wave_one_goblins(
+	player_position_microfeet: Vector2i,
+	first_goblin_position_microfeet: Vector2i,
+	start_active: bool = true
+) -> Dictionary:
+	if _initialized:
+		return _failure("encounter_already_initialized")
+	_initial_player_position_microfeet = player_position_microfeet
+	_initial_opponent_position_microfeet = first_goblin_position_microfeet
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var wave_initialization := _arena_wave_state_machine.initialize(_roll_wave_quantity)
+	if not wave_initialization.get("success", false):
+		return _failure(String(wave_initialization.get("reason", "wave_initialization_failed")))
+	var goblin_count := _arena_wave_state_machine.get_resolved_enemy_count()
+	var goblin_positions := _make_wave_one_goblin_positions(first_goblin_position_microfeet, goblin_count)
+	if goblin_positions.size() != goblin_count:
+		return _failure("goblin_spawn_positions_unavailable")
+	var occupancy := {String(Fixture.PLAYER_ID): player_position_microfeet}
+	if not _battlefield.is_position_legal(Fixture.PLAYER_ID, player_position_microfeet, occupancy).get("legal", false):
+		return _failure("player_spawn_position_illegal")
+	for index in range(goblin_positions.size()):
+		var actor_id := _goblin_actor_id(index)
+		occupancy[String(actor_id)] = goblin_positions[index]
+		if not _battlefield.is_position_legal(actor_id, goblin_positions[index], occupancy).get("legal", false):
+			return _failure("goblin_spawn_position_illegal")
+
+	var player_attack := Fixture.make_attack_definition()
+	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
+	var player_validation := Fixture.validate_combatant_fixture(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_validation.get("success", false):
+		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
+	var player_registration := _register_wave_combatant(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_registration.get("success", false):
+		return player_registration
+	_attack_definition = player_attack
+	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
+
+	_goblin_actor_ids = PackedStringArray()
+	for index in range(goblin_count):
+		var goblin_id := _goblin_actor_id(index)
+		var goblin_actor := CommonGoblinFixture.make_actor(goblin_id, "Common Goblin %d" % (index + 1))
+		var goblin_attack := CommonGoblinFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+		var goblin_validation := CommonGoblinFixture.validate_actor(goblin_actor, goblin_attack)
+		if not goblin_validation.get("success", false):
+			return _failure(String(goblin_validation.get("reason", "goblin_fixture_invalid")))
+		var goblin_registration := _register_wave_combatant(
+			goblin_actor,
+			CommonGoblinFixture.make_defense_profile(goblin_id),
+			CommonGoblinFixture.make_damage_protection_profile(goblin_id),
+			goblin_attack
+		)
+		if not goblin_registration.get("success", false):
+			return goblin_registration
+		_attack_definitions_by_actor[String(goblin_id)] = goblin_attack
+		_goblin_actor_ids.append(String(goblin_id))
+
+	var player_position_result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, player_position_microfeet, 0)
+	if not player_position_result.get("success", false):
+		return player_position_result
+	for index in range(_goblin_actor_ids.size()):
+		var goblin_position_result := simulation.apply_authoritative_position(
+			StringName(_goblin_actor_ids[index]), goblin_positions[index], 180_000 + index * 180_000
+		)
+		if not goblin_position_result.get("success", false):
+			return goblin_position_result
+	var opening_result := simulation.begin_combat()
+	if not opening_result.get("success", false):
+		return opening_result
+	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	_publish_wave_transition(wave_initialization)
+	set_wave_creature_integration_available(CommonGoblinFixture.CREATURE_ID, true)
+	var activation := activate_current_wave(_goblin_actor_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = StringName(_goblin_actor_ids[0])
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialized = true
+	_is_wave_one_goblin_encounter = true
+	_encounter_active = start_active
+	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
+	_opponent_behavior_status = "goblin_wave_idle" if _opponent_behavior_enabled else "disabled"
+	_goblin_paths.clear()
+	_goblin_path_targets.clear()
+	_goblin_attack_destinations.clear()
+	_goblin_path_rebuild_counts.clear()
+	_goblin_failed_path_cache.clear()
+	_goblin_failed_path_cache_hits.clear()
+	_goblin_static_collision_counts.clear()
+	_goblin_movement_models.clear()
+	_goblin_movement_round_indices.clear()
+	_goblin_movement_spent.clear()
+	_goblin_last_movement_us = simulation.clock.get_elapsed_us()
+	for goblin_id: String in _goblin_actor_ids:
+		_goblin_movement_models[goblin_id] = _make_goblin_movement_model(StringName(goblin_id), simulation.get_actor_state(StringName(goblin_id)).position_microfeet)
+		_goblin_movement_round_indices[goblin_id] = simulation.clock.get_round_index()
+		_goblin_movement_spent[goblin_id] = 0
+		_goblin_path_rebuild_counts[goblin_id] = 0
+		_goblin_failed_path_cache_hits[goblin_id] = 0
+		_goblin_static_collision_counts[goblin_id] = 0
+	_resolved_event_history_generation += 1
+	_last_error = ""
+	if _opponent_behavior_enabled and _encounter_active:
+		_run_opponent_behavior()
+	return {
+		"success": true,
+		"opening_order": opening_result.get("opening_order", []),
+		"goblin_actor_ids": Array(_goblin_actor_ids),
+		"resolved_goblin_count": goblin_count,
+		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS),
+	}
+
+
+func _register_wave_combatant(
+	actor: CombatActorDefinition,
+	defense_profile: CombatDefenseProfile,
+	protection_profile: CombatDamageProtectionProfile,
+	attack: CombatAttackDefinition
+) -> Dictionary:
+	for registration: Dictionary in [
+		simulation.register_actor(actor),
+		simulation.register_defense_profile(actor.actor_id, defense_profile),
+		simulation.register_damage_protection_profile(actor.actor_id, protection_profile),
+		simulation.register_critical_reaction_attack(actor.actor_id, attack, true),
+	]:
+		if not registration.get("success", false):
+			return registration
+	return {"success": true}
+
+
 func set_opponent_behavior_enabled(enabled: bool) -> void:
 	_opponent_behavior_enabled = enabled
 	_opponent_behavior_status = "idle" if enabled else "disabled"
@@ -122,8 +283,10 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 func start_encounter() -> Dictionary:
 	if not _initialized:
 		return _failure("encounter_not_initialized")
-	if _arena_wave_state_machine != null:
+	if _arena_wave_state_machine != null and not _is_wave_one_goblin_encounter:
 		return _failure("wave_circuit_requires_creature_activation")
+	if _is_wave_one_goblin_encounter and _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_ACTIVE:
+		return _failure("wave_not_active")
 	if _encounter_active:
 		return _failure("encounter_already_running")
 	if _encounter_state != ENCOUNTER_READY:
@@ -140,6 +303,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 		return _failure("external_simulation_reset_unsupported")
 	simulation = CombatSimulation.new(_seed_value)
 	_attack_definition = null
+	_attack_definitions_by_actor.clear()
+	_active_attack_ids_by_actor.clear()
 	_selected_target_id = &""
 	_selected_target_location = &"torso"
 	_next_location_8_is_knee = true
@@ -153,9 +318,25 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_opponent_behavior_status = "idle" if _opponent_behavior_enabled else "disabled"
 	_opponent_movement_model = null
 	_arena_wave_state_machine = null
+	_goblin_actor_ids = PackedStringArray()
+	_goblin_paths.clear()
+	_goblin_path_targets.clear()
+	_goblin_attack_destinations.clear()
+	_goblin_path_rebuild_counts.clear()
+	_goblin_failed_path_cache.clear()
+	_goblin_failed_path_cache_hits.clear()
+	_goblin_static_collision_counts.clear()
+	_goblin_movement_models.clear()
+	_goblin_movement_round_indices.clear()
+	_goblin_movement_spent.clear()
+	_goblin_last_movement_us = 0
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
-	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	return (
+		initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+		if _is_wave_one_goblin_encounter
+		else initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	)
 
 
 func set_arena_bounds_microfeet(bounds: Rect2i) -> void:
@@ -170,6 +351,13 @@ func configure_battlefield(battlefield: ArenaBattlefield) -> void:
 	_arena_bounds_microfeet = battlefield.bounds_microfeet
 	_opponent_path.clear()
 	_opponent_path_target_microfeet = null
+	_goblin_paths.clear()
+	_goblin_path_targets.clear()
+	_goblin_attack_destinations.clear()
+	_goblin_path_rebuild_counts.clear()
+	_goblin_failed_path_cache.clear()
+	_goblin_failed_path_cache_hits.clear()
+	_goblin_static_collision_counts.clear()
 
 
 func get_battlefield() -> ArenaBattlefield:
@@ -386,6 +574,9 @@ func is_actor_prone(actor_id: StringName) -> bool:
 
 
 func _get_actor_attack_legality(attacker_id: StringName, target_id: StringName, require_awareness: bool = false) -> Dictionary:
+	var attack_definition := _get_attack_definition_for_actor(attacker_id)
+	if attack_definition == null:
+		return {"success": false, "reason": "attack_definition_unavailable"}
 	var attacker_state := simulation.get_actor_state(attacker_id)
 	var target_state := simulation.get_actor_state(target_id)
 	if attacker_state == null:
@@ -408,7 +599,7 @@ func _get_actor_attack_legality(attacker_id: StringName, target_id: StringName, 
 		return {"success": false, "reason": "actor_critically_staggered"}
 	if not attacker_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(attacker_id):
 		return {"success": false, "reason": "attack_in_progress"}
-	if not attacker_state.equipment_refs.has(String(_attack_definition.weapon_ref)):
+	if not attacker_state.equipment_refs.has(String(attack_definition.weapon_ref)):
 		return {"success": false, "reason": "weapon_not_equipped"}
 	var geometry := _get_actor_attack_geometry(attacker_id, target_id)
 	return {
@@ -423,14 +614,17 @@ func _get_actor_attack_legality(attacker_id: StringName, target_id: StringName, 
 
 
 func _get_actor_attack_geometry(attacker_id: StringName, target_id: StringName) -> Dictionary:
+	var attack_definition := _get_attack_definition_for_actor(attacker_id)
+	if attack_definition == null:
+		return {"success": false, "reason": "attack_definition_unavailable"}
 	var attacker_state := simulation.get_actor_state(attacker_id)
 	var target_state := simulation.get_actor_state(target_id)
 	if attacker_state == null or target_state == null:
 		return {"success": false, "reason": "attack_geometry_unavailable"}
 	var offset := target_state.position_microfeet - attacker_state.position_microfeet
-	var maximum_range := int(_attack_definition.maximum_range_microfeet)
+	var maximum_range := int(attack_definition.maximum_range_microfeet)
 	var in_range := offset.length_squared() <= maximum_range * maximum_range
-	var line_of_sight := not _attack_definition.requires_line_of_sight \
+	var line_of_sight := not attack_definition.requires_line_of_sight \
 		or _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
 	return {
 		"success": in_range and line_of_sight,
@@ -460,13 +654,17 @@ func advance_by(delta_us: int) -> void:
 		var movement_tick_us := -1
 		if not simulation.event_queue.is_empty():
 			step_timestamp_us = mini(step_timestamp_us, (simulation.event_queue.peek_next() as CombatEvent).timestamp_us)
-		if _opponent_behavior_enabled and _battlefield.navigation_authoritative:
+		if _has_authoritative_opponent_movement() and _battlefield.navigation_authoritative:
 			movement_tick_us = _next_opponent_movement_tick_us(simulation.clock.get_elapsed_us())
 			step_timestamp_us = mini(step_timestamp_us, movement_tick_us)
 		simulation.advance_to(step_timestamp_us)
 		if step_timestamp_us == movement_tick_us:
-			_advance_opponent_movement(step_timestamp_us - _opponent_last_movement_us)
-			_opponent_last_movement_us = step_timestamp_us
+			if _is_wave_one_goblin_encounter:
+				_advance_goblin_movement(step_timestamp_us - _goblin_last_movement_us)
+				_goblin_last_movement_us = step_timestamp_us
+			else:
+				_advance_opponent_movement(step_timestamp_us - _opponent_last_movement_us)
+				_opponent_last_movement_us = step_timestamp_us
 		_resolve_ready_attack_pipeline()
 		_refresh_active_attacks()
 		_update_encounter_outcome()
@@ -479,6 +677,11 @@ func advance_by(delta_us: int) -> void:
 
 func get_selected_target_id() -> StringName:
 	return _selected_target_id
+
+
+func get_actor_max_hpm(actor_id: StringName) -> Variant:
+	var definition := simulation.get_actor_definition(actor_id)
+	return null if definition == null else definition.get_combat_stat("hpm")
 
 
 func get_selected_target_location() -> StringName:
@@ -522,6 +725,8 @@ func get_encounter_fixture_id() -> StringName:
 
 
 func get_encounter_display_name() -> String:
+	if _is_wave_one_goblin_encounter:
+		return "WAVE 1: %d COMMON GOBLINS" % _goblin_actor_ids.size()
 	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
 
 
@@ -535,6 +740,18 @@ func get_opponent_behavior_label() -> String:
 
 func get_opponent_path_rebuild_count_for_testing() -> int:
 	return _opponent_path_rebuild_count
+
+
+func get_goblin_path_rebuild_counts_for_testing() -> Dictionary:
+	return _goblin_path_rebuild_counts.duplicate(true)
+
+
+func get_goblin_failed_path_cache_hits_for_testing() -> Dictionary:
+	return _goblin_failed_path_cache_hits.duplicate(true)
+
+
+func get_goblin_static_collision_counts_for_testing() -> Dictionary:
+	return _goblin_static_collision_counts.duplicate(true)
 
 
 func get_last_error() -> String:
@@ -700,11 +917,14 @@ func _sync_wave_snapshot() -> void:
 
 
 func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String, target_location: StringName = &"torso") -> Dictionary:
+	var attack_definition := _get_attack_definition_for_actor(attacker_id)
+	if attack_definition == null:
+		return _failure("attack_definition_unavailable")
 	var request_id := _next_request_id("%s_%s_attack" % [String(attacker_id), input_source])
 	var result := simulation.start_physical_attack(
 		attacker_id,
 		target_id,
-		_attack_definition,
+		attack_definition,
 		request_id,
 		target_location,
 		_battlefield.has_line_of_sight(
@@ -719,7 +939,14 @@ func _request_actor_attack(attacker_id: StringName, target_id: StringName, input
 		_active_player_attack_id = attack_id
 	elif attacker_id == Fixture.OPPONENT_ID:
 		_active_opponent_attack_id = attack_id
+	_active_attack_ids_by_actor[String(attacker_id)] = attack_id
 	return result
+
+
+func _get_attack_definition_for_actor(actor_id: StringName) -> CombatAttackDefinition:
+	if _attack_definitions_by_actor.has(String(actor_id)):
+		return _attack_definitions_by_actor[String(actor_id)] as CombatAttackDefinition
+	return _attack_definition if actor_id == Fixture.PLAYER_ID or actor_id == Fixture.OPPONENT_ID else null
 
 
 func _resolve_attack_final_line_of_sight(attacker_id: StringName, target_id: StringName) -> Variant:
@@ -736,6 +963,9 @@ func _run_opponent_behavior() -> void:
 		return
 	if not _encounter_active or _encounter_state != ENCOUNTER_RUNNING:
 		_opponent_behavior_status = "stopped"
+		return
+	if _is_wave_one_goblin_encounter:
+		_run_goblin_wave_behavior()
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
@@ -791,8 +1021,298 @@ func _run_opponent_behavior() -> void:
 		_opponent_behavior_status = "attacking_while_approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))
 
 
+func _run_goblin_wave_behavior() -> void:
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
+		_opponent_behavior_status = "stopped_target_defeated"
+		return
+	var statuses: Array[String] = []
+	for actor_id: String in _goblin_actor_ids:
+		var goblin_id := StringName(actor_id)
+		var goblin_state := simulation.get_actor_state(goblin_id)
+		if goblin_state == null or goblin_state.current_hpc == null or int(goblin_state.current_hpc) <= 0:
+			_release_goblin_navigation_state(goblin_id)
+			statuses.append("%s:defeated" % actor_id)
+			continue
+		if goblin_state.awareness != &"aware":
+			statuses.append("%s:blocked_unaware" % actor_id)
+			continue
+		if goblin_state.critical_stagger_until_us > simulation.clock.get_elapsed_us():
+			statuses.append("%s:blocked_critical_stagger" % actor_id)
+			continue
+		if goblin_state.conditions.has("prone"):
+			var stand_result := simulation.start_stand_action(goblin_id, _next_request_id("%s_stand" % actor_id))
+			statuses.append("%s:%s" % [actor_id, "standing" if stand_result.get("success", false) else "blocked_stand"])
+			continue
+		if not goblin_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(goblin_id):
+			statuses.append("%s:action_in_progress" % actor_id)
+			continue
+		var legality := _get_actor_attack_legality(goblin_id, Fixture.PLAYER_ID, true)
+		if not legality.get("success", false):
+			statuses.append("%s:blocked_%s" % [actor_id, String(legality.get("reason", "attack_illegal"))])
+			continue
+		if not bool(legality.get("currently_in_range", false)) or not bool(legality.get("currently_unobstructed", false)):
+			var path_result := _ensure_current_goblin_path(goblin_id)
+			statuses.append("%s:%s" % [actor_id, "approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))])
+			continue
+		var attack_result := _request_actor_attack(goblin_id, Fixture.PLAYER_ID, "wave_1_scripted")
+		statuses.append("%s:%s" % [actor_id, "attacking" if attack_result.get("success", false) else "blocked_%s" % String(attack_result.get("reason", "attack_rejected"))])
+	statuses.sort()
+	_opponent_behavior_status = "goblin_wave " + ", ".join(PackedStringArray(statuses))
+
+
+func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
+	var goblin_state := simulation.get_actor_state(goblin_id)
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	var attack_definition := _get_attack_definition_for_actor(goblin_id)
+	if goblin_state == null or player_state == null or attack_definition == null:
+		return {"success": false, "reason": "missing_actor_or_attack_definition"}
+	var path_result := _battlefield.find_path_to_attack_position(
+		goblin_id,
+		goblin_state.position_microfeet,
+		player_state.position_microfeet,
+		int(attack_definition.maximum_range_microfeet),
+		_actor_occupancy_with_goblin_reservations(goblin_id, player_state.position_microfeet)
+	)
+	var key := String(goblin_id)
+	var navigation_signature := _goblin_navigation_state_signature(goblin_id, player_state.position_microfeet)
+	_goblin_paths[key] = []
+	_goblin_path_targets[key] = player_state.position_microfeet
+	_goblin_path_rebuild_counts[key] = int(_goblin_path_rebuild_counts.get(key, 0)) + 1
+	if path_result.get("success", false):
+		var path: Array[Vector2i] = []
+		for waypoint: Vector2i in path_result.get("waypoints", []):
+			path.append(waypoint)
+		_goblin_paths[key] = path
+		_goblin_attack_destinations[key] = goblin_state.position_microfeet if path.is_empty() else path[-1]
+		_goblin_failed_path_cache.erase(key)
+	else:
+		_goblin_attack_destinations.erase(key)
+		_goblin_failed_path_cache[key] = {
+			"signature": navigation_signature,
+			"reason": String(path_result.get("reason", "no_legal_path")),
+		}
+	return path_result
+
+
+func _ensure_current_goblin_path(goblin_id: StringName) -> Dictionary:
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		return {"success": false, "reason": "missing_actor_state"}
+	var key := String(goblin_id)
+	var path: Array = _goblin_paths.get(key, [])
+	var remembered_target: Variant = _goblin_path_targets.get(key, null)
+	if path.is_empty() or remembered_target == null:
+		var signature := _goblin_navigation_state_signature(goblin_id, player_state.position_microfeet)
+		var cached_failure: Dictionary = _goblin_failed_path_cache.get(key, {})
+		if not signature.is_empty() and String(cached_failure.get("signature", "")) == signature:
+			_goblin_failed_path_cache_hits[key] = int(_goblin_failed_path_cache_hits.get(key, 0)) + 1
+			return {
+				"success": false,
+				"reason": "cached_%s" % String(cached_failure.get("reason", "no_legal_path")),
+			}
+		return _build_goblin_approach_path(goblin_id)
+	var target_offset: Vector2i = player_state.position_microfeet - remembered_target
+	if target_offset != Vector2i.ZERO and _retarget_current_goblin_path(goblin_id, player_state.position_microfeet, target_offset).get("success", false):
+		return {"success": true, "reason": "retargeted_existing_path"}
+	if target_offset.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET * OPPONENT_REPATH_DISTANCE_MICROFEET:
+		return _build_goblin_approach_path(goblin_id)
+	return {"success": true, "reason": "stable_existing_path"}
+
+
+func _goblin_navigation_state_signature(goblin_id: StringName, target_position: Vector2i) -> String:
+	var goblin_state := simulation.get_actor_state(goblin_id)
+	var attack_definition := _get_attack_definition_for_actor(goblin_id)
+	if goblin_state == null or attack_definition == null:
+		return ""
+	var occupancy := _actor_occupancy_with_goblin_reservations(goblin_id, target_position)
+	var occupied_entries: Array[Dictionary] = []
+	for occupancy_key: Variant in occupancy.keys():
+		if String(occupancy_key) == String(goblin_id):
+			continue
+		occupied_entries.append({
+			"id": String(occupancy_key),
+			"position": occupancy[occupancy_key],
+		})
+	occupied_entries.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return String(left["id"]) < String(right["id"])
+	)
+	var parts := PackedStringArray([
+		"start=%d,%d" % [goblin_state.position_microfeet.x, goblin_state.position_microfeet.y],
+		"target=%d,%d" % [target_position.x, target_position.y],
+		"reach=%d" % int(attack_definition.maximum_range_microfeet),
+	])
+	for entry: Dictionary in occupied_entries:
+		var position: Vector2i = entry["position"]
+		parts.append("%s=%d,%d" % [String(entry["id"]), position.x, position.y])
+	return "|".join(parts)
+
+
+func _invalidate_goblin_path(goblin_id: StringName) -> void:
+	var key := String(goblin_id)
+	_goblin_paths[key] = []
+	_goblin_path_targets.erase(key)
+	_goblin_attack_destinations.erase(key)
+	_goblin_failed_path_cache.erase(key)
+
+
+func _release_goblin_navigation_state(goblin_id: StringName) -> void:
+	var key := String(goblin_id)
+	_goblin_paths.erase(key)
+	_goblin_path_targets.erase(key)
+	_goblin_attack_destinations.erase(key)
+	_goblin_failed_path_cache.erase(key)
+
+
+func _retarget_current_goblin_path(goblin_id: StringName, target_position: Vector2i, target_offset: Vector2i) -> Dictionary:
+	var key := String(goblin_id)
+	var path: Array = _goblin_paths.get(key, [])
+	var goblin_state := simulation.get_actor_state(goblin_id)
+	var attack_definition := _get_attack_definition_for_actor(goblin_id)
+	if path.is_empty() or goblin_state == null or attack_definition == null:
+		return {"success": false, "reason": "missing_route_state"}
+	var destination: Vector2i = path[-1] + target_offset
+	var segment_start: Vector2i = goblin_state.position_microfeet if path.size() == 1 else path[-2]
+	var static_occupancy := {String(goblin_id): goblin_state.position_microfeet}
+	if not _battlefield.is_position_legal(goblin_id, destination, static_occupancy).get("legal", false):
+		return {"success": false, "reason": "static_topology_changed"}
+	if not _battlefield.is_attack_position_legal(destination, target_position, int(attack_definition.maximum_range_microfeet)):
+		return {"success": false, "reason": "static_topology_changed"}
+	if not _battlefield.is_direct_path_clear(goblin_id, segment_start, destination, static_occupancy):
+		return {"success": false, "reason": "static_topology_changed"}
+	var occupancy := _actor_occupancy_with_goblin_reservations(goblin_id, target_position)
+	if not _battlefield.is_position_legal(goblin_id, destination, occupancy).get("legal", false):
+		return {"success": false, "reason": "dynamic_occupancy_blocked"}
+	if not _battlefield.is_direct_path_clear(goblin_id, segment_start, destination, occupancy):
+		return {"success": false, "reason": "dynamic_occupancy_blocked"}
+	path[-1] = destination
+	_goblin_paths[key] = path
+	_goblin_path_targets[key] = target_position
+	_goblin_attack_destinations[key] = destination
+	return {"success": true, "reason": "retargeted"}
+
+
+func _actor_occupancy_with_goblin_reservations(mover_id: StringName, target_position: Vector2i) -> Dictionary:
+	var occupancy := _actor_occupancy()
+	for actor_key: Variant in _goblin_attack_destinations.keys():
+		var other_key := String(actor_key)
+		if String(mover_id) == other_key:
+			continue
+		var other_state := simulation.get_actor_state(StringName(other_key))
+		if other_state == null or other_state.current_hpc == null or int(other_state.current_hpc) <= 0:
+			continue
+		var reserved: Vector2i = _goblin_attack_destinations[other_key]
+		var remembered_target: Variant = _goblin_path_targets.get(other_key, target_position)
+		if remembered_target != null:
+			reserved += target_position - (remembered_target as Vector2i)
+		occupancy["goblin_attack_reservation:%s" % other_key] = reserved
+	return occupancy
+
+
+func _advance_goblin_movement(delta_us: int) -> void:
+	if delta_us <= 0 or not _encounter_active or not _opponent_behavior_enabled:
+		return
+	for actor_id: String in _goblin_actor_ids:
+		var goblin_id := StringName(actor_id)
+		var goblin_state := simulation.get_actor_state(goblin_id)
+		var movement_model: PrimeMovementModel = _goblin_movement_models.get(actor_id)
+		if goblin_state == null or movement_model == null or goblin_state.current_hpc == null or int(goblin_state.current_hpc) <= 0:
+			continue
+		if goblin_state.conditions.has("prone") or goblin_state.critical_stagger_until_us > simulation.clock.get_elapsed_us():
+			movement_model.set_prone(goblin_state.conditions.has("prone"))
+			movement_model.advance(delta_us, Vector2.ZERO)
+			continue
+		var geometry := _get_actor_attack_geometry(goblin_id, Fixture.PLAYER_ID)
+		if geometry.get("success", false) or not goblin_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(goblin_id):
+			movement_model.advance(delta_us, Vector2.ZERO)
+			continue
+		var path_result := _ensure_current_goblin_path(goblin_id)
+		var path: Array = _goblin_paths.get(actor_id, [])
+		if not path_result.get("success", false) or path.is_empty():
+			movement_model.advance(delta_us, Vector2.ZERO)
+			continue
+		_refresh_goblin_movement_ledger(goblin_id)
+		var allowance := int(_actor_definition_snapshot(goblin_id).get("combat_stats", {}).get("mr", 0)) * MICROFEET_PER_FOOT
+		var spent := int(_goblin_movement_spent.get(actor_id, 0))
+		var remaining := maxi(0, allowance - spent)
+		var waypoint: Vector2i = path[0]
+		var offset := waypoint - goblin_state.position_microfeet
+		movement_model.position_feet = Vector2(goblin_state.position_microfeet) / float(MICROFEET_PER_FOOT)
+		var displacement := movement_model.advance(delta_us, Vector2(offset).normalized())
+		var budget := mini(roundi(displacement.length() * float(MICROFEET_PER_FOOT)), remaining)
+		if budget <= 0:
+			continue
+		var destination := waypoint
+		var distance := roundi(Vector2(offset).length())
+		if distance > budget:
+			destination = goblin_state.position_microfeet + Vector2i(roundi(float(offset.x) * budget / float(distance)), roundi(float(offset.y) * budget / float(distance)))
+		var movement_start: Vector2i = goblin_state.position_microfeet
+		var resolved := _battlefield.resolve_motion(goblin_id, movement_start, destination, _actor_occupancy())
+		if not resolved.get("success", false) or int(resolved.get("movement_cost_microfeet", 0)) <= 0:
+			_invalidate_goblin_path(goblin_id)
+			continue
+		var collision_limited: bool = bool(resolved.get("blocked", false)) or resolved["position_microfeet"] != destination
+		var static_path_clear := _battlefield.is_direct_path_clear(
+			goblin_id,
+			movement_start,
+			destination,
+			{String(goblin_id): movement_start}
+		)
+		var blocked_by_static_geometry: bool = collision_limited and not static_path_clear
+		goblin_state.movement_round_index = simulation.clock.get_round_index()
+		goblin_state.remaining_mr_microfeet = remaining
+		var movement_result := simulation.apply_authoritative_position(goblin_id, resolved["position_microfeet"], goblin_state.facing_millidegrees, int(resolved["movement_cost_microfeet"]))
+		if movement_result.get("success", false):
+			_goblin_movement_spent[actor_id] = spent + int(resolved["movement_cost_microfeet"])
+			movement_model.position_feet = Vector2(resolved["position_microfeet"]) / float(MICROFEET_PER_FOOT)
+			if blocked_by_static_geometry:
+				_goblin_static_collision_counts[actor_id] = int(_goblin_static_collision_counts.get(actor_id, 0)) + 1
+				_invalidate_goblin_path(goblin_id)
+			elif resolved["position_microfeet"] == waypoint:
+				path.pop_front()
+				_goblin_paths[actor_id] = path
+
+
+func _make_goblin_movement_model(goblin_id: StringName, position_microfeet: Vector2i) -> PrimeMovementModel:
+	var actor := _actor_definition_snapshot(goblin_id)
+	var model := PrimeMovementModel.new(
+		int(actor.get("combat_stats", {}).get("mr", 0)),
+		int(actor.get("attributes", {}).get("spd", 0)),
+		int(actor.get("attributes", {}).get("end", 0)),
+		0,
+		0,
+		int(actor.get("combat_stats", {}).get("rb", 0)),
+		simulation.random
+	)
+	model.position_feet = Vector2(position_microfeet) / float(MICROFEET_PER_FOOT)
+	return model
+
+
+func _refresh_goblin_movement_ledger(goblin_id: StringName) -> void:
+	var key := String(goblin_id)
+	var round_index := simulation.clock.get_round_index()
+	if int(_goblin_movement_round_indices.get(key, -1)) == round_index:
+		return
+	_goblin_movement_round_indices[key] = round_index
+	_goblin_movement_spent[key] = 0
+
+
 func _update_encounter_outcome() -> void:
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if _is_wave_one_goblin_encounter:
+		if player_state == null:
+			return
+		if player_state.current_hpc != null and int(player_state.current_hpc) <= 0:
+			_encounter_state = ENCOUNTER_PLAYER_DEFEAT
+			_encounter_active = false
+			_opponent_behavior_status = "stopped_player_defeated"
+			return
+		var wave_victory := evaluate_current_wave_victory()
+		if wave_victory.get("success", false) and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_VICTORY_DETECTED:
+			_encounter_state = ENCOUNTER_PLAYER_VICTORY
+			_encounter_active = false
+			_opponent_behavior_status = "wave_1_victory_detected"
+		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	if player_state == null or opponent_state == null:
 		return
@@ -830,6 +1350,8 @@ func _is_attack_in_flight(attack_id: String) -> bool:
 
 
 func _is_actor_attack_in_flight(actor_id: StringName) -> bool:
+	if _active_attack_ids_by_actor.has(String(actor_id)):
+		return _is_attack_in_flight(String(_active_attack_ids_by_actor[String(actor_id)]))
 	if actor_id == Fixture.PLAYER_ID:
 		return is_player_attack_in_flight()
 	if actor_id == Fixture.OPPONENT_ID:
@@ -882,7 +1404,8 @@ func _make_dodge_environment(attack: CombatAttackInstance) -> CombatDodgeEnviron
 		# half-MR Dodge allowance down to whole feet.
 		@warning_ignore("integer_division")
 		maximum_dodge_feet = defender_mr / 8
-	var maximum_attack_range := int(_attack_definition.maximum_range_microfeet)
+	var attack_definition := _get_attack_definition_for_actor(attack.attacker_id)
+	var maximum_attack_range := 0 if attack_definition == null else int(attack_definition.maximum_range_microfeet)
 	var candidate_facts := _battlefield.build_dodge_candidate_facts(
 		attack.target_id,
 		defender_state.position_microfeet,
@@ -924,10 +1447,14 @@ func _actor_definition_snapshot(actor_id: StringName) -> Dictionary:
 
 func _actor_occupancy() -> Dictionary:
 	var occupancy := {}
-	for actor_id: StringName in [Fixture.PLAYER_ID, Fixture.OPPONENT_ID]:
+	for actor_snapshot: Dictionary in simulation.get_state_snapshot().get("actors", []):
+		var actor_id := StringName(actor_snapshot.get("state", {}).get("actor_id", ""))
 		var state := simulation.get_actor_state(actor_id)
-		if state != null:
-			occupancy[String(actor_id)] = state.position_microfeet
+		if state == null:
+			continue
+		if state.current_hpc != null and int(state.current_hpc) <= 0:
+			continue
+		occupancy[String(actor_id)] = state.position_microfeet
 	return occupancy
 
 
@@ -948,6 +1475,26 @@ func _refresh_player_movement_ledger() -> void:
 		return
 	_player_movement_round_index = round_index
 	_player_movement_spent_microfeet = 0
+
+
+func _has_authoritative_opponent_movement() -> bool:
+	return _opponent_behavior_enabled and (_is_wave_one_goblin_encounter or _opponent_movement_model != null)
+
+
+func _make_wave_one_goblin_positions(first_position: Vector2i, count: int) -> Array[Vector2i]:
+	# Fixed source-neutral Arena test positions. They only determine placement;
+	# all movement, reach and collision remain authoritative afterwards.
+	var offsets := [Vector2i.ZERO, Vector2i(0, 2_000_000), Vector2i(2_000_000, 0), Vector2i(2_000_000, 2_000_000)]
+	var positions: Array[Vector2i] = []
+	for index in range(count):
+		if index >= offsets.size():
+			return []
+		positions.append(first_position + offsets[index])
+	return positions
+
+
+func _goblin_actor_id(index: int) -> StringName:
+	return StringName("wave_1_common_goblin_%02d" % (index + 1))
 
 
 func _next_opponent_movement_tick_us(current_us: int) -> int:
@@ -1124,6 +1671,9 @@ func _next_request_id(kind: String) -> String:
 
 
 func _refresh_active_attacks() -> void:
+	for actor_id: String in _active_attack_ids_by_actor.keys():
+		if not _is_attack_in_flight(String(_active_attack_ids_by_actor[actor_id])):
+			_active_attack_ids_by_actor.erase(actor_id)
 	if not is_player_attack_in_flight():
 		_active_player_attack_id = ""
 	if not is_opponent_attack_in_flight():

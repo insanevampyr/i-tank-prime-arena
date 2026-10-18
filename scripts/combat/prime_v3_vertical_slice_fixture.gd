@@ -13,6 +13,7 @@ const CHARACTER_DEFINITION_ID := &"prime_v3_uncommon_guard"
 const LOADOUT_DEFINITION_ID := &"arena_guard_plate_buckler"
 const ENCOUNTER_MEDIUM_GUARDS := &"medium_guard_vs_medium_guard"
 const ENCOUNTER_SYNTHETIC_SMALL_GUARD := &"medium_guard_vs_synthetic_small_guard"
+const ENCOUNTER_WAVE_ONE_GOBLINS := &"wave_1_common_goblins"
 
 const PRIME_GUARD_SOURCE := "PRIME-V3 p. 336, Uncommon Guard"
 const PRIME_BATTLE_AXE_SOURCE := "PRIME-V3 p. 127, Battle Axe"

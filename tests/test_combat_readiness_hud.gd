@@ -104,7 +104,7 @@ func _test_attack_readiness_states_and_interruption() -> void:
 	_expect_equal(Readiness.get_attack_readiness(restricted)["reason"], "attacker_defeated", "Defeat must block ordinary attacks.")
 
 	var waiting := _opponent_opening_session()
-	_expect_equal(Readiness.get_attack_readiness(waiting)["reason"], "opening_initiative_wait", "ATTACK must not show READY before the player's opening-Initiative eligibility.")
+	_expect_true(Readiness.get_attack_readiness(waiting)["reason"] != "opening_initiative_wait", "A lower opening rank must not create a false readiness block under independent Initiative.")
 
 
 func _test_running_readiness_states() -> void:

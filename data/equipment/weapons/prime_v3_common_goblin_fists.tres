@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_common_goblin_fists"
+display_name = "Common Goblin Fists"
+damage_dice_count = 1
+damage_die_sides = 4
+fixed_damage_bonus = 0
+strength_bonus_eligible = false
+damage_types = PackedStringArray("bashing")
+reach_microfeet = 1000000
+strength_requirement = -1
+one_hand_strength_requirement = -1
+base_hands_required = 1
+block_target = -1
+required_acts = 1
+strikes_per_act = 2
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = true
+source_refs = PackedStringArray("Common Goblin.doc: two bashing fists dealing 1d4 damage with reach 1", "Prime V3 generic natural critical triggers")

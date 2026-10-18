@@ -73,7 +73,7 @@ The Task 22 regression builds one exchange from a frozen pre-migration construct
 
 ## Opponent activation finding
 
-The opponent driver is enabled while the scene is prepared but the encounter is inactive until START. START immediately runs the driver. If the player owns opening Initiative rank 0, the opponent reports `blocked_opening_initiative_wait` and cannot declare until the player makes the first declaration. That declaration unlocks the next opening rank at the same simulation timestamp; there is no artificial real-time delay or attack-triggered aggro rule. The observed simultaneous declarations at 10.467 seconds are consistent with the player waiting 10.467 seconds before declaring and the lower-ranked opponent declaring immediately afterward.
+The opponent driver is enabled while the scene is prepared but the encounter is inactive until START. START immediately runs the driver. Task 31E's controlling Option B ruling supersedes the former rank gate: every actor may independently declare a legal action regardless of opening rank, while INIT remains the ordering key for genuinely simultaneous effect events. There is no artificial real-time delay, priority window, or attack-triggered aggro rule.
 
 ## Battlefield rectangle finding
 
