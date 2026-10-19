@@ -74,6 +74,7 @@ var _initial_opponent_position_feet := Vector2.ZERO
 var _last_opponent_behavior_status := ""
 var _application_has_focus := true
 var _keyboard_attack_keys_held: Dictionary = {}
+var _mouse_attack_held := false
 var _last_attack_readiness: Dictionary = {}
 var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
@@ -170,11 +171,13 @@ func _physics_process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		_application_has_focus = false
-		_keyboard_attack_keys_held.clear()
+		_clear_attack_hold_intent()
 		if _touch_controls != null:
 			_touch_controls.reset_input()
 		if is_node_ready():
 			_update_presentation()
+	elif what == NOTIFICATION_WM_MOUSE_EXIT:
+		_mouse_attack_held = false
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		_application_has_focus = true
 		if is_node_ready():
@@ -184,6 +187,10 @@ func _notification(what: int) -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and _is_attack_key(event.physical_keycode) and not event.pressed:
 		_keyboard_attack_keys_held.erase(event.physical_keycode)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_mouse_attack_held = false
+	elif event is InputEventMouseMotion and _mouse_attack_held and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+		_mouse_attack_held = false
 	if _session == null or not _session.is_encounter_active():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
@@ -219,7 +226,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			set_transcript_visible(not is_transcript_visible())
 			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		_select_target_at(event.position, true)
+		_handle_left_mouse_attack_press(event.position)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventScreenTouch and event.pressed and not event.canceled:
 		_select_target_at(event.position, false)
@@ -231,6 +238,13 @@ func get_combat_session_for_testing() -> ArenaCombatSession:
 
 func request_pointer_action_for_testing(screen_position: Vector2, desktop_click: bool) -> Dictionary:
 	return _select_target_at(screen_position, desktop_click)
+
+
+func set_mouse_attack_for_testing(screen_position: Vector2, pressed: bool) -> Dictionary:
+	if not pressed:
+		_mouse_attack_held = false
+		return {"success": true}
+	return _handle_left_mouse_attack_press(screen_position)
 
 
 func set_world_presentation_pixels_per_foot(pixels_per_foot: float, presentation_size: Vector2 = Vector2.ZERO) -> void:
@@ -316,6 +330,7 @@ func get_attack_hold_state_for_testing() -> Dictionary:
 	return {
 		"active": not _active_attack_hold_source().is_empty(),
 		"keyboard": not _keyboard_attack_keys_held.is_empty(),
+		"mouse": _mouse_attack_held,
 		"touch": _touch_controls != null and _touch_controls.is_attack_held(),
 	}
 
@@ -485,6 +500,8 @@ func _active_attack_hold_source() -> String:
 		return ""
 	if not _keyboard_attack_keys_held.is_empty():
 		return "keyboard"
+	if _mouse_attack_held:
+		return "mouse"
 	if _touch_controls != null and _touch_controls.is_attack_held():
 		return "touch"
 	return ""
@@ -499,6 +516,7 @@ func _attack_input_is_blocked_by_ui() -> bool:
 
 func _clear_attack_hold_intent() -> void:
 	_keyboard_attack_keys_held.clear()
+	_mouse_attack_held = false
 	if _touch_controls != null:
 		_touch_controls.clear_attack_input()
 
@@ -684,6 +702,17 @@ func _select_target_at(screen_position: Vector2, request_desktop_attack: bool) -
 	_last_ui_message = "No target selected. Click/tap an enemy to select it."
 	_update_presentation()
 	return {"selection": {"success": true, "target_id": ""}, "attack": null}
+
+
+func _handle_left_mouse_attack_press(screen_position: Vector2) -> Dictionary:
+	if _attack_input_is_blocked_by_ui():
+		_mouse_attack_held = false
+		return {"selection": {"success": false, "reason": "ui_input_blocked"}, "attack": null}
+	var result := _select_target_at(screen_position, true)
+	var selection: Dictionary = result.get("selection", {})
+	_mouse_attack_held = selection.get("success", false) and not String(selection.get("target_id", "")).is_empty()
+	_update_presentation()
+	return result
 
 
 static func is_pointer_over_target(screen_position: Vector2, target_position: Vector2, radius_pixels: float) -> bool:

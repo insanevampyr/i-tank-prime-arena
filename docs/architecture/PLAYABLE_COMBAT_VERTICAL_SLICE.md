@@ -4,7 +4,7 @@
 
 Phase 1 Task 14 connects the temporary Arena scene to one `CombatSimulation`. `ArenaCombatSession` is an intent and orchestration adapter: it selects an existing target, samples the canonical movement position when an attack is requested, advances deterministic simulation time, submits the existing automatic-defense transaction, and invokes the existing physical-damage transaction only after defenses are exhausted. It does not calculate ACC, AT duration, defense eligibility, criticals, damage, TAL, NAL, SHP, or HPC.
 
-Desktop left-click, keyboard Space/Enter, and touch ATTACK all call the same `request_player_attack` boundary. A desktop click on the opponent selects it and requests exactly one ordinary attack; a touch tap selects only, preserving the separate mobile ATTACK control. Task 31M may retain keyboard/touch intent locally, but duplicate input remains rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
+Desktop left-click, keyboard Space/Enter, and touch ATTACK all call the same `request_player_attack` boundary. A desktop press on a living opponent selects it and requests one ordinary attack; Task 31N retains mouse intent while held. A touch tap selects only, preserving the separate mobile ATTACK control. Task 31M/31N may retain keyboard, mouse and touch intent locally, but duplicate input remains rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
 
 ## Source-verified fixture
 
@@ -23,7 +23,7 @@ Task 22 moves those values into reusable Godot Resource definitions and a valida
 
 1. The scene initializes both actors, their equipment/protection/defense profiles, critical-reaction registrations, positions, seeded RNG, and opening Initiative in the authority.
 2. The opponent is selected by default. Left-clicking it selects and requests one attack; tapping it or pressing Tab/Shift+Tab selects only. Clicking/tapping empty arena space clears selection. Desktop top-row and keypad 1-9 select a Prime aim location without attacking or consuming an Act.
-3. The player moves with the existing WASD/touch joystick and Running path. At attack input, the adapter submits the current canonical player position to the combat authority.
+3. The player moves with WASD, equivalent arrow keys, or the touch joystick through the same movement and Running path. Mixed keyboard inputs are normalized. At attack input, the adapter submits the current canonical player position to the combat authority.
 4. The authority validates alive state, equipped Battle Axe, selected source-supported location, opening Initiative, and action availability. The target actor and aim location are copied into the attack instance at declaration, so later selection changes cannot retarget an executing action. Ordinary melee reach and obstruction are checked at final resolution rather than prohibiting an approach-attack declaration.
 5. One Act executes at the fixture's AT 2, so ACC occurs after exactly 2.5 simulation seconds.
 6. An ACC hit enters the existing ordered Dodge, weapon Block, shield Block, and Physical Soak pipeline. The open fixture arena supplies bounded, collision-free, unoccupied, hazard-free Dodge candidates; no in-place duck is supplied because Battle Axe duck eligibility is unresolved.
@@ -48,7 +48,7 @@ Task 18 adds desktop click-to-attack without queued Acts, keeps touch selection 
 
 Task 19 adds passive ATTACK and RUN rings sourced from the existing action, legality and movement snapshots. The attack countdown uses the linked action's actual scheduled start/effect timestamps; the Running ring uses actual endurance, recovery and retry state. These controls do not issue intents or add cooldowns. Movement and Running remain legal during actions where existing rules permit, and final range/line-of-sight validation still precedes ACC. See `COMBAT_READINESS_HUD.md`.
 
-Task 31M lets Space, Enter, and touch ATTACK retain local held intent. The next ordinary attack is submitted only at an exact authoritative legality boundary; release does not cancel an action already executing. Desktop enemy clicks remain one-shot. No held input changes AT, queues an Act, bypasses final geometry, or adds an auto-attack state to simulation/replay.
+Task 31M lets Space, Enter, and touch ATTACK retain local held intent; Task 31N extends that presentation behavior to left mouse held on a living enemy. The next ordinary attack is submitted only at an exact authoritative legality boundary; releasing one source does not cancel an action already executing or another held source. Empty terrain, HUD/text input, focus loss and mouse cancellation cannot leave a retained mouse attack. No held input changes AT, queues an Act, bypasses final geometry, or adds an auto-attack state to simulation/replay.
 
 ## Deliberate limits
 

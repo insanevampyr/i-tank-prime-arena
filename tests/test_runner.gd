@@ -35,6 +35,7 @@ const MovementCongestionPresentationTests = preload("res://tests/test_movement_c
 const WebHudFacingTests = preload("res://tests/test_web_hud_facing.gd")
 const Task31LLagAndLabelTests = preload("res://tests/test_task31l_lag_and_labels.gd")
 const HoldToAttackTests = preload("res://tests/test_hold_to_attack.gd")
+const MouseHoldArrowMovementTests = preload("res://tests/test_mouse_hold_arrow_movement.gd")
 
 
 func _initialize() -> void:
@@ -43,6 +44,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 31N mouse hold and arrow movement", "instance": MouseHoldArrowMovementTests.new()},
 		{"name": "Task 31M hold to attack", "instance": HoldToAttackTests.new()},
 		{"name": "Task 31L lag diagnosis and Goblin labels", "instance": Task31LLagAndLabelTests.new()},
 		{"name": "Task 31K Web hygiene, HUD and facing", "instance": WebHudFacingTests.new()},

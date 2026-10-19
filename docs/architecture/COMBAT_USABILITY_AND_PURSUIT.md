@@ -6,12 +6,12 @@ Phase 1 Task 18 improves the Task 14-17 playtest adapter without changing combat
 
 ## Controls
 
-- Desktop left-click on the opponent selects it and requests one ordinary Battle Axe attack through `ArenaCombatSession.request_player_attack`.
-- A second deliberate click is accepted only when that authority says another action is legal. An in-flight action rejects the request; nothing is queued. Mouse hold never repeats.
+- Desktop left-click on a living opponent selects it and requests one ordinary Battle Axe attack through `ArenaCombatSession.request_player_attack`. Task 31N retains that same local intent while the button remains held; later requests occur only when authority permits another ordinary action.
+- Mouse release stops future requests without canceling the executing action. Mouse, keyboard and touch sources are retained independently, but simultaneous sources cannot duplicate an in-flight declaration. This is neither a toggle nor an authoritative auto-attack mode.
 - Empty terrain clears selection. Right-click remains unused. Space and Enter use the same request boundary; Task 31M permits either key to retain local intent while held and request the next attack only when legal.
-- On touch, tapping the opponent selects only. Pressing ATTACK requests once; holding the same touch retains the Task 31M local intent. WASD/touch movement and Shift/RUN still reduce to the same movement and Running intents.
+- On touch, tapping the opponent selects only. Pressing ATTACK requests once; holding the same touch retains the Task 31M local intent. WASD, arrow keys and touch movement reduce to the same movement intent; Shift with either desktop key set and touch RUN use the same Running path. Mixed WASD/arrow input is normalized and cannot increase MR.
 
-Held intent is presentation state, not a combat action or stored Act. Release stops future requests without canceling an executing action. Exact authoritative event boundaries drive repeat eligibility, so AT 1, 2, 5 and 10 retain `5/AT` timing independent of rendered frames. Focus loss, FULL LOG, RESET, encounter switching, target loss, or focused text/HUD controls prevent stale repetition. A target switch affects only later declarations because every accepted attack has already locked its target and location.
+Held intent is presentation state, not a combat action or stored Act. Release stops future requests without canceling an executing action. Exact authoritative event boundaries drive repeat eligibility, so AT 1, 2, 5 and 10 retain `5/AT` timing independent of rendered frames. Focus loss, mouse/window cancellation, FULL LOG, RESET, encounter switching, target loss, or focused text/HUD controls prevent stale repetition. A target switch affects only later declarations because every accepted attack has already locked its target and location. A defeated selected target is not silently replaced.
 
 ## Pursuit correction
 

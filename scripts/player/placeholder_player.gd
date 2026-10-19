@@ -70,13 +70,22 @@ func _physics_process(delta: float) -> void:
 	var delta_us := floori(_delta_us_remainder)
 	_delta_us_remainder -= float(delta_us)
 
-	var desktop_direction := Vector2.ZERO
-	desktop_direction.x = float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A))
-	desktop_direction.y = float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W))
+	var wasd_direction := Vector2(
+		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
+		float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W))
+	)
+	var arrow_direction := Vector2(
+		float(Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_LEFT)),
+		float(Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_UP))
+	)
+	var viewport := get_viewport()
+	var keyboard_blocked := viewport != null and viewport.gui_get_focus_owner() != null
+	var desktop_direction := resolve_keyboard_direction(wasd_direction, arrow_direction, keyboard_blocked)
 	var touch_direction: Vector2 = Vector2.ZERO if _touch_controls == null else _touch_controls.get_movement_vector()
 	var direction := ArenaPlayerInputIntent.combine_movement(desktop_direction, touch_direction)
 	var touch_run_held: bool = false if _touch_controls == null else _touch_controls.is_run_held()
-	var run_held := ArenaPlayerInputIntent.combine_run(Input.is_physical_key_pressed(KEY_SHIFT), touch_run_held)
+	var keyboard_run_held := resolve_keyboard_run(Input.is_physical_key_pressed(KEY_SHIFT), keyboard_blocked)
+	var run_held := ArenaPlayerInputIntent.combine_run(keyboard_run_held, touch_run_held)
 	if _movement.is_prone():
 		run_held = false
 	if _combat_movement_locked:
@@ -106,6 +115,16 @@ func _physics_process(delta: float) -> void:
 	position = _movement.position_feet * pixels_per_foot
 	_run_was_held = run_held
 	_update_debug_label()
+
+
+static func resolve_keyboard_direction(wasd_direction: Vector2, arrow_direction: Vector2, keyboard_blocked: bool) -> Vector2:
+	if keyboard_blocked:
+		return Vector2.ZERO
+	return ArenaPlayerInputIntent.combine_keyboard_movement(wasd_direction, arrow_direction)
+
+
+static func resolve_keyboard_run(shift_pressed: bool, keyboard_blocked: bool) -> bool:
+	return shift_pressed and not keyboard_blocked
 
 
 func apply_authoritative_combat_position(position_feet: Vector2) -> void:

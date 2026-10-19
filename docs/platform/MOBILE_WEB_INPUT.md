@@ -16,14 +16,14 @@ No touch handler rolls dice, spends resources, schedules combat events, resolves
 
 | Control | Desktop | Touch/Web | Integration |
 | --- | --- | --- | --- |
-| Movement | WASD | Lower-left virtual joystick | Existing deterministic movement request |
+| Movement | WASD or arrow keys | Lower-left virtual joystick | Existing deterministic movement request; mixed desktop keys are normalized |
 | Running | Hold Shift while moving | Hold lower-right RUN while moving | Existing Running activation, maintenance, cap, recovery and stop path |
 | Select opponent | Tab / Shift+Tab cycle living targetable enemies; click empty terrain to clear | Tap opponent | Touch selection remains separate from ATTACK; authority validates the actor at attack request |
 | Select aim location | Top-row or numeric-keypad 1-9 | Not yet exposed as a touch control | Selection is presentation/input state only; it consumes no Act, does not attack, and is locked into the attack record at declaration |
-| Ordinary attack | Left-click opponent once, or press/hold Space or Enter | Press/hold lower-right ATTACK | Every accepted declaration uses `ArenaCombatSession.request_player_attack`; desktop click remains exactly one request |
+| Ordinary attack | Press/hold left-click on an opponent, Space, or Enter | Press/hold lower-right ATTACK | Every accepted declaration uses `ArenaCombatSession.request_player_attack`; release stops future requests only |
 | Start/reset encounter | Click START/RESET or press R to reset | Tap START/RESET | Rebuilds the owned simulation with the original fixture positions and seed |
 
-Joystick, RUN, and ATTACK use independent touch indexes. ATTACK emits its initial request on press and retains local intent while that same touch remains held; it can request another attack only when authority reports a new declaration legal. Releasing one finger does not release the others. A browser-canceled touch, viewport resize/rotation, application pause, focus loss, FULL LOG, RESET, or encounter change clears held attack state to prevent stale repetition.
+Joystick, RUN, and ATTACK use independent touch indexes. ATTACK emits its initial request on press and retains local intent while that same touch remains held; it can request another attack only when authority reports a new declaration legal. Desktop mouse, desktop keyboard and touch attack sources are independent. Releasing one source does not release the others. A browser-canceled touch, mouse release/window exit, viewport resize/rotation, application pause, focus loss, FULL LOG, RESET, or encounter change clears the applicable held state to prevent stale repetition.
 
 The default HUD contains concise movement/Running status, HPC, target, legality, conditions and important combat results. Detailed timestamps, event IDs, path diagnostics and complete formatted event history remain available through the DEBUG button or desktop F3 key and are hidden by default. This presentation split does not delete or filter the authoritative event source.
 

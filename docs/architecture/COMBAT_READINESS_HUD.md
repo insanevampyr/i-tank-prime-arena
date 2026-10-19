@@ -33,7 +33,7 @@ The blue integration fixture retains baseline SPD 12, END 10 and MR 12, three Ru
 
 ## Movement and action concurrency
 
-Legal walking or Running remains available during an ordinary action because neither readiness indicator locks movement. The player may declare one ordinary Battle Axe attack outside its three-foot reach, then approach under direct WASD/touch control during AT execution. The deterministic opponent declares through the same authority and spends legal MR along its stable path during its own execution. At the final effect point, both actors must be within weapon reach and unobstructed or the attack records final-legality failure without an ACC draw. Nothing queues a later attack or refunds elapsed action time.
+Legal walking or Running remains available during an ordinary action because neither readiness indicator locks movement. The player may declare one ordinary Battle Axe attack outside its three-foot reach, then approach under direct WASD/arrow/touch control during AT execution. The deterministic opponent declares through the same authority and spends legal MR along its stable path during its own execution. At the final effect point, both actors must be within weapon reach and unobstructed or the attack records final-legality failure without an ACC draw. Nothing queues a later attack or refunds elapsed action time.
 
 ## Presentation and focus
 
