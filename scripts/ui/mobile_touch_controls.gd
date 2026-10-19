@@ -75,10 +75,20 @@ func is_run_held() -> bool:
 	return _run_held
 
 
+func is_attack_held() -> bool:
+	return _attack_touch_index != NO_TOUCH
+
+
 func consume_attack_requested() -> bool:
 	var requested := _attack_requested
 	_attack_requested = false
 	return requested
+
+
+func clear_attack_input() -> void:
+	_attack_touch_index = NO_TOUCH
+	_attack_requested = false
+	queue_redraw()
 
 
 func handle_touch(index: int, pressed: bool, position: Vector2, canceled: bool = false) -> bool:

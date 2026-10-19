@@ -63,7 +63,11 @@ func _draw() -> void:
 
 	var font := ThemeDB.fallback_font
 	var font_size := maxi(9, mini(12, roundi(size.y * 0.13)))
-	var title := "ATTACK" if indicator_kind == IndicatorKind.ATTACK else "RUN"
+	var title := (
+		"ATTACK HOLD"
+		if indicator_kind == IndicatorKind.ATTACK and bool(_readiness.get("hold_active", false))
+		else ("ATTACK" if indicator_kind == IndicatorKind.ATTACK else "RUN")
+	)
 	var status := String(_readiness.get("status_text", "BLOCKED"))
 	if not value.is_empty() and not show_value:
 		match String(_readiness.get("state", Readiness.STATE_BLOCKED)):

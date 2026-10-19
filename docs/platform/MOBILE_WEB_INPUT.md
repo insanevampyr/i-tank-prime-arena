@@ -8,7 +8,7 @@ The authoritative movement and Running model remains `PrimeMovementModel`. Deskt
 
 - movement direction;
 - Running held or released;
-- one-shot ordinary physical-attack request.
+- ordinary physical-attack intent, either one-shot or locally held.
 
 No touch handler rolls dice, spends resources, schedules combat events, resolves criticals, or mutates combat actors.
 
@@ -20,10 +20,10 @@ No touch handler rolls dice, spends resources, schedules combat events, resolves
 | Running | Hold Shift while moving | Hold lower-right RUN while moving | Existing Running activation, maintenance, cap, recovery and stop path |
 | Select opponent | Tab / Shift+Tab cycle living targetable enemies; click empty terrain to clear | Tap opponent | Touch selection remains separate from ATTACK; authority validates the actor at attack request |
 | Select aim location | Top-row or numeric-keypad 1-9 | Not yet exposed as a touch control | Selection is presentation/input state only; it consumes no Act, does not attack, and is locked into the attack record at declaration |
-| Ordinary attack | Left-click opponent, Space, or Enter | Tap lower-right ATTACK | Shared one-shot `ArenaCombatSession.request_player_attack` path; desktop click selects then requests exactly once |
+| Ordinary attack | Left-click opponent once, or press/hold Space or Enter | Press/hold lower-right ATTACK | Every accepted declaration uses `ArenaCombatSession.request_player_attack`; desktop click remains exactly one request |
 | Start/reset encounter | Click START/RESET or press R to reset | Tap START/RESET | Rebuilds the owned simulation with the original fixture positions and seed |
 
-Joystick, RUN, and ATTACK use independent touch indexes. ATTACK emits one request per press and cannot become a held duplicate stream. Releasing one finger does not release the others. A browser-canceled touch, viewport resize/rotation, application pause, or focus loss clears all captured touch state to prevent stuck movement or stale attacks.
+Joystick, RUN, and ATTACK use independent touch indexes. ATTACK emits its initial request on press and retains local intent while that same touch remains held; it can request another attack only when authority reports a new declaration legal. Releasing one finger does not release the others. A browser-canceled touch, viewport resize/rotation, application pause, focus loss, FULL LOG, RESET, or encounter change clears held attack state to prevent stale repetition.
 
 The default HUD contains concise movement/Running status, HPC, target, legality, conditions and important combat results. Detailed timestamps, event IDs, path diagnostics and complete formatted event history remain available through the DEBUG button or desktop F3 key and are hidden by default. This presentation split does not delete or filter the authoritative event source.
 
@@ -45,7 +45,7 @@ The source-verified same-size Guard fixture exposes Prime locations 1-9 through 
 
 ## Validation boundary
 
-Automated tests synthesize independent touch indexes, one-shot ATTACK behavior, release/cancel behavior, focus-reset behavior, resize/rotation reset, desktop intent preservation, and Android-sized layout calculations. Browser viewport automation can verify rendering, resizing, selection, and attack presentation but does not prove physical touchscreen behavior, Chrome Android GPU/driver behavior, OS gesture interference, thermal performance, or device-specific safe areas.
+Automated tests synthesize independent touch indexes, held ATTACK cadence, release/cancel behavior, focus/reset behavior, resize/rotation reset, desktop click's one-shot boundary, and Android-sized layout calculations. Browser viewport automation can verify rendering, resizing, selection, and attack presentation but does not prove physical touchscreen behavior, Chrome Android GPU/driver behavior, OS gesture interference, thermal performance, or device-specific safe areas.
 
 Use the LAN procedure in `WEB_COMPATIBILITY.md` for the required physical Android check. A physical-device pass must explicitly record device model, Android/Chrome versions, orientation, console errors, simultaneous joystick/RUN behavior, app-switch recovery and observed frame rate.
 

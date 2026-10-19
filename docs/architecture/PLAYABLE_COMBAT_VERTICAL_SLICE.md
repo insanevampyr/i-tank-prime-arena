@@ -4,7 +4,7 @@
 
 Phase 1 Task 14 connects the temporary Arena scene to one `CombatSimulation`. `ArenaCombatSession` is an intent and orchestration adapter: it selects an existing target, samples the canonical movement position when an attack is requested, advances deterministic simulation time, submits the existing automatic-defense transaction, and invokes the existing physical-damage transaction only after defenses are exhausted. It does not calculate ACC, AT duration, defense eligibility, criticals, damage, TAL, NAL, SHP, or HPC.
 
-Desktop left-click, keyboard Space/Enter, and the one-shot touch ATTACK button all call the same `request_player_attack` boundary. A desktop click on the opponent selects it and requests exactly one ordinary attack; a touch tap selects only, preserving the separate mobile ATTACK button. Repeated input is rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
+Desktop left-click, keyboard Space/Enter, and touch ATTACK all call the same `request_player_attack` boundary. A desktop click on the opponent selects it and requests exactly one ordinary attack; a touch tap selects only, preserving the separate mobile ATTACK control. Task 31M may retain keyboard/touch intent locally, but duplicate input remains rejected while the player attack is in flight. Visual positions, labels, and animation never decide an outcome.
 
 ## Source-verified fixture
 
@@ -42,11 +42,13 @@ Task 15 keeps this same authority boundary and adds a deterministic two-way enco
 
 ## Task 18 usability extension
 
-Task 18 adds desktop click-to-attack without auto-attack or queued Acts, keeps touch selection separate from the one-shot ATTACK button, reduces the default HUD to play-relevant state, and moves technical detail behind F3. It also validates the blue Task 3 movement-test profile against the Guard fixture before play. See `COMBAT_USABILITY_AND_PURSUIT.md`.
+Task 18 adds desktop click-to-attack without queued Acts, keeps touch selection separate from ATTACK, reduces the default HUD to play-relevant state, and moves technical detail behind F3. Task 31M later adds bounded hold intent to keyboard/touch ATTACK while preserving one-shot mouse clicks. Task 18 also validates the blue Task 3 movement-test profile against the Guard fixture before play. See `COMBAT_USABILITY_AND_PURSUIT.md`.
 
 ## Task 19 readiness extension
 
 Task 19 adds passive ATTACK and RUN rings sourced from the existing action, legality and movement snapshots. The attack countdown uses the linked action's actual scheduled start/effect timestamps; the Running ring uses actual endurance, recovery and retry state. These controls do not issue intents or add cooldowns. Movement and Running remain legal during actions where existing rules permit, and final range/line-of-sight validation still precedes ACC. See `COMBAT_READINESS_HUD.md`.
+
+Task 31M lets Space, Enter, and touch ATTACK retain local held intent. The next ordinary attack is submitted only at an exact authoritative legality boundary; release does not cancel an action already executing. Desktop enemy clicks remain one-shot. No held input changes AT, queues an Act, bypasses final geometry, or adds an auto-attack state to simulation/replay.
 
 ## Deliberate limits
 

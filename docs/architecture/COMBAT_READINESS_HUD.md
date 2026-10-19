@@ -39,6 +39,8 @@ Legal walking or Running remains available during an ordinary action because nei
 
 The circular rings and code-drawn swords/footprints are passive `Control` nodes. Green means READY, blue means an active attack/run, amber means recovery/retry, and red means unavailable. Text accompanies every color. Focus loss clears touch input and replaces a potentially stale READY display with `FOCUS LOST`; it does not mutate combat state. Reset recreates the simulation and movement model before recalculating both indicators.
 
+Task 31M adds `ATTACK HOLD` to the attack indicator while keyboard or touch attack intent is actively retained. Its existing READY, ATTACKING, STAGGERED, BLOCKED and target-legality state remains authoritative; the marker grants no action and creates no timer. Releasing or canceling the input removes the marker immediately, while an already executing countdown continues from its action timestamps.
+
 ## Task 20 approach feedback
 
 For the current Battle Axe fixture, an outside-reach or initially obstructed declaration remains `READY` with value `APPROACH`. The compact status explains that final three-foot reach and line of sight are required before ACC. Final geometry failure stops the countdown and reports that ACC was not rolled; it is not reclassified as a declaration-time cooldown.

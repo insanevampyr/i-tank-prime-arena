@@ -259,7 +259,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 		_instructions.text = (
 			"START | Move: WASD/touch | Run: Shift/RUN | Attack | F3 debug | F4 log"
 			if metrics["compact"]
-			else "START; WASD/touch moves; Shift/RUN runs; left-click enemy attacks; tap selects + ATTACK; Space/Enter acts; R resets; F3 debug; F4 full log"
+			else "START; WASD/touch moves; Shift/RUN runs; click attacks once; hold Space/Enter or touch ATTACK; R resets; F3 debug; F4 full log"
 		)
 	if _seed_label != null:
 		_seed_label.add_theme_font_size_override("font_size", metrics["instructions_font_size"])

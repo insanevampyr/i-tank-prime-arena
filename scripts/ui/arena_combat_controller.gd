@@ -73,6 +73,7 @@ var _initial_player_position_feet := Vector2.ZERO
 var _initial_opponent_position_feet := Vector2.ZERO
 var _last_opponent_behavior_status := ""
 var _application_has_focus := true
+var _keyboard_attack_keys_held: Dictionary = {}
 var _last_attack_readiness: Dictionary = {}
 var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
@@ -150,12 +151,15 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if _session == null:
 		return
-	if _touch_controls != null and _touch_controls.consume_attack_requested():
-		_request_attack("touch")
+	if not _session.is_encounter_active():
+		_clear_attack_hold_intent()
+	elif _attack_input_is_blocked_by_ui():
+		_clear_attack_hold_intent()
+	_consume_pending_touch_attack()
 	_delta_us_remainder += delta * 1_000_000.0
 	var delta_us := floori(_delta_us_remainder)
 	_delta_us_remainder -= float(delta_us)
-	_session.advance_by(delta_us)
+	_advance_session_with_attack_hold(delta_us)
 	_process_new_events()
 	_apply_authoritative_combat_displacements()
 	_update_combat_movement_lock()
@@ -166,6 +170,7 @@ func _physics_process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		_application_has_focus = false
+		_keyboard_attack_keys_held.clear()
 		if _touch_controls != null:
 			_touch_controls.reset_input()
 		if is_node_ready():
@@ -177,6 +182,8 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and _is_attack_key(event.physical_keycode) and not event.pressed:
+		_keyboard_attack_keys_held.erase(event.physical_keycode)
 	if _session == null or not _session.is_encounter_active():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
@@ -189,7 +196,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_SPACE or event.physical_keycode == KEY_ENTER:
-			_request_attack("keyboard")
+			if _attack_input_is_blocked_by_ui():
+				return
+			var was_held := _keyboard_attack_keys_held.has(event.physical_keycode)
+			_keyboard_attack_keys_held[event.physical_keycode] = true
+			if not was_held:
+				_request_attack("keyboard")
 			get_viewport().set_input_as_handled()
 		elif event.physical_keycode == KEY_TAB:
 			_cycle_enemy(-1 if event.shift_pressed else 1)
@@ -282,6 +294,8 @@ func is_debug_overlay_visible() -> bool:
 
 
 func set_transcript_visible(visible: bool) -> void:
+	if visible:
+		_clear_attack_hold_intent()
 	if _transcript_panel != null:
 		_transcript_panel.visible = visible
 	if _log_button != null:
@@ -296,6 +310,23 @@ func is_transcript_visible() -> bool:
 
 func get_attack_readiness_for_testing() -> Dictionary:
 	return _last_attack_readiness.duplicate(true)
+
+
+func get_attack_hold_state_for_testing() -> Dictionary:
+	return {
+		"active": not _active_attack_hold_source().is_empty(),
+		"keyboard": not _keyboard_attack_keys_held.is_empty(),
+		"touch": _touch_controls != null and _touch_controls.is_attack_held(),
+	}
+
+
+func advance_combat_for_testing(delta_us: int) -> void:
+	_consume_pending_touch_attack()
+	_advance_session_with_attack_hold(delta_us)
+	_process_new_events()
+	_apply_authoritative_combat_displacements()
+	_update_combat_movement_lock()
+	_update_presentation()
 
 
 func get_run_readiness_for_testing() -> Dictionary:
@@ -335,6 +366,8 @@ func get_actor_label_rects_for_testing() -> Array[Rect2]:
 
 func set_application_focus_for_testing(has_focus: bool) -> void:
 	_application_has_focus = has_focus
+	if not has_focus:
+		_clear_attack_hold_intent()
 	_update_presentation()
 
 
@@ -397,7 +430,85 @@ func _request_attack(input_source: String) -> Dictionary:
 	return result
 
 
+func _advance_session_with_attack_hold(delta_us: int) -> void:
+	if delta_us < 0:
+		_session.advance_by(delta_us)
+		return
+	var target_timestamp_us := _session.simulation.clock.get_elapsed_us() + delta_us
+	_try_request_held_attack()
+	var iterations := 0
+	while _session.simulation.clock.get_elapsed_us() < target_timestamp_us:
+		iterations += 1
+		if iterations > 10_000:
+			push_error("Held attack presentation advance exceeded its safety limit.")
+			return
+		var now_us := _session.simulation.clock.get_elapsed_us()
+		var boundary_us := target_timestamp_us
+		if not _active_attack_hold_source().is_empty():
+			if not _session.simulation.event_queue.is_empty():
+				var event_timestamp_us := (_session.simulation.event_queue.peek_next() as CombatEvent).timestamp_us
+				if event_timestamp_us > now_us:
+					boundary_us = mini(boundary_us, event_timestamp_us)
+			var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
+			if player_state != null and player_state.critical_stagger_until_us > now_us:
+				boundary_us = mini(boundary_us, player_state.critical_stagger_until_us)
+		_session.advance_by(boundary_us - now_us)
+		if _session.simulation.clock.get_elapsed_us() <= now_us:
+			break
+		_try_request_held_attack()
+	if not _session.is_encounter_active():
+		_clear_attack_hold_intent()
+
+
+func _consume_pending_touch_attack() -> void:
+	if _touch_controls != null and _touch_controls.consume_attack_requested() and not _attack_input_is_blocked_by_ui():
+		_request_attack("touch")
+
+
+func _try_request_held_attack() -> void:
+	var input_source := _active_attack_hold_source()
+	if input_source.is_empty() or not _session.is_encounter_active():
+		return
+	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
+		return
+	if _session.is_actor_prone(Fixture.PLAYER_ID):
+		if player_state.current_action_instance_id.is_empty() and not _session.is_player_attack_in_flight():
+			_request_attack("%s_hold" % input_source)
+		return
+	if _session.get_attack_legality().get("success", false):
+		_request_attack("%s_hold" % input_source)
+
+
+func _active_attack_hold_source() -> String:
+	if _session == null or not _session.is_encounter_active() or not _application_has_focus or is_transcript_visible() or _attack_input_is_blocked_by_ui():
+		return ""
+	if not _keyboard_attack_keys_held.is_empty():
+		return "keyboard"
+	if _touch_controls != null and _touch_controls.is_attack_held():
+		return "touch"
+	return ""
+
+
+func _attack_input_is_blocked_by_ui() -> bool:
+	if not _application_has_focus or is_transcript_visible():
+		return true
+	var viewport := get_viewport()
+	return viewport != null and viewport.gui_get_focus_owner() != null
+
+
+func _clear_attack_hold_intent() -> void:
+	_keyboard_attack_keys_held.clear()
+	if _touch_controls != null:
+		_touch_controls.clear_attack_input()
+
+
+static func _is_attack_key(keycode: Key) -> bool:
+	return keycode == KEY_SPACE or keycode == KEY_ENTER
+
+
 func _on_encounter_button_pressed() -> void:
+	_clear_attack_hold_intent()
 	if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY:
 		_player.reset_for_encounter(_initial_player_position_feet)
 		_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
@@ -476,6 +587,7 @@ static func _fits_signed_64_bit(value: String) -> bool:
 
 
 func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
+	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
 	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS].has(encounter_fixture_id):
@@ -527,6 +639,7 @@ func _prepare_encounter_fixture() -> Dictionary:
 
 
 func _reset_encounter() -> void:
+	_clear_attack_hold_intent()
 	_player.reset_for_encounter(_initial_player_position_feet)
 	_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
 	if _touch_controls != null:
@@ -830,6 +943,7 @@ func _update_presentation() -> void:
 	var legality := _session.get_attack_legality()
 	var movement := _player.get_movement_state_for_testing()
 	_last_attack_readiness = ReadinessModel.get_attack_readiness(_session, _application_has_focus)
+	_last_attack_readiness["hold_active"] = not _active_attack_hold_source().is_empty()
 	_last_run_readiness = ReadinessModel.get_running_readiness(movement, _get_running_blocker(player_state), _application_has_focus)
 	if _attack_readiness != null:
 		_attack_readiness.set_readiness(_last_attack_readiness)

@@ -102,7 +102,7 @@ offset_right = 650.0
 offset_bottom = 88.0
 theme_override_colors/font_color = Color(0.62, 0.69, 0.76, 1)
 theme_override_font_sizes/font_size = 16
-text = "START; WASD/touch moves; Shift/RUN runs; left-click enemy attacks; tap + ATTACK on touch; F3 debug"
+text = "START; WASD/touch moves; Shift/RUN runs; hold Space/Enter or touch ATTACK; click enemy attacks once; F3 debug"
 
 [node name="SeedLabel" type="Label" parent="HUD/UI"]
 layout_mode = 0

@@ -34,6 +34,7 @@ const SeedFocusTargetHudTests = preload("res://tests/test_seed_focus_target_hud.
 const MovementCongestionPresentationTests = preload("res://tests/test_movement_congestion_presentation.gd")
 const WebHudFacingTests = preload("res://tests/test_web_hud_facing.gd")
 const Task31LLagAndLabelTests = preload("res://tests/test_task31l_lag_and_labels.gd")
+const HoldToAttackTests = preload("res://tests/test_hold_to_attack.gd")
 
 
 func _initialize() -> void:
@@ -42,6 +43,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 31M hold to attack", "instance": HoldToAttackTests.new()},
 		{"name": "Task 31L lag diagnosis and Goblin labels", "instance": Task31LLagAndLabelTests.new()},
 		{"name": "Task 31K Web hygiene, HUD and facing", "instance": WebHudFacingTests.new()},
 		{"name": "Task 31J movement congestion and presentation", "instance": MovementCongestionPresentationTests.new()},

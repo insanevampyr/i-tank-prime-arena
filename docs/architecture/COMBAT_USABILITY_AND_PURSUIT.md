@@ -7,9 +7,11 @@ Phase 1 Task 18 improves the Task 14-17 playtest adapter without changing combat
 ## Controls
 
 - Desktop left-click on the opponent selects it and requests one ordinary Battle Axe attack through `ArenaCombatSession.request_player_attack`.
-- A second deliberate click is accepted only when that authority says another action is legal. An in-flight action rejects the request; nothing is queued and no auto-attack state exists.
-- Empty terrain clears selection. Right-click remains unused. Space and Enter use the same request boundary.
-- On touch, tapping the opponent selects only. The ATTACK control emits the existing one-shot request. WASD/touch movement and Shift/RUN still reduce to the same movement and Running intents.
+- A second deliberate click is accepted only when that authority says another action is legal. An in-flight action rejects the request; nothing is queued. Mouse hold never repeats.
+- Empty terrain clears selection. Right-click remains unused. Space and Enter use the same request boundary; Task 31M permits either key to retain local intent while held and request the next attack only when legal.
+- On touch, tapping the opponent selects only. Pressing ATTACK requests once; holding the same touch retains the Task 31M local intent. WASD/touch movement and Shift/RUN still reduce to the same movement and Running intents.
+
+Held intent is presentation state, not a combat action or stored Act. Release stops future requests without canceling an executing action. Exact authoritative event boundaries drive repeat eligibility, so AT 1, 2, 5 and 10 retain `5/AT` timing independent of rendered frames. Focus loss, FULL LOG, RESET, encounter switching, target loss, or focused text/HUD controls prevent stale repetition. A target switch affects only later declarations because every accepted attack has already locked its target and location.
 
 ## Pursuit correction
 
