@@ -23,8 +23,21 @@ corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
-[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_combat_log"]
-content_margin_top = 20.0
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud_summary"]
+content_margin_left = 10.0
+content_margin_top = 8.0
+content_margin_right = 10.0
+content_margin_bottom = 8.0
+bg_color = Color(0.025, 0.035, 0.05, 0.88)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.32, 0.43, 0.9)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
 
 [node name="TestArena" type="Node2D"]
 script = ExtResource("2_layout")
@@ -147,6 +160,8 @@ text = "Landscape orientation recommended"
 horizontal_alignment = 1
 
 [node name="CombatStatus" type="Label" parent="HUD/UI"]
+clip_contents = true
+clip_text = true
 layout_mode = 0
 offset_left = 650.0
 offset_top = 102.0
@@ -154,8 +169,10 @@ offset_right = 1120.0
 offset_bottom = 220.0
 theme_override_colors/font_color = Color(0.91, 0.94, 0.98, 1)
 theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_hud_summary")
 text = "Combat fixture initializing..."
-autowrap_mode = 2
+text_overrun_behavior = 3
+max_lines_visible = 4
 
 [node name="CombatLog" type="RichTextLabel" parent="HUD/UI"]
 layout_mode = 0
@@ -166,9 +183,10 @@ offset_bottom = 500.0
 mouse_filter = 2
 theme_override_colors/default_color = Color(0.74, 0.82, 0.9, 1)
 theme_override_font_sizes/normal_font_size = 13
-theme_override_styles/normal = SubResource("StyleBoxEmpty_combat_log")
+theme_override_styles/normal = SubResource("StyleBoxFlat_hud_summary")
 bbcode_enabled = true
 fit_content = false
+scroll_active = true
 scroll_following = true
 
 [node name="EncounterButton" type="Button" parent="HUD/UI"]
@@ -358,21 +376,26 @@ polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)
 color = Color(0.2, 0.72, 0.88, 1)
 
 [node name="FacingMarker" type="Polygon2D" parent="PlaceholderPlayer"]
-polygon = PackedVector2Array(-4, -10, 4, -10, 0, -18)
-color = Color(0.95, 0.8, 0.28, 1)
+visible = false
+polygon = PackedVector2Array(28, -5, 38, 0, 28, 5)
+color = Color(1, 0.38, 0.82, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="PlaceholderPlayer"]
 shape = SubResource("RectangleShape2D_player")
 
 [node name="HPC" type="Label" parent="PlaceholderPlayer"]
-offset_left = -60.0
-offset_top = -62.0
-offset_right = 60.0
-offset_bottom = -24.0
-theme_override_colors/font_color = Color(0.55, 0.9, 1, 1)
+offset_left = -68.0
+offset_top = -72.0
+offset_right = 68.0
+offset_bottom = -48.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.55, 0.9, 1, 0.78)
+theme_override_colors/font_outline_color = Color(0.015, 0.025, 0.04, 0.68)
+theme_override_constants/outline_size = 2
 theme_override_font_sizes/font_size = 13
-text = "PLAYER\nHPC --"
+text = "HPC --/--"
 horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Opponent" type="CharacterBody2D" parent="."]
 position = Vector2(648, 376)
@@ -382,21 +405,26 @@ polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)
 color = Color(0.9, 0.3, 0.28, 1)
 
 [node name="FacingMarker" type="Polygon2D" parent="Opponent"]
-polygon = PackedVector2Array(-4, 10, 4, 10, 0, 18)
-color = Color(0.95, 0.8, 0.28, 1)
+visible = false
+polygon = PackedVector2Array(28, -5, 38, 0, 28, 5)
+color = Color(1, 0.38, 0.82, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Opponent"]
 shape = SubResource("RectangleShape2D_player")
 
 [node name="HPC" type="Label" parent="Opponent"]
-offset_left = -65.0
-offset_top = -62.0
-offset_right = 65.0
-offset_bottom = -24.0
-theme_override_colors/font_color = Color(1, 0.66, 0.62, 1)
+offset_left = -95.0
+offset_top = -72.0
+offset_right = 95.0
+offset_bottom = -48.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.66, 0.62, 0.78)
+theme_override_colors/font_outline_color = Color(0.015, 0.025, 0.04, 0.68)
+theme_override_constants/outline_size = 2
 theme_override_font_sizes/font_size = 13
-text = "OPPONENT\nHPC --"
+text = "GUARD | HPC --/--"
 horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="TargetIndicator" type="Line2D" parent="."]
 position = Vector2(648, 376)

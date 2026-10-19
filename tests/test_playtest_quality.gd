@@ -120,8 +120,12 @@ func _test_scene_log_and_crowded_labels() -> void:
 	var opponent: Node2D = scene.get_node("Opponent")
 	opponent.position = player.position + Vector2(40.0, 0.0)
 	controller.call("_update_actor_label_layout")
-	var rects := controller.get_actor_label_rects_for_testing()
-	_expect_true(not (rects[0] as Rect2).intersects(rects[1] as Rect2), "Crowded combatants must retain distinct identity/HPC label rectangles.")
+	var player_label := player.get_node("HPC") as Label
+	var opponent_label := opponent.get_node("HPC") as Label
+	_expect_true(is_equal_approx(player_label.position.x + player_label.size.x * 0.5, 0.0), "The player label must remain centered above its actor during crowding.")
+	_expect_true(is_equal_approx(opponent_label.position.x + opponent_label.size.x * 0.5, 0.0), "The opponent label must remain centered above its actor during crowding.")
+	_expect_equal(player_label.position.y, ArenaCombatController.ACTOR_HPC_LABEL_TOP, "Crowding must not relocate the player health label.")
+	_expect_equal(opponent_label.position.y, ArenaCombatController.ACTOR_HPC_LABEL_TOP, "Crowding must not relocate the opponent health label.")
 	controller.set_transcript_visible(false)
 	_expect_true(not controller.is_transcript_visible(), "The transcript viewer must collapse without discarding encounter state.")
 	scene.free()

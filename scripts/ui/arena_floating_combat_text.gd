@@ -6,8 +6,8 @@ const Mapper = preload("res://scripts/ui/combat_floating_text_mapper.gd")
 const MAX_ACTIVE_MESSAGES := 10
 const MAX_ACTIVE_PER_ACTOR := 4
 const LANE_COUNT := 3
-const BASE_DURATION_SECONDS := 0.9
-const IMPORTANT_DURATION_SECONDS := 1.15
+const BASE_DURATION_SECONDS := 2.0
+const IMPORTANT_DURATION_SECONDS := 2.0
 const SAFE_TOP_PIXELS := 90.0
 const EDGE_MARGIN_PIXELS := 6.0
 const LABEL_SIZE := Vector2(190.0, 28.0)
@@ -62,6 +62,8 @@ func get_active_messages_for_testing() -> Array[Dictionary]:
 			"text": String(message.get("text", "")),
 			"priority": int(message.get("priority", 0)),
 			"lane": int(message.get("lane", 0)),
+			"age": float(message.get("age", 0.0)),
+			"duration": float(message.get("duration", BASE_DURATION_SECONDS)),
 		})
 	return snapshot
 

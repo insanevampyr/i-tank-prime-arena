@@ -4,12 +4,14 @@ extends RefCounted
 const MICROFEET_PER_FOOT := 1_000_000
 const DEFAULT_ACTOR_RADIUS_MICROFEET := 500_000
 const NAVIGATION_STEP_MICROFEET := MICROFEET_PER_FOOT
+const DIRECT_PATH_BOUNDARY_EPSILON_MICROFEET := 2_048
 
 var bounds_microfeet: Rect2i
 var actor_radius_microfeet: int
 var navigation_authoritative: bool
 var _obstacles: Array[Dictionary] = []
 var _hazards: Array[Dictionary] = []
+var _direct_path_exact_sample_count: int = 0
 
 
 func _init(
@@ -168,7 +170,105 @@ func is_direct_path_clear(
 ) -> bool:
 	if not is_position_legal(actor_id, end_microfeet, occupancy)["legal"]:
 		return false
+	# Reject segments that certainly enter the actor-footprint-expanded interior
+	# of a static obstacle before invoking the exact sampled collision resolver.
+	# A narrow boundary band preserves the existing rule that touching an
+	# obstacle boundary is legal while avoiding expensive sampling for the
+	# common across-wall navigation case.
+	if _segment_definitely_crosses_static_obstacle(start_microfeet, end_microfeet):
+		return false
+	if _segment_definitely_crosses_occupied_actor(actor_id, start_microfeet, end_microfeet, occupancy):
+		return false
+	if not _segment_may_require_static_collision_sampling(start_microfeet, end_microfeet) \
+		and not _segment_may_require_occupied_actor_sampling(actor_id, start_microfeet, end_microfeet, occupancy):
+		return true
+	_direct_path_exact_sample_count += 1
 	return _furthest_legal_on_segment(actor_id, start_microfeet, end_microfeet, occupancy) == end_microfeet
+
+
+func get_direct_path_exact_sample_count_for_testing() -> int:
+	return _direct_path_exact_sample_count
+
+
+func reset_direct_path_exact_sample_count_for_testing() -> void:
+	_direct_path_exact_sample_count = 0
+
+
+func _segment_definitely_crosses_static_obstacle(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bool:
+	# Vector2 segment math loses single-microfoot precision at Arena-scale
+	# coordinates. Leave a narrow boundary band for the exact resolver so legal
+	# tangent travel is never rejected by the broad phase.
+	var interior_margin := maxi(0, actor_radius_microfeet - DIRECT_PATH_BOUNDARY_EPSILON_MICROFEET)
+	for obstacle: Dictionary in _obstacles:
+		var obstacle_rect: Rect2i = obstacle["rect_microfeet"]
+		var expanded_interior := Rect2i(
+			obstacle_rect.position - Vector2i(interior_margin, interior_margin),
+			obstacle_rect.size + Vector2i(interior_margin * 2, interior_margin * 2)
+		)
+		if _segment_intersects_rect(start_microfeet, end_microfeet, expanded_interior):
+			return true
+	return false
+
+
+func _segment_may_require_static_collision_sampling(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bool:
+	for obstacle: Dictionary in _obstacles:
+		var obstacle_rect: Rect2i = obstacle["rect_microfeet"]
+		var expanded := Rect2i(
+			obstacle_rect.position - Vector2i(actor_radius_microfeet, actor_radius_microfeet),
+			obstacle_rect.size + Vector2i(actor_radius_microfeet * 2, actor_radius_microfeet * 2)
+		)
+		if _segment_intersects_rect(start_microfeet, end_microfeet, expanded):
+			return true
+	return false
+
+
+func _segment_definitely_crosses_occupied_actor(
+	actor_id: StringName,
+	start_microfeet: Vector2i,
+	end_microfeet: Vector2i,
+	occupancy: Dictionary
+) -> bool:
+	var minimum_separation := actor_radius_microfeet * 2
+	var definite_overlap_distance := maxi(0, minimum_separation - DIRECT_PATH_BOUNDARY_EPSILON_MICROFEET)
+	var definite_overlap_distance_squared := float(definite_overlap_distance) * float(definite_overlap_distance)
+	var start := Vector2(start_microfeet)
+	var segment := Vector2(end_microfeet - start_microfeet)
+	var segment_length_squared := segment.length_squared()
+	for occupied_actor_key: Variant in occupancy.keys():
+		if StringName(occupied_actor_key) == actor_id:
+			continue
+		var occupied_position: Vector2i = occupancy[occupied_actor_key]
+		var point := Vector2(occupied_position)
+		var fraction := 0.0
+		if segment_length_squared > 0.0:
+			fraction = clampf((point - start).dot(segment) / segment_length_squared, 0.0, 1.0)
+		var closest := start + segment * fraction
+		if closest.distance_squared_to(point) < definite_overlap_distance_squared:
+			return true
+	return false
+
+
+func _segment_may_require_occupied_actor_sampling(
+	actor_id: StringName,
+	start_microfeet: Vector2i,
+	end_microfeet: Vector2i,
+	occupancy: Dictionary
+) -> bool:
+	var possible_overlap_distance := actor_radius_microfeet * 2 + DIRECT_PATH_BOUNDARY_EPSILON_MICROFEET
+	var possible_overlap_distance_squared := float(possible_overlap_distance) * float(possible_overlap_distance)
+	var start := Vector2(start_microfeet)
+	var segment := Vector2(end_microfeet - start_microfeet)
+	var segment_length_squared := segment.length_squared()
+	for occupied_actor_key: Variant in occupancy.keys():
+		if StringName(occupied_actor_key) == actor_id:
+			continue
+		var point := Vector2(occupancy[occupied_actor_key])
+		var fraction := 0.0
+		if segment_length_squared > 0.0:
+			fraction = clampf((point - start).dot(segment) / segment_length_squared, 0.0, 1.0)
+		if (start + segment * fraction).distance_squared_to(point) <= possible_overlap_distance_squared:
+			return true
+	return false
 
 
 func has_line_of_sight(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bool:

@@ -23,6 +23,10 @@ The generated output included `index.html`, `index.js`, `index.wasm`, `index.pck
 
 The exported `index.html` returned HTTP 200 from a local loopback HTTP server. Microsoft Edge loaded the Phase 0 test scene, rendered the placeholder, and moved it upward from a held `W` input. Browser diagnostics contained no project JavaScript or WebAssembly errors. Warnings observed during the run originated from an unrelated installed browser extension.
 
+## Task 31K export hygiene
+
+The `Web` preset retains `export_filter="all_resources"` so referenced scenes, scripts and data continue to be dependency-safe, but narrowly excludes `tmp/*`. Project-local PDF rendering artifacts and other temporary files therefore remain untouched on disk and outside `index.pck`. Release-package inspection confirmed `tmp/` and the known Task-28 PDF filenames are absent while `test_arena`, `arena_combat_session` and `prime_v3_common_goblin` remain present. Exported artifacts continue to be written under the ignored `builds/web` directory.
+
 ## Verified platform limitations
 
 - Browsers require WebAssembly and WebGL 2.0. Safari has additional WebGL 2 caveats; Chromium-based browsers and Firefox are the primary test targets.

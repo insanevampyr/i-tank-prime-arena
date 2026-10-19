@@ -32,6 +32,8 @@ const GoblinWallNavigationTests = preload("res://tests/test_goblin_wall_navigati
 const GoblinWallNavigationSeedControlsTests = preload("res://tests/test_goblin_wall_navigation_seed_controls.gd")
 const SeedFocusTargetHudTests = preload("res://tests/test_seed_focus_target_hud.gd")
 const MovementCongestionPresentationTests = preload("res://tests/test_movement_congestion_presentation.gd")
+const WebHudFacingTests = preload("res://tests/test_web_hud_facing.gd")
+const Task31LLagAndLabelTests = preload("res://tests/test_task31l_lag_and_labels.gd")
 
 
 func _initialize() -> void:
@@ -40,6 +42,8 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 31L lag diagnosis and Goblin labels", "instance": Task31LLagAndLabelTests.new()},
+		{"name": "Task 31K Web hygiene, HUD and facing", "instance": WebHudFacingTests.new()},
 		{"name": "Task 31J movement congestion and presentation", "instance": MovementCongestionPresentationTests.new()},
 		{"name": "Task 31I seed focus, target cycling and HUD layout", "instance": SeedFocusTargetHudTests.new()},
 		{"name": "Task 31H wall navigation and seed controls", "instance": GoblinWallNavigationSeedControlsTests.new()},

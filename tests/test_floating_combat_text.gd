@@ -13,6 +13,7 @@ func run() -> Array[String]:
 	_test_critical_damage_and_condition_ownership()
 	_test_simultaneous_and_critical_chain_mapping()
 	_test_duplicate_reset_and_layout_safety()
+	_test_two_second_lifetime_and_expiry()
 	_test_mapper_is_pure_for_authoritative_state()
 	return _failures
 
@@ -88,6 +89,39 @@ func _test_mapper_is_pure_for_authoritative_state() -> void:
 		Mapper.messages_for_event(event)
 	var after := Digest.compute(session.get_state_snapshot())
 	_expect_true(before == after, "Floating-text mapping must not mutate combat state, RNG, or synchronization digest.")
+
+
+func _test_two_second_lifetime_and_expiry() -> void:
+	var packed: PackedScene = load("res://scenes/test_arena.tscn")
+	var scene := packed.instantiate()
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		_failures.append("SceneTree unavailable for two-second floating-text test.")
+		scene.free()
+		return
+	tree.root.add_child(scene)
+	var layer: ArenaFloatingCombatText = scene.get_node("FloatingCombatText")
+	var representative_events := [
+		_event("lifetime_miss", &"physical_attack_accuracy_resolved", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {"accuracy_success": false}),
+		_event("lifetime_dodge", &"physical_defense_resolved", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {"successful_defense_type": "dodge"}),
+		_event("lifetime_damage", &"physical_damage_resolved", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {"final_damage": 3, "hpc_after": 97}),
+		_event("lifetime_critical", &"critical_trigger_recorded", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {"critical_record": {"result_kind": "success", "outcome_id": "potent_strike"}}),
+		_event("lifetime_failure", &"physical_defense_attempted", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {"attempt": {"defense_type": "weapon_block", "success": false}}),
+	]
+	for event: CombatEvent in representative_events:
+		layer.clear()
+		layer.present_authoritative_event(event)
+		var active := layer.get_active_messages_for_testing()
+		_expect_true(active.size() == 1 and is_equal_approx(float(active[0]["duration"]), 2.0), "%s floating feedback must use the approved 2.0-second presentation lifetime." % event.event_id)
+		layer.call("_process", 1.99)
+		_expect_true(layer.get_active_messages_for_testing().size() == 1, "%s feedback must remain visible before 2.0 seconds." % event.event_id)
+		layer.call("_process", 0.02)
+		_expect_true(layer.get_active_messages_for_testing().is_empty(), "%s feedback must expire automatically after 2.0 seconds." % event.event_id)
+	layer.present_authoritative_event(representative_events[0])
+	layer.clear()
+	_expect_true(layer.get_active_messages_for_testing().is_empty(), "RESET/clear must remove two-second floating feedback immediately.")
+	tree.root.remove_child(scene)
+	scene.free()
 
 
 func _expect_text(event: CombatEvent, expected_text: String, expected_actor: StringName, message: String) -> void:

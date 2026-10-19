@@ -135,11 +135,11 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	var readiness_size := Vector2((104.0 if compact else 116.0) / canvas_scale, (100.0 if compact else 112.0) / canvas_scale)
 	var readiness_gap := (6.0 if compact else 10.0) / canvas_scale
 	var readiness_pair_width := readiness_size.x * 2.0 + readiness_gap
-	var combat_log_x := minf(
-		maxf(safe_size.x * 0.72, combat_x + combat_width + combat_gap),
-		safe_size.x - margin - readiness_pair_width
-	)
-	var combat_log_width := maxf(120.0 / canvas_scale, safe_size.x - combat_log_x - margin)
+	var combat_log_min_x := maxf(safe_size.x * 0.72, combat_x + combat_width + combat_gap)
+	var combat_log_available_width := safe_size.x - margin - combat_log_min_x
+	var combat_log_width := minf(460.0 / canvas_scale, combat_log_available_width)
+	combat_log_width = maxf(120.0 / canvas_scale, combat_log_width)
+	var combat_log_x := safe_size.x - margin - combat_log_width
 	var readiness_y := debug_y
 	var attack_readiness_rect := Rect2(combat_log_x, readiness_y, readiness_size.x, readiness_size.y)
 	var run_readiness_rect := Rect2(attack_readiness_rect.end.x + readiness_gap, readiness_y, readiness_size.x, readiness_size.y)
@@ -234,7 +234,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 		_battlefield.pixels_per_foot = pixels_per_foot
 		_battlefield.queue_redraw()
 	if _combat_controller != null:
-		_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot)
+		_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot, viewport_size)
 	_apply_control_rect(_title, metrics["title_rect"])
 	_apply_control_rect(_instructions, metrics["instructions_rect"])
 	_apply_control_rect(_seed_label, metrics["seed_label_rect"])

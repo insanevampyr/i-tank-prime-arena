@@ -14,6 +14,16 @@ const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
 const TARGET_PICK_RADIUS_PIXELS := 40.0
 const BASE_WORLD_PIXELS_PER_FOOT := 24.0
+const FACING_MARKER_COLOR := Color(1.0, 0.38, 0.82, 1.0)
+const ACTOR_HPC_LABEL_TOP := -72.0
+const ACTOR_HPC_LABEL_TEXT_ALPHA := 0.78
+const PLAYER_HPC_LABEL_SIZE := Vector2(136.0, 24.0)
+const OPPONENT_HPC_LABEL_SIZE := Vector2(190.0, 24.0)
+const GOBLIN_HPC_LABEL_SIZE := Vector2(104.0, 24.0)
+const PLAYER_HPC_LABEL_COLOR := Color(0.55, 0.9, 1.0, ACTOR_HPC_LABEL_TEXT_ALPHA)
+const OPPONENT_HPC_LABEL_COLOR := Color(1.0, 0.66, 0.62, ACTOR_HPC_LABEL_TEXT_ALPHA)
+const GOBLIN_HPC_LABEL_COLOR := Color(0.72, 1.0, 0.72, ACTOR_HPC_LABEL_TEXT_ALPHA)
+const ACTOR_HPC_LABEL_OUTLINE_COLOR := Color(0.015, 0.025, 0.04, 0.68)
 
 @export var combat_seed: int = ArenaCombatSession.DEFAULT_SEED
 @export var player_path: NodePath
@@ -68,6 +78,9 @@ var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
 var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
 var _goblin_visuals: Dictionary = {}
+var _player_facing_marker: Polygon2D
+var _opponent_facing_marker: Polygon2D
+var _world_presentation_size := Vector2.ZERO
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -99,6 +112,10 @@ var _goblin_visuals: Dictionary = {}
 func _ready() -> void:
 	assert(_player != null, "Playable combat requires the existing player node.")
 	assert(_opponent != null, "Playable combat requires the opponent presentation node.")
+	_player_facing_marker = _player.get_node_or_null("FacingMarker") as Polygon2D
+	_opponent_facing_marker = _opponent.get_node_or_null("FacingMarker") as Polygon2D
+	_configure_actor_health_label(_player_hpc_label, PLAYER_HPC_LABEL_SIZE, PLAYER_HPC_LABEL_COLOR, 13)
+	_configure_actor_health_label(_opponent_hpc_label, OPPONENT_HPC_LABEL_SIZE, OPPONENT_HPC_LABEL_COLOR, 13)
 	_place_initial_combatants()
 	_initial_player_position_feet = _player.position / _player.pixels_per_foot
 	_initial_opponent_position_feet = _opponent.position / _player.pixels_per_foot
@@ -204,9 +221,10 @@ func request_pointer_action_for_testing(screen_position: Vector2, desktop_click:
 	return _select_target_at(screen_position, desktop_click)
 
 
-func set_world_presentation_pixels_per_foot(pixels_per_foot: float) -> void:
+func set_world_presentation_pixels_per_foot(pixels_per_foot: float, presentation_size: Vector2 = Vector2.ZERO) -> void:
 	if _player == null or pixels_per_foot <= 0.0:
 		return
+	_world_presentation_size = presentation_size if not presentation_size.is_zero_approx() else get_viewport().get_visible_rect().size
 	_player.pixels_per_foot = pixels_per_foot
 	var actor_scale := Vector2.ONE * (pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
 	_player.scale = actor_scale
@@ -222,6 +240,7 @@ func set_world_presentation_pixels_per_foot(pixels_per_foot: float) -> void:
 		_player.apply_authoritative_combat_position(_microfeet_to_feet(player_state.position_microfeet))
 	if _session != null:
 		_refresh_non_player_actor_positions()
+		_update_actor_label_layout()
 
 
 func press_encounter_control_for_testing() -> void:
@@ -309,8 +328,8 @@ func get_event_consumption_metrics_for_testing() -> Dictionary:
 
 func get_actor_label_rects_for_testing() -> Array[Rect2]:
 	return [
-		Rect2(_player_hpc_label.global_position, _player_hpc_label.size),
-		Rect2(_opponent_hpc_label.global_position, _opponent_hpc_label.size),
+		_control_global_rect(_player_hpc_label),
+		_control_global_rect(_opponent_hpc_label),
 	]
 
 
@@ -693,7 +712,11 @@ func _refresh_non_player_actor_positions() -> void:
 			goblin_visual.visible = goblin_state.current_hpc != null and int(goblin_state.current_hpc) > 0
 			var goblin_label := goblin_visual.get_node_or_null("Label") as Label
 			if goblin_label != null:
-				goblin_label.text = _format_hpc(goblin_state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id)))
+				goblin_label.visible = goblin_visual.visible
+				goblin_label.text = "%s | %s" % [
+					compact_actor_name(StringName(actor_id)).replace("GOBLIN ", "G"),
+					_format_hpc(goblin_state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id))),
+				]
 
 
 func _rebuild_encounter_visuals() -> void:
@@ -724,20 +747,29 @@ func _rebuild_encounter_visuals() -> void:
 		glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		glyph.add_theme_font_size_override("font_size", 18)
 		glyph.add_theme_color_override("font_color", Color("#FFFFFF"))
+		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		glyph.text = "G"
 		visual.add_child(glyph)
+		var facing_marker := Polygon2D.new()
+		facing_marker.name = "FacingMarker"
+		facing_marker.polygon = PackedVector2Array([
+			Vector2(28.0, -5.0), Vector2(38.0, 0.0), Vector2(28.0, 5.0),
+		])
+		facing_marker.color = FACING_MARKER_COLOR
+		facing_marker.visible = false
+		visual.add_child(facing_marker)
 		var label := Label.new()
-		label.position = Vector2(-42, -48)
-		label.size = Vector2(84, 34)
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.add_theme_font_size_override("font_size", 12)
-		label.add_theme_color_override("font_color", Color(0.72, 1.0, 0.72, 1.0))
 		label.name = "Label"
-		label.text = _format_hpc(state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id)))
+		_configure_actor_health_label(label, GOBLIN_HPC_LABEL_SIZE, GOBLIN_HPC_LABEL_COLOR, 12)
+		label.text = "%s | %s" % [
+			compact_actor_name(StringName(actor_id)).replace("GOBLIN ", "G"),
+			_format_hpc(state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id))),
+		]
 		visual.add_child(label)
 		visual.scale = Vector2.ONE * (_player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
 		get_parent().add_child(visual)
 		_goblin_visuals[actor_id] = visual
+	_update_facing_indicators()
 
 
 func _get_enemy_visual(actor_id: StringName) -> Node2D:
@@ -783,10 +815,12 @@ func _update_presentation() -> void:
 		ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT:
 			_last_ui_message = "DOUBLE DEFEAT: both fixtures reached zero HPC. Press RESET."
 	if _player_hpc_label != null:
-		_player_hpc_label.text = "PLAYER\n%s%s" % [_format_hpc(player_state.current_hpc, _session.get_actor_max_hpm(Fixture.PLAYER_ID)), _condition_suffix(player_state)]
+		_player_hpc_label.visible = player_state.current_hpc != null and int(player_state.current_hpc) > 0
+		_player_hpc_label.text = "%s%s" % [_format_hpc(player_state.current_hpc, _session.get_actor_max_hpm(Fixture.PLAYER_ID)), _condition_suffix(player_state)]
 	if _opponent_hpc_label != null:
-		var opponent_label := "SYNTHETIC SMALL*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else ("COMMON GOBLIN" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS else "OPPONENT")
-		_opponent_hpc_label.text = "%s\n%s%s" % [opponent_label, "HPC -- / --" if opponent_state == null else _format_hpc(opponent_state.current_hpc, _session.get_actor_max_hpm(selected_target_id if selected_target_id != &"" else Fixture.OPPONENT_ID)), "" if opponent_state == null else _condition_suffix(opponent_state)]
+		var opponent_label := "SYNTHETIC SMALL*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "GUARD"
+		_opponent_hpc_label.visible = _opponent.visible and opponent_state != null and opponent_state.current_hpc != null and int(opponent_state.current_hpc) > 0
+		_opponent_hpc_label.text = "%s | %s%s" % [opponent_label, "HPC --/--" if opponent_state == null else _format_hpc(opponent_state.current_hpc, _session.get_actor_max_hpm(Fixture.OPPONENT_ID)), "" if opponent_state == null else _condition_suffix(opponent_state)]
 	_update_actor_label_layout()
 	if _target_indicator != null:
 		var target_visual := _get_enemy_visual(selected_target_id)
@@ -816,16 +850,17 @@ func _update_presentation() -> void:
 			_append_log(blocked_line)
 	if _combat_status != null:
 		_combat_status.text = (
-			"%s | %s | TARGET: %s\nBATTLE AXE: %s | Range %s\n%s"
+			"%s | %s\nTARGET: %s | AXE: %s\nRANGE: %s\n%s"
 			% [
 				_session.get_encounter_state().replace("_", " ").to_upper(),
 				_session.get_encounter_display_name(),
-				"None" if selected_target_id == &"" else String(selected_target_id).replace("_", " ").capitalize(),
+				compact_actor_name(selected_target_id),
 				readiness,
 				distance_text,
-				_last_ui_message,
+				_compact_status_message(_last_ui_message),
 			]
 		)
+	_update_facing_indicators()
 	if _encounter_button != null:
 		_encounter_button.text = "START" if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY else "RESET"
 		_encounter_button.disabled = false
@@ -846,7 +881,7 @@ func _update_presentation() -> void:
 		_seed_apply_button.visible = seed_editable
 		_seed_apply_button.disabled = not seed_editable
 	if _event_log != null:
-		_event_log.text = "\n[b]RECENT RESULTS[/b]  (FULL LOG / F4 for complete transcript)\n" + "\n".join(PackedStringArray(_log_lines))
+		_event_log.text = "[b]RECENT RESULTS[/b]  (FULL LOG / F4)\n" + "\n".join(PackedStringArray(_log_lines))
 		_event_log.scroll_to_line(maxi(0, _event_log.get_line_count() - 1))
 	if is_transcript_visible():
 		_refresh_transcript_view()
@@ -883,7 +918,67 @@ func _update_presentation() -> void:
 
 
 func _format_hpc(current_hpc: Variant, maximum_hpm: Variant) -> String:
-	return "HPC %s / %s" % ["--" if current_hpc == null else current_hpc, "--" if maximum_hpm == null else maximum_hpm]
+	return "HPC %s/%s" % ["--" if current_hpc == null else current_hpc, "--" if maximum_hpm == null else maximum_hpm]
+
+
+static func compact_actor_name(actor_id: StringName) -> String:
+	if actor_id == &"":
+		return "NONE"
+	if actor_id == Fixture.PLAYER_ID:
+		return "PLAYER"
+	if actor_id == Fixture.OPPONENT_ID:
+		return "OPPONENT"
+	var raw := String(actor_id)
+	if raw.begins_with("wave_1_common_goblin_"):
+		return "GOBLIN %d" % int(raw.trim_prefix("wave_1_common_goblin_"))
+	var display := raw.replace("_", " ").to_upper()
+	return display if display.length() <= 20 else display.substr(0, 17) + "..."
+
+
+static func facing_rotation_degrees(facing_millidegrees: int) -> float:
+	return float(posmod(facing_millidegrees, 360_000)) / 1000.0
+
+
+func _compact_status_message(message: String) -> String:
+	var compact := message.replace("\n", " ").strip_edges()
+	const MAX_STATUS_CHARACTERS := 72
+	if compact.length() <= MAX_STATUS_CHARACTERS:
+		return compact
+	return compact.substr(0, MAX_STATUS_CHARACTERS - 3).strip_edges() + "..."
+
+
+func _update_facing_indicators() -> void:
+	if _session == null:
+		return
+	_apply_facing_indicator(
+		_player_facing_marker,
+		_session.get_actor_state(Fixture.PLAYER_ID),
+		_player != null and _player.visible
+	)
+	_apply_facing_indicator(
+		_opponent_facing_marker,
+		_session.get_actor_state(Fixture.OPPONENT_ID),
+		_opponent != null and _opponent.visible
+	)
+	for actor_id: String in _goblin_visuals:
+		var visual := _goblin_visuals[actor_id] as Node2D
+		if visual == null:
+			continue
+		var marker := visual.get_node_or_null("FacingMarker") as Polygon2D
+		_apply_facing_indicator(
+			marker,
+			_session.get_actor_state(StringName(actor_id)),
+			visual.visible
+		)
+
+
+func _apply_facing_indicator(marker: Polygon2D, state: CombatActorState, presentation_visible: bool) -> void:
+	if marker == null:
+		return
+	var living := state != null and state.current_hpc != null and int(state.current_hpc) > 0
+	marker.visible = presentation_visible and living
+	if state != null:
+		marker.rotation_degrees = facing_rotation_degrees(state.facing_millidegrees)
 
 
 func update_presentation_for_testing() -> void:
@@ -984,17 +1079,66 @@ func _poll_web_copy_status() -> void:
 func _update_actor_label_layout() -> void:
 	if _player_hpc_label == null or _opponent_hpc_label == null:
 		return
-	var crowded := _player.global_position.distance_to(_opponent.global_position) < 150.0
-	if crowded:
-		_player_hpc_label.position = Vector2(-138.0, -62.0)
-		_player_hpc_label.size = Vector2(116.0, 44.0)
-		_opponent_hpc_label.position = Vector2(22.0, -62.0)
-		_opponent_hpc_label.size = Vector2(126.0, 44.0)
-	else:
-		_player_hpc_label.position = Vector2(-60.0, -62.0)
-		_player_hpc_label.size = Vector2(120.0, 44.0)
-		_opponent_hpc_label.position = Vector2(-65.0, -62.0)
-		_opponent_hpc_label.size = Vector2(130.0, 44.0)
+	_anchor_actor_health_label(_player, _player_hpc_label)
+	_anchor_actor_health_label(_opponent, _opponent_hpc_label)
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS:
+		_layout_goblin_hpc_labels()
+
+
+func _layout_goblin_hpc_labels() -> void:
+	if _session == null or _goblin_visuals.is_empty():
+		return
+	var ordered_ids: Array[String] = []
+	for actor_key: Variant in _goblin_visuals.keys():
+		ordered_ids.append(String(actor_key))
+	ordered_ids.sort()
+	for actor_id: String in ordered_ids:
+		var visual := _goblin_visuals.get(actor_id) as Node2D
+		var state := _session.get_actor_state(StringName(actor_id))
+		var label := visual.get_node_or_null("Label") as Label if visual != null else null
+		var living := state != null and state.current_hpc != null and int(state.current_hpc) > 0
+		if label == null:
+			continue
+		label.visible = visual.visible and living
+		if label.visible:
+			_anchor_actor_health_label(visual, label)
+
+
+func _control_global_rect(control: Control) -> Rect2:
+	return Rect2(control.global_position, control.size * control.get_global_transform().get_scale().abs())
+
+
+func _configure_actor_health_label(label: Label, size: Vector2, color: Color, font_size: int) -> void:
+	if label == null:
+		return
+	label.size = size
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_color_override("font_outline_color", ACTOR_HPC_LABEL_OUTLINE_COLOR)
+	label.add_theme_constant_override("outline_size", 2)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.z_index = 5
+
+
+func _anchor_actor_health_label(actor_visual: Node2D, label: Label) -> void:
+	if actor_visual == null or label == null:
+		return
+	# Labels remain centered at one fixed actor-relative location. A small screen
+	# clamp is the only exception, preventing edge clipping without searching for
+	# another battlefield position or detaching the label from its owner.
+	label.position = Vector2(-label.size.x * 0.5, ACTOR_HPC_LABEL_TOP)
+	var screen_rect := Rect2(Vector2.ZERO, _world_presentation_size) if not _world_presentation_size.is_zero_approx() else get_viewport().get_visible_rect()
+	var scaled_size := label.size * label.get_global_transform().get_scale().abs()
+	var desired_global := label.global_position
+	var maximum := screen_rect.end - scaled_size
+	var clamped_global := Vector2(
+		clampf(desired_global.x, screen_rect.position.x, maxf(screen_rect.position.x, maximum.x)),
+		clampf(desired_global.y, screen_rect.position.y, maxf(screen_rect.position.y, maximum.y))
+	)
+	if not clamped_global.is_equal_approx(desired_global):
+		label.position = actor_visual.to_local(clamped_global)
 
 
 func _place_initial_combatants() -> void:

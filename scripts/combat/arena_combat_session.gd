@@ -454,7 +454,14 @@ func update_player_position(position_microfeet: Vector2i) -> Dictionary:
 	if _battlefield.navigation_authoritative:
 		var player_definition := _actor_definition_snapshot(Fixture.PLAYER_ID)
 		return request_player_movement(position_microfeet, int(player_definition.get("combat_stats", {}).get("mr", 0)))
-	var result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, position_microfeet, 0)
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	var facing := 0
+	if player_state != null:
+		facing = facing_millidegrees_for_displacement(
+			position_microfeet - player_state.position_microfeet,
+			player_state.facing_millidegrees
+		)
+	var result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, position_microfeet, facing)
 	if not result.get("success", false):
 		_last_error = String(result.get("reason", "position_update_rejected"))
 	return result
@@ -510,7 +517,11 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 		movement_cost = int(resolved["movement_cost_microfeet"])
 	player_state.movement_round_index = simulation.clock.get_round_index()
 	player_state.remaining_mr_microfeet = remaining
-	var result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, destination, player_state.facing_millidegrees, movement_cost)
+	var facing := facing_millidegrees_for_displacement(
+		destination - player_state.position_microfeet,
+		player_state.facing_millidegrees
+	)
+	var result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, destination, facing, movement_cost)
 	if not result.get("success", false):
 		return _movement_rejected(String(result.get("reason", "position_update_rejected")), player_state.position_microfeet)
 	_player_movement_spent_microfeet += movement_cost
@@ -1261,7 +1272,11 @@ func _advance_goblin_movement(delta_us: int) -> void:
 		var blocked_by_static_geometry: bool = collision_limited and not static_path_clear
 		goblin_state.movement_round_index = simulation.clock.get_round_index()
 		goblin_state.remaining_mr_microfeet = remaining
-		var movement_result := simulation.apply_authoritative_position(goblin_id, resolved["position_microfeet"], goblin_state.facing_millidegrees, int(resolved["movement_cost_microfeet"]))
+		var facing := facing_millidegrees_for_displacement(
+			resolved["position_microfeet"] - movement_start,
+			goblin_state.facing_millidegrees
+		)
+		var movement_result := simulation.apply_authoritative_position(goblin_id, resolved["position_microfeet"], facing, int(resolved["movement_cost_microfeet"]))
 		if movement_result.get("success", false):
 			_goblin_movement_spent[actor_id] = spent + int(resolved["movement_cost_microfeet"])
 			movement_model.position_feet = Vector2(resolved["position_microfeet"]) / float(MICROFEET_PER_FOOT)
@@ -1617,7 +1632,10 @@ func _advance_opponent_movement(delta_us: int) -> void:
 	var movement_result := simulation.apply_authoritative_position(
 		Fixture.OPPONENT_ID,
 		resolved["position_microfeet"],
-		opponent_state.facing_millidegrees,
+		facing_millidegrees_for_displacement(
+			resolved["position_microfeet"] - opponent_state.position_microfeet,
+			opponent_state.facing_millidegrees
+		),
 		int(resolved["movement_cost_microfeet"])
 	)
 	if not movement_result.get("success", false):
@@ -1629,6 +1647,13 @@ func _advance_opponent_movement(delta_us: int) -> void:
 	if resolved["position_microfeet"] == _opponent_path[0]:
 		_opponent_path.pop_front()
 	_opponent_behavior_status = "attacking_while_approaching"
+
+
+static func facing_millidegrees_for_displacement(displacement: Vector2i, fallback_facing: int) -> int:
+	if displacement == Vector2i.ZERO:
+		return posmod(fallback_facing, 360_000)
+	var degrees := rad_to_deg(Vector2(displacement).angle())
+	return posmod(roundi(degrees * 1000.0), 360_000)
 
 
 func _make_opponent_movement_model(position_microfeet: Vector2i) -> PrimeMovementModel:

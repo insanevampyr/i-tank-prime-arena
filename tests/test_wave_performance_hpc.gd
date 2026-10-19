@@ -79,7 +79,7 @@ func _test_hpc_display_retains_definition_hpm() -> void:
 	opponent_state.current_hpc = 37
 	controller.update_presentation_for_testing()
 	var opponent_label: Label = scene.get_node("Opponent/HPC")
-	_expect_true(opponent_label.text.contains("HPC 37 / 100"), "Damage must change current Guard HPC without replacing its source HPM in the HUD.")
+	_expect_true(opponent_label.text.contains("HPC 37/100"), "Damage must change current Guard HPC without replacing its source HPM in the HUD.")
 	_expect_equal(session.get_actor_max_hpm(Fixture.OPPONENT_ID), 100, "The Guard's maximum HPM must remain definition-owned after damage.")
 
 	var selection := controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
@@ -87,10 +87,13 @@ func _test_hpc_display_retains_definition_hpm() -> void:
 	session = controller.get_combat_session_for_testing()
 	var goblin_id := session.get_selected_target_id()
 	controller.update_presentation_for_testing()
-	_expect_true(opponent_label.text.contains("HPC 1 / 1"), "A healthy Common Goblin must display current HPC 1 and source HPM 1.")
+	var goblin_label := (controller._get_enemy_visual(goblin_id).get_node("Label") as Label)
+	_expect_true(goblin_label.text.contains("HPC 1/1"), "A healthy Common Goblin must display current HPC 1 and source HPM 1.")
 	session.get_actor_state(goblin_id).current_hpc = 0
+	controller.call("_refresh_non_player_actor_positions")
 	controller.update_presentation_for_testing()
-	_expect_true(opponent_label.text.contains("HPC 0 / 1"), "A defeated Common Goblin label must retain maximum HPM 1.")
+	_expect_true(goblin_label.text.contains("HPC 0/1"), "A defeated Common Goblin label must retain maximum HPM 1 even while hidden.")
+	_expect_true(not goblin_label.visible, "A defeated Common Goblin health label must no longer be rendered.")
 	tree.root.remove_child(scene)
 	scene.free()
 
