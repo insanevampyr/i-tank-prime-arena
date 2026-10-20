@@ -1499,7 +1499,18 @@ func _has_authoritative_opponent_movement() -> bool:
 func _make_wave_one_goblin_positions(first_position: Vector2i, count: int) -> Array[Vector2i]:
 	# Fixed source-neutral Arena test positions. They only determine placement;
 	# all movement, reach and collision remain authoritative afterwards.
-	var offsets := [Vector2i.ZERO, Vector2i(0, 2_000_000), Vector2i(2_000_000, 0), Vector2i(2_000_000, 2_000_000)]
+	# The first four offsets remain unchanged. The second four extend the same
+	# legal two-column formation vertically without changing Arena dimensions.
+	var offsets := [
+		Vector2i.ZERO,
+		Vector2i(0, 2_000_000),
+		Vector2i(2_000_000, 0),
+		Vector2i(2_000_000, 2_000_000),
+		Vector2i(0, -2_000_000),
+		Vector2i(2_000_000, -2_000_000),
+		Vector2i(0, 4_000_000),
+		Vector2i(2_000_000, 4_000_000),
+	]
 	var positions: Array[Vector2i] = []
 	for index in range(count):
 		if index >= offsets.size():

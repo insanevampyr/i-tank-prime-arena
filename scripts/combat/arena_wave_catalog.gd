@@ -7,7 +7,7 @@ const WAVE_COUNT := 5
 static func definitions() -> Array[Dictionary]:
 	return [
 		_wave(&"wave_1", "Wave 1", [
-			_entry(&"common_goblin", "Common Goblin", 4),
+			_entry(&"common_goblin", "Common Goblin", 4, 2),
 		]),
 		_wave(&"wave_2", "Wave 2", [
 			_entry(&"common_spadoodle", "Common Spadoodle", 3),
@@ -37,11 +37,11 @@ static func _wave(wave_id: StringName, display_name: String, roster: Array[Dicti
 	}
 
 
-static func _entry(creature_id: StringName, display_name: String, dice_sides: int) -> Dictionary:
+static func _entry(creature_id: StringName, display_name: String, dice_sides: int, dice_count: int = 1) -> Dictionary:
 	return {
 		"creature_id": String(creature_id),
 		"display_name": display_name,
-		"quantity": {"kind": "dice", "minimum": 1, "sides": dice_sides},
+		"quantity": {"kind": "dice", "minimum": dice_count, "sides": dice_sides, "dice_count": dice_count},
 		"creature_integration_status": "not_implemented",
 	}
 

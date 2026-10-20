@@ -46,16 +46,16 @@ func _test_direct_path_broad_phase_preserves_collision_answers() -> void:
 
 
 func _test_seed_seven_has_no_living_eligible_movement_stall() -> void:
-	var session := ArenaCombatSession.new(7, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+	var session := ArenaCombatSession.new(3, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
 	session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	session.set_opponent_behavior_enabled(true)
 	var initialized := session.initialize_wave_one_goblins(PLAYER_START, GOBLIN_START, true)
-	_expect_true(initialized.get("success", false), "The four-Goblin Seed 7 lag regression must initialize.")
+	_expect_true(initialized.get("success", false), "The four-Goblin lag regression must initialize.")
 	if not initialized.get("success", false):
 		return
 	session.get_actor_state(Fixture.PLAYER_ID).current_hpc = 1_000_000
 	var goblin_ids: Array = session.get_targetable_enemy_ids()
-	_expect_equal(goblin_ids.size(), 4, "Seed 7 must continue to produce the representative four-Goblin wave.")
+	_expect_equal(goblin_ids.size(), 4, "The representative seed must continue to produce the four-Goblin wave.")
 	var previous_positions := {}
 	var eligible_stall_ticks := {}
 	var maximum_eligible_stall_ticks := {}
@@ -95,7 +95,7 @@ func _test_actor_health_labels_remain_anchored() -> void:
 	if scene == null:
 		return
 	var controller: ArenaCombatController = scene.get_node("CombatController")
-	_expect_true(controller.set_seed_text_for_testing("7").get("success", false), "The label regression requires Seed 7.")
+	_expect_true(controller.set_seed_text_for_testing("3").get("success", false), "The label regression requires the representative four-Goblin seed.")
 	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "Wave 1 must remain selectable for the label regression.")
 	var session := controller.get_combat_session_for_testing()
 	var goblin_ids: Array = session.get_targetable_enemy_ids()

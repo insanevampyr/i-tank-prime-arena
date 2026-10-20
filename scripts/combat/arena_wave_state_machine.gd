@@ -132,10 +132,20 @@ func _initialize_current_wave(roll_quantity: Callable, is_circuit_initialization
 		var quantity: Dictionary = entry["quantity"]
 		var resolved_count: int
 		var rng_draw_index: Variant = null
+		var rng_draw_indices: Array[int] = []
+		var dice_results: Array[int] = []
+		var dice_count := 0
 		if quantity.get("kind") == "dice":
-			var roll: Dictionary = roll_quantity.call(int(quantity["sides"]))
-			resolved_count = int(roll["value"])
-			rng_draw_index = roll.get("rng_draw_index")
+			dice_count = int(quantity.get("dice_count", 1))
+			resolved_count = 0
+			for unused_die in range(dice_count):
+				var roll: Dictionary = roll_quantity.call(int(quantity["sides"]))
+				var die_result := int(roll["value"])
+				dice_results.append(die_result)
+				resolved_count += die_result
+				if roll.get("rng_draw_index") != null:
+					rng_draw_indices.append(int(roll["rng_draw_index"]))
+			rng_draw_index = null if rng_draw_indices.is_empty() else rng_draw_indices[0]
 		else:
 			resolved_count = int(quantity["count"])
 		var resolved := {
@@ -143,7 +153,10 @@ func _initialize_current_wave(roll_quantity: Callable, is_circuit_initialization
 			"display_name": String(entry["display_name"]),
 			"quantity_kind": String(quantity["kind"]),
 			"dice_sides": null if quantity.get("kind") != "dice" else int(quantity["sides"]),
+			"dice_count": dice_count,
+			"dice_results": dice_results,
 			"rng_draw_index": rng_draw_index,
+			"rng_draw_indices": rng_draw_indices,
 			"resolved_count": resolved_count,
 			"creature_integration_status": String(entry["creature_integration_status"]),
 		}

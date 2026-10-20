@@ -46,7 +46,7 @@ func _test_attack_path_segments_are_directly_collision_clear() -> void:
 
 
 func _test_both_wall_endpoints_retain_clearance_and_reach_attack_range() -> void:
-	var seed_value := _find_seed_for_count(1)
+	var seed_value := _find_seed_for_count(2)
 	_test_wall_endpoint(seed_value, Vector2i(20_000_000, 6_000_000), GOBLIN_ACROSS_WALL, true)
 	_test_wall_endpoint(seed_value, Vector2i(20_000_000, 22_000_000), Vector2i(38_000_000, 18_000_000), false)
 
@@ -74,8 +74,8 @@ func _test_wall_endpoint(seed_value: int, player_position: Vector2i, goblin_posi
 
 func _test_seeded_counts_and_history_are_reproducible() -> void:
 	var seeds_by_count := _find_first_seeds_by_count()
-	_expect_equal(seeds_by_count.size(), 4, "Authoritative 1d4 draws must expose seeds for all four legal Goblin quantities.")
-	for expected_count in range(1, 5):
+	_expect_equal(seeds_by_count.size(), 7, "Authoritative 2d4 draws must expose seeds for all seven legal Goblin quantities.")
+	for expected_count in range(2, 9):
 		if not seeds_by_count.has(expected_count):
 			continue
 		var seed_value := int(seeds_by_count[expected_count])
@@ -103,11 +103,11 @@ func _test_seed_ui_validation_lock_and_reset_semantics() -> void:
 		_expect_true(not controller.set_seed_text_for_testing(invalid_seed).get("success", false), "Invalid or out-of-range seed '%s' must fail closed." % invalid_seed)
 		_expect_equal(controller.get_seed_ui_state_for_testing().get("authoritative_seed"), 1, "Rejected seed input must not change authoritative RNG initialization.")
 	var seeds_by_count := _find_first_seeds_by_count()
-	var selected_seed := int(seeds_by_count.get(4, 1))
+	var selected_seed := int(seeds_by_count.get(8, 1))
 	_expect_true(controller.set_seed_text_for_testing(str(selected_seed)).get("success", false), "A valid signed seed must be accepted while the encounter is READY.")
 	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "Wave 1 must remain selectable after applying a seed.")
 	var session := controller.get_combat_session_for_testing()
-	_expect_equal(session.get_targetable_enemy_ids().size(), 4, "The selected seed must initialize the actual Wave 1 1d4 quantity.")
+	_expect_equal(session.get_targetable_enemy_ids().size(), 8, "The selected seed must initialize the actual Wave 1 2d4 quantity.")
 	_expect_true(controller.get_transcript_text_for_testing().contains("Seed: %d" % selected_seed), "The authoritative transcript must report the selected seed.")
 	controller.press_encounter_control_for_testing()
 	_expect_true(not controller.set_seed_text_for_testing("1").get("success", false), "An active encounter must reject a seed change.")
@@ -116,7 +116,7 @@ func _test_seed_ui_validation_lock_and_reset_semantics() -> void:
 	session = controller.get_combat_session_for_testing()
 	var reset_state := controller.get_seed_ui_state_for_testing()
 	_expect_equal(reset_state.get("authoritative_seed"), selected_seed, "RESET must reuse the selected seed.")
-	_expect_equal(session.get_targetable_enemy_ids().size(), 4, "RESET must reproduce the selected seed's Goblin quantity.")
+	_expect_equal(session.get_targetable_enemy_ids().size(), 8, "RESET must reproduce the selected seed's Goblin quantity.")
 	_expect_true(not bool(reset_state.get("input_disabled", true)) and not bool(reset_state.get("apply_disabled", true)), "Seed controls must become editable again after RESET.")
 	tree.root.remove_child(scene)
 	scene.free()
@@ -141,7 +141,7 @@ func _find_first_seeds_by_count() -> Dictionary:
 		var count := session.get_targetable_enemy_ids().size()
 		if not seeds_by_count.has(count):
 			seeds_by_count[count] = seed_value
-		if seeds_by_count.size() == 4:
+		if seeds_by_count.size() == 7:
 			break
 	return seeds_by_count
 

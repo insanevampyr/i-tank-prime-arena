@@ -24,13 +24,13 @@ func run() -> Array[String]:
 
 
 func _test_defeated_goblin_does_not_block_player_movement() -> void:
-	var session := ArenaCombatSession.new(7, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+	var session := ArenaCombatSession.new(3, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
 	session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	session.set_opponent_behavior_enabled(true)
 	var initialized := session.initialize_wave_one_goblins(PLAYER_START, GOBLIN_START, true)
-	_expect_true(initialized.get("success", false), "The four-Goblin seed-7 congestion fixture must initialize.")
+	_expect_true(initialized.get("success", false), "The representative four-Goblin congestion fixture must initialize.")
 	var goblin_ids: Array = session.get_targetable_enemy_ids()
-	_expect_equal(goblin_ids.size(), 4, "Seed 7 must retain the owner's four-Goblin reproduction quantity.")
+	_expect_equal(goblin_ids.size(), 4, "The representative seed must retain the four-Goblin regression quantity.")
 	if goblin_ids.size() != 4:
 		return
 	for index in range(3):
@@ -143,7 +143,7 @@ func _test_responsive_battlefield_scale_and_targeting() -> void:
 	_expect_equal(battlefield.pixels_per_foot, 40.0, "The large desktop viewport must use the calculated 40-pixel foot presentation scale.")
 	_expect_equal(player.pixels_per_foot, 40.0, "Player and battlefield presentation conversions must remain aligned.")
 	_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).position_microfeet, player_position_before, "Presentation scaling must not mutate authoritative coordinates.")
-	_expect_true(controller.set_seed_text_for_testing("7").get("success", false), "The scaled targeting fixture must accept seed 7.")
+	_expect_true(controller.set_seed_text_for_testing("3").get("success", false), "The scaled targeting fixture must accept the representative four-Goblin seed.")
 	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "The scaled targeting fixture must load Wave 1.")
 	var target_id := StringName(controller.get_combat_session_for_testing().get_targetable_enemy_ids()[2])
 	var target_visual := controller._get_enemy_visual(target_id)
@@ -161,7 +161,7 @@ func _test_responsive_battlefield_scale_and_targeting() -> void:
 
 
 func _make_four_goblin_session() -> ArenaCombatSession:
-	var session := ArenaCombatSession.new(7, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+	var session := ArenaCombatSession.new(3, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
 	session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	session.set_opponent_behavior_enabled(true)
 	var initialized := session.initialize_wave_one_goblins(PLAYER_START, GOBLIN_START, true)

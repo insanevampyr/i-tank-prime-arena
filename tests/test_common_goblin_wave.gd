@@ -57,9 +57,11 @@ func _test_all_seeded_wave_counts_spawn_independent_goblins() -> void:
 		for actor_id: String in ids:
 			var actor_state := session.get_actor_state(StringName(actor_id))
 			_expect_true(actor_state != null and actor_state.current_hpc == 1, "Each Goblin must retain independent HPM/HPC state.")
-		if observed_counts.size() == 4:
+		if observed_counts.size() == 7:
 			break
-	_expect_equal(observed_counts.size(), 4, "The seeded 1d4 contract must exercise all four legal Wave 1 spawn quantities.")
+	_expect_equal(observed_counts.size(), 7, "The seeded Arena 2d4 contract must exercise every legal Wave 1 spawn quantity from 2 through 8.")
+	for expected_count in range(2, 9):
+		_expect_true(observed_counts.has(expected_count), "Arena 2d4 must produce legal count %d within the deterministic seed sample." % expected_count)
 
 
 func _test_targeting_and_size_acc_are_directional() -> void:
@@ -217,9 +219,11 @@ func _opening_goblin_id(session: ArenaCombatSession) -> StringName:
 	if opening_event == null:
 		return &""
 	var opening_order: Array = opening_event.payload.get("opening_order", [])
-	if opening_order.is_empty():
-		return &""
-	return StringName(opening_order[0].get("actor_id", ""))
+	for entry: Dictionary in opening_order:
+		var actor_id := String(entry.get("actor_id", ""))
+		if actor_id.begins_with("wave_1_common_goblin_"):
+			return StringName(actor_id)
+	return &""
 
 
 func _advance_until_two_declarations(session: ArenaCombatSession, goblin_id: StringName) -> Array[CombatEvent]:

@@ -1,0 +1,107 @@
+name: Deploy Godot Web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Check out project
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Install verified Godot 4.7.2 and export templates
+        shell: bash
+        env:
+          GODOT_EDITOR_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
+          GODOT_TEMPLATES_SHA256: f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011
+        run: |
+          set -euo pipefail
+          editor_archive="$RUNNER_TEMP/godot-editor.zip"
+          templates_archive="$RUNNER_TEMP/godot-templates.tpz"
+          curl --fail --location --retry 3 \
+            --output "$editor_archive" \
+            "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip"
+          curl --fail --location --retry 3 \
+            --output "$templates_archive" \
+            "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz"
+          echo "$GODOT_EDITOR_SHA256  $editor_archive" | sha256sum --check --strict
+          echo "$GODOT_TEMPLATES_SHA256  $templates_archive" | sha256sum --check --strict
+          unzip -q "$editor_archive" -d "$RUNNER_TEMP/godot-editor"
+          unzip -q "$templates_archive" -d "$RUNNER_TEMP/godot-templates"
+          install -m 0755 \
+            "$RUNNER_TEMP/godot-editor/Godot_v4.7.2-stable_linux.x86_64" \
+            "$RUNNER_TEMP/godot"
+          template_dir="$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          mkdir -p "$template_dir"
+          cp -R "$RUNNER_TEMP/godot-templates/templates/." "$template_dir/"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Import and validate project
+        run: godot --headless --path . --import
+
+      - name: Export Web Single-Threaded release
+        run: |
+          mkdir -p builds/web
+          godot --headless --path . --export-release Web builds/web/index.html
+
+      - name: Validate static Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          for required_file in index.html index.js index.wasm index.pck; do
+            test -s "builds/web/$required_file"
+          done
+          test "$(find builds/web -type f | wc -l)" -ge 4
+          if find builds/web -type l -print -quit | grep -q .; then
+            echo "Web artifact must not contain symbolic links." >&2
+            exit 1
+          fi
+          if find builds/web -path '*/tmp/*' -o -name '*.md' -o -name '*.doc' -o -name '*.docx' | grep -q .; then
+            echo "Web artifact contains protected or development-only files." >&2
+            exit 1
+          fi
+          if grep -Eiq '<base[[:space:]]+href="/|(src|href)="/' builds/web/index.html; then
+            echo "Web shell contains a repository-root-incompatible absolute asset path." >&2
+            exit 1
+          fi
+          touch builds/web/.nojekyll
+
+      - name: Upload static Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: builds/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

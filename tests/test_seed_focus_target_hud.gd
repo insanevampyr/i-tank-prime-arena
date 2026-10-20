@@ -25,16 +25,16 @@ func _test_seed_focus_lifecycle_and_target_cycle() -> void:
 	_expect_true(not ready.get("input_disabled", true) and not ready.get("apply_disabled", true), "READY seed controls must be enabled.")
 	seed_input.grab_focus()
 	_expect_true(seed_input.has_focus(), "Seed entry must retain normal text focus before START.")
-	_expect_true(controller.set_seed_text_for_testing("7").get("success", false), "Seed 7 must remain a valid READY-state seed.")
+	_expect_true(controller.set_seed_text_for_testing("3").get("success", false), "The representative four-Goblin seed must be valid in READY state.")
 	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "Wave 1 must remain selectable after seed entry.")
 	var session := controller.get_combat_session_for_testing()
-	_expect_equal(session.get_targetable_enemy_ids().size(), 4, "Seed 7 must still produce four authoritative Goblins.")
+	_expect_equal(session.get_targetable_enemy_ids().size(), 4, "The representative seed must produce four authoritative Goblins.")
 	seed_input.grab_focus()
 	controller.press_encounter_control_for_testing()
 	var active := controller.get_seed_ui_state_for_testing()
 	_expect_true(not active.get("input_visible", true) and not active.get("apply_visible", true), "ACTIVE must hide seed editing controls.")
 	_expect_true(not active.get("input_has_focus", true) and not active.get("apply_has_focus", true), "Hidden seed controls must release keyboard focus.")
-	_expect_equal(active.get("label"), "SEED 7", "ACTIVE must retain a read-only authoritative seed indicator.")
+	_expect_equal(active.get("label"), "SEED 3", "ACTIVE must retain a read-only authoritative seed indicator.")
 
 	var visited := {}
 	visited[String(session.get_selected_target_id())] = true
@@ -66,15 +66,15 @@ func _test_seed_focus_lifecycle_and_target_cycle() -> void:
 	if mouse_visual != null:
 		var mouse_result := controller.request_pointer_action_for_testing(mouse_visual.global_position, true)
 		_expect_equal(StringName(mouse_result.get("selection", {}).get("target_id", &"")), mouse_target, "Desktop click selection must remain functional.")
-	_expect_equal(controller.get_seed_ui_state_for_testing().get("authoritative_seed"), 7, "Target switching must never apply or mutate a seed.")
+	_expect_equal(controller.get_seed_ui_state_for_testing().get("authoritative_seed"), 3, "Target switching must never apply or mutate a seed.")
 	_expect_true(not controller.set_seed_text_for_testing("3").get("success", false), "Programmatic seed mutation must remain rejected during ACTIVE.")
 
 	controller.press_encounter_control_for_testing()
 	var reset := controller.get_seed_ui_state_for_testing()
 	_expect_true(reset.get("input_visible", false) and reset.get("apply_visible", false), "RESET must restore seed editing controls.")
 	_expect_true(not reset.get("input_disabled", true) and not reset.get("apply_disabled", true), "RESET seed controls must be enabled.")
-	_expect_equal(reset.get("authoritative_seed"), 7, "RESET must retain the selected seed.")
-	_expect_equal(reset.get("input"), "7", "RESET must restore the retained seed text.")
+	_expect_equal(reset.get("authoritative_seed"), 3, "RESET must retain the selected seed.")
+	_expect_equal(reset.get("input"), "3", "RESET must restore the retained seed text.")
 	_free_scene(scene)
 
 

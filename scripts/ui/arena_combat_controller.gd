@@ -647,7 +647,7 @@ func _prepare_encounter_fixture() -> Dictionary:
 	_append_log(
 		"Synthetic Small Guard size test ready; Guard statistics/loadout are reused and no printed creature identity is claimed."
 		if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD
-		else ("Wave 1 Common Goblins ready. The seeded 1d4 count is authoritative." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS else "Verified Prime V3 Guard fixture ready.")
+		else ("Wave 1 Common Goblins ready. The seeded Arena 2d4 count is authoritative." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS else "Verified Prime V3 Guard fixture ready.")
 	)
 	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
 	if not running_validation.get("success", false):

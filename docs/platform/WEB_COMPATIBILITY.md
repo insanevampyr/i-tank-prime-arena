@@ -25,7 +25,13 @@ The exported `index.html` returned HTTP 200 from a local loopback HTTP server. M
 
 ## Task 31K export hygiene
 
-The `Web` preset retains `export_filter="all_resources"` so referenced scenes, scripts and data continue to be dependency-safe, but narrowly excludes `tmp/*`. Project-local PDF rendering artifacts and other temporary files therefore remain untouched on disk and outside `index.pck`. Release-package inspection confirmed `tmp/` and the known Task-28 PDF filenames are absent while `test_arena`, `arena_combat_session` and `prime_v3_common_goblin` remain present. Exported artifacts continue to be written under the ignored `builds/web` directory.
+The `Web` preset retains `export_filter="all_resources"` so referenced scenes, scripts and data continue to be dependency-safe. It excludes `tmp/*`; Task 31O also excludes `tests/*`, `docs/*`, and `.github/*` so regression code, engineering documents, and workflow source are not published inside `index.pck`. Project-local PDF rendering artifacts and other temporary files remain untouched on disk and outside the package. The required `test_arena`, `arena_combat_session`, and `prime_v3_common_goblin` runtime resources remain present. Exported artifacts continue to be written under the ignored `builds/web` directory.
+
+## Task 31O GitHub Pages preparation
+
+`.github/workflows/deploy-pages.yml` prepares a release export on owner pushes to `main` or a manual workflow dispatch. It downloads the official Godot 4.7.2 Linux editor and export templates, verifies their published SHA-256 digests, imports the project, exports the existing single-threaded `Web` preset, validates the required static files and relative shell paths, and uploads only `builds/web` to the official GitHub Pages artifact/deployment actions. Every action is pinned to a reviewed commit. The build job has read-only repository and Pages-metadata access; only the deployment job receives `pages: write` and OIDC `id-token: write`.
+
+Generated HTML, JavaScript, WebAssembly and PCK files remain ignored and are never pushed back to `main`. The static artifact contains neither `tmp/` nor Markdown, DOC, or DOCX development material. Single-threaded Web export continues to avoid `SharedArrayBuffer` and cross-origin-isolation header requirements. Asset URLs remain relative so the game can load under a repository project path. Owner activation and rollback steps are documented in `GITHUB_PAGES_DEPLOYMENT.md`.
 
 ## Verified platform limitations
 

@@ -8,7 +8,7 @@ Task 31B introduces configuration and authoritative lifecycle state only. It doe
 
 | Wave | Configured roster | Quantity authority |
 | --- | --- | --- |
-| 1 | Common Goblin | authoritative `1d4` |
+| 1 | Common Goblin | Prime baseline `1d4`; Arena override `2d4` |
 | 2 | Common Spadoodle | authoritative `1d3` |
 | 3 | Common Skelly; Hades Combat Follower | authoritative `1d2`; fixed one |
 | 4 | Mini Gargoyle Swarmer | authoritative `1d4` |
@@ -49,7 +49,7 @@ Future creature work must explicitly register creature availability, spawn and b
 
 ## Task 31C: implemented Wave 1 Common Goblins
 
-Wave 1 is now the sole playable wave. Its `1d4` count is still drawn by the existing seeded `CombatSimulation` RNG and retained as `arena_wave_quantity_resolved` evidence. The session registers one independent authoritative `Common Goblin` actor per resolved result, activates Wave 1 with those exact actor IDs, and uses the normal combat event, action, defense, damage, defeat, snapshot, replay, and two-client synchronization paths.
+Wave 1 is now the sole playable wave. Prime V3's `1d4` baseline is superseded for this Arena encounter by the Task 31O `2d4` quantity override. Both d4s use the existing seeded `CombatSimulation` RNG; their ordered results and draw indexes plus the resolved sum are retained as `arena_wave_quantity_resolved` evidence. The session registers one independent authoritative `Common Goblin` actor per resolved result, activates Wave 1 with those exact actor IDs, and uses the normal combat event, action, defense, damage, defeat, snapshot, replay, and two-client synchronization paths.
 
 The reusable source-backed definition is `data/characters/prime_v3_common_goblin.tres`; the associated natural-fist attack data is `data/equipment/weapons/prime_v3_common_goblin_fists.tres`. The character resource records `Small` as a Task 31C designer ruling rather than a sheet value. Each Goblin uses MR 6 walking pursuit only; Task 31C does not issue Running requests because no Running investment is printed. Its one-foot fists are not marked approach-capable, so the existing deterministic behavior moves to legal reach before it declares an ordinary attack. The approved two-fist behavior is represented as two ordered attack instances attached to one AT-1 action: each fist independently verifies final legality and resolves ACC, defenses, damage and legitimate criticals without creating a second Act.
 
@@ -59,7 +59,7 @@ After the final active Goblin reaches zero authoritative HPC, the state machine 
 
 ### Battlefield assessment and deferred Wave Arena configuration
 
-The retained Guard test battlefield is `44 x 23` feet (`x=2..46`, `y=2..25`) with one central wall. Wave 1's current deterministic four-Goblin maximum is legal there, but its fixed spawn offsets occupy only a `2 x 2`-foot cluster. That is adequate for exercising independent actors and targeting, not a meaningful multi-direction encounter. A separate, presentation-aware Wave Arena is recommended as the next bounded task: `64 x 36` feet, preserving the one-foot canonical grid and the original Guard map, with four fixed legal spawn anchors roughly 8–12 feet around the player and an explicit camera/layout fit for desktop and landscape mobile. It is intentionally deferred because the existing battlefield view always draws the Guard geometry; changing only simulation bounds would desynchronize presentation from authoritative geometry.
+The retained Guard test battlefield is `44 x 23` feet (`x=2..46`, `y=2..25`) with one central wall. Task 31O verifies that its unchanged geometry can legally place and run the Arena maximum of eight Goblins. The original four spawn offsets remain unchanged; four additional offsets extend the same two-column formation by two feet above and below. This supports the quantity override without changing authoritative bounds, scale, collision, or navigation. The compact fixture remains a combat-development arena rather than a designed multi-direction wave map.
 
 ## Task 31D: fractional-position pursuit correction
 
@@ -87,7 +87,13 @@ The session now distinguishes temporary actor blocking from a segment blocked by
 
 The remaining wall-end stall was caused by using axis-separated motion resolution as a direct-segment predicate. `resolve_motion()` intentionally tries X and then Y so normal movement can slide against collision. A path shortcut could therefore reach a candidate through an implicit L-shaped route, return only the final diagonal waypoint, and send the Goblin directly into the wall corner. Navigation construction, cached final-waypoint retargeting and cached-segment validation now use one footprint-aware straight-segment predicate. The whole-foot route keeps its intermediate corner-clearance nodes until the exact fractional attack destination can be reached directly. Failed-route caching, destination reservations, continuous MR accounting and the complete authoritative position-event history are unchanged.
 
-The Arena development HUD now shows the active simulation seed and accepts a signed 64-bit seed before START. Applying a valid value rebuilds the selected ready fixture with that RNG seed; invalid values fail closed, and the control is disabled after combat starts. RESET recreates the encounter with the same selected seed for reproducible retesting. FULL LOG, COPY LOG and SAVE LOG identify the actual simulation seed rather than a presentation-only value. The default remains seed 1 and the Wave-1 count is still resolved solely by the existing authoritative `1d4` draw.
+The Arena development HUD now shows the active simulation seed and accepts a signed 64-bit seed before START. Applying a valid value rebuilds the selected ready fixture with that RNG seed; invalid values fail closed, and the control is disabled after combat starts. RESET recreates the encounter with the same selected seed for reproducible retesting. FULL LOG, COPY LOG and SAVE LOG identify the actual simulation seed rather than a presentation-only value. The default remains seed 1; from Task 31O forward, Wave 1 resolves two consecutive authoritative d4 draws and sums them.
+
+## Task 31O: Arena 2d4 quantity override
+
+Task 31O changes only Wave 1's encounter quantity. The Prime V3 baseline remains documented as `1d4`, while the approved Arena configuration is `2d4` Common Goblins. `ArenaWaveStateMachine` consumes each die through the same authority callback and stores `dice_count`, ordered `dice_results`, legacy first `rng_draw_index`, all ordered `rng_draw_indices`, and `resolved_count`. Retaining the first-draw field preserves older consumers while the arrays provide complete two-die evidence.
+
+The encounter supports every total from two through eight. Actor registration, targeting, individual HPC, pursuit, victory detection, transcripts, RESET, replay, snapshots, and simulated-client publication remain count-driven. No uniform `2..8` roll or seed lookup table exists. The first four spawn positions are unchanged and four additional legal positions use the same deterministic formation inside the existing `44 x 23`-foot battlefield.
 
 ## Task 31I: seed setup focus and combat HUD separation
 

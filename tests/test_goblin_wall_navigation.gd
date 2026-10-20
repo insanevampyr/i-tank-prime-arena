@@ -26,7 +26,7 @@ func run() -> Array[String]:
 
 
 func _test_stationary_target_routes_around_wall_and_attacks() -> void:
-	var seed_value := _find_seed_for_count(1)
+	var seed_value := _find_seed_for_count(2)
 	var session := _wave_session(seed_value, Vector2i(20_000_000, 12_000_000), GOBLIN_START)
 	var goblin_id := String(session.get_targetable_enemy_ids()[0])
 	var previous_position: Vector2i = session.get_actor_state(StringName(goblin_id)).position_microfeet
@@ -49,7 +49,7 @@ func _test_stationary_target_routes_around_wall_and_attacks() -> void:
 
 
 func _test_moving_target_stays_on_legal_wall_route() -> void:
-	var seed_value := _find_seed_for_count(1)
+	var seed_value := _find_seed_for_count(2)
 	var session := _wave_session(seed_value, Vector2i(20_000_000, 12_000_000), GOBLIN_START)
 	var goblin_id := String(session.get_targetable_enemy_ids()[0])
 	var initial_distance := _distance(session.get_actor_state(StringName(goblin_id)).position_microfeet, Vector2i(20_000_000, 12_000_000))
@@ -67,7 +67,7 @@ func _test_moving_target_stays_on_legal_wall_route() -> void:
 
 
 func _test_subfoot_corner_transition_rebuilds_invalid_route() -> void:
-	var seed_value := _find_seed_for_count(1)
+	var seed_value := _find_seed_for_count(2)
 	var session := _wave_session(seed_value, CORNER_PLAYER_START, GOBLIN_START)
 	var goblin_id := String(session.get_targetable_enemy_ids()[0])
 	var rebuilds_before := int(session.get_goblin_path_rebuild_counts_for_testing().get(goblin_id, 0))
@@ -134,7 +134,7 @@ func _test_unreachable_route_is_cached_and_reconsidered() -> void:
 		ArenaBattlefield.DEFAULT_ACTOR_RADIUS_MICROFEET,
 		true
 	)
-	var seed_value := _find_seed_for_count(1)
+	var seed_value := _find_seed_for_count(2)
 	var session := ArenaCombatSession.new(seed_value, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
 	session.configure_battlefield(battlefield)
 	session.set_opponent_behavior_enabled(true)

@@ -43,9 +43,9 @@ func _test_all_wave_counts_advance_responsively() -> void:
 		var count := session.get_targetable_enemy_ids().size()
 		if not sessions_by_count.has(count):
 			sessions_by_count[count] = session
-		if sessions_by_count.size() == 4:
+		if sessions_by_count.size() == 7:
 			break
-	_expect_equal(sessions_by_count.size(), 4, "Task 31D performance coverage must include Wave-1 counts 1 through 4.")
+	_expect_equal(sessions_by_count.size(), 7, "Wave-1 performance coverage must include every Arena 2d4 count from 2 through 8.")
 	for count in sessions_by_count:
 		var session: ArenaCombatSession = sessions_by_count[count]
 		var starting_positions := {}

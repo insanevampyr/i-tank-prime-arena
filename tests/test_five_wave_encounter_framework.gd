@@ -29,7 +29,7 @@ func _test_catalog_is_exact_and_creature_free() -> void:
 	var waves := ArenaWaveCatalog.definitions()
 	_expect_equal(waves.size(), 5, "Five-wave catalog must have exactly five configured waves.")
 	var expected := [
-		["common_goblin", "dice", 4],
+		["common_goblin", "dice", 4, 2],
 		["common_spadoodle", "dice", 3],
 		["common_skelly", "dice", 2, "hades_combat_follower", "fixed", 1],
 		["mini_gargoyle_swarmer", "dice", 4],
@@ -42,6 +42,7 @@ func _test_catalog_is_exact_and_creature_free() -> void:
 		var quantity := roster[0]["quantity"] as Dictionary
 		var quantity_value := int(quantity.get("sides", quantity.get("count", -1)))
 		_expect_equal(quantity_value, expected[index][2], "Wave %d primary quantity value must match the approved sequence." % (index + 1))
+		_expect_equal(int(quantity.get("dice_count", 0)), (2 if index == 0 else 1) if expected[index][1] == "dice" else 0, "Wave %d dice count must match its approved quantity expression." % (index + 1))
 		for entry: Dictionary in roster:
 			_expect_equal(entry.get("creature_integration_status"), "not_implemented", "Task 31B roster entries must not claim creature implementation.")
 	_expect_equal(String(waves[2]["roster"][1]["creature_id"]), expected[2][3], "Wave 3 must retain the Hades Combat Follower.")
@@ -59,8 +60,9 @@ func _test_seeded_initialization_blocks_without_creature_integrations() -> void:
 	_expect_equal(first_state.get("current_wave_id"), "wave_1", "Wave initialization must begin at Wave 1.")
 	_expect_equal(first_state.get("resolved_roster"), second_state.get("resolved_roster"), "Same seed must resolve identical wave quantities.")
 	var roster: Array = first_state.get("resolved_roster", [])
-	_expect_true(not roster.is_empty() and int(roster[0].get("resolved_count", 0)) >= 1 and int(roster[0].get("resolved_count", 0)) <= 4, "Wave 1 must record a legal 1d4 count.")
-	_expect_true(roster.size() == 1 and roster[0].get("rng_draw_index") != null, "Random wave quantities must preserve their authoritative RNG draw evidence.")
+	_expect_true(not roster.is_empty() and int(roster[0].get("resolved_count", 0)) >= 2 and int(roster[0].get("resolved_count", 0)) <= 8, "Wave 1 must record a legal Arena 2d4 count.")
+	_expect_true(roster.size() == 1 and (roster[0].get("rng_draw_indices", []) as Array).size() == 2, "Wave 1 must preserve both authoritative RNG draw indexes.")
+	_expect_equal(roster[0].get("resolved_count"), int(roster[0].get("dice_results", [0, 0])[0]) + int(roster[0].get("dice_results", [0, 0])[1]), "Wave 1 count must be the sum of its two retained die results.")
 	var event_types := _event_types(first)
 	_expect_true(event_types.has("arena_wave_circuit_initialized"), "Wave initialization must enter the retained authoritative event history.")
 	_expect_true(event_types.has("arena_wave_quantity_resolved"), "Wave quantity resolution must enter the retained authoritative event history.")
@@ -70,11 +72,12 @@ func _test_seeded_initialization_blocks_without_creature_integrations() -> void:
 
 func _test_state_machine_transition_contract() -> void:
 	var machine := ArenaWaveStateMachine.new()
-	var draw_index := 0
+	var draw_state := {"index": 0}
 	var roll_quantity := func(sides: int) -> Dictionary:
-		draw_index += 1
-		return {"value": sides, "rng_draw_index": draw_index}
+		draw_state["index"] = int(draw_state["index"]) + 1
+		return {"value": 2, "rng_draw_index": int(draw_state["index"]), "sides": sides}
 	_expect_true(machine.initialize(roll_quantity).get("success", false), "State machine must initialize deterministically.")
+	_expect_equal(draw_state["index"], 2, "Arena Wave 1 must consume exactly two independent quantity draws.")
 	_expect_equal(machine.get_state(), ArenaWaveStateMachine.STATE_BLOCKED, "Unintegrated wave must block rather than simulate a victory.")
 	machine.set_creature_integration_available(&"common_goblin", true)
 	var active_ids := PackedStringArray(["integration_contract_enemy_01", "integration_contract_enemy_02", "integration_contract_enemy_03", "integration_contract_enemy_04"])

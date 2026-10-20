@@ -30,6 +30,8 @@ func _test_web_export_filter_is_narrow_and_required_sources_exist() -> void:
 	_expect_equal(String(presets.get_value("preset.0", "export_filter", "")), "all_resources", "The Web preset must retain dependency-safe all-resource export behavior.")
 	var excluded := String(presets.get_value("preset.0", "exclude_filter", ""))
 	_expect_true(excluded.split(",").has("tmp/*"), "The Web preset must narrowly exclude project-local temporary artifacts.")
+	_expect_true(excluded.split(",").has("tests/*"), "The published Web PCK must exclude development-only regression scripts.")
+	_expect_true(excluded.split(",").has("docs/*") and excluded.split(",").has(".github/*"), "The published Web PCK must exclude documentation and workflow sources.")
 	for required_path in [
 		"res://scenes/test_arena.tscn",
 		"res://scripts/combat/arena_combat_session.gd",
@@ -165,7 +167,7 @@ func _test_facing_replay_and_two_client_convergence() -> void:
 
 
 func _test_seeded_goblin_facing_markers() -> void:
-	for seed_and_count in [[3, 1], [7, 4]]:
+	for seed_and_count in [[1, 3], [3, 4]]:
 		var scene := _make_scene()
 		if scene == null:
 			return
