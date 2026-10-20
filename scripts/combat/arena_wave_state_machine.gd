@@ -25,6 +25,16 @@ func initialize(roll_quantity: Callable) -> Dictionary:
 	return _initialize_current_wave(roll_quantity, true)
 
 
+func initialize_at_wave(wave_id: StringName, roll_quantity: Callable) -> Dictionary:
+	if _state != STATE_UNINITIALIZED:
+		return _failure("wave_circuit_already_initialized")
+	for index in range(_definitions.size()):
+		if String(_definitions[index].get("wave_id", "")) == String(wave_id):
+			_current_wave_index = index
+			return _initialize_current_wave(roll_quantity, true)
+	return _failure("unknown_wave_id", {"wave_id": String(wave_id)})
+
+
 func set_creature_integration_available(creature_id: StringName, available: bool) -> void:
 	_available_creature_integrations[String(creature_id)] = available
 
@@ -126,6 +136,7 @@ func _initialize_current_wave(roll_quantity: Callable, is_circuit_initialization
 	if is_circuit_initialization:
 		events.append(_event(&"arena_wave_circuit_initialized", {
 			"wave_count": _definitions.size(),
+			"starting_wave_id": _current_wave_id(),
 			"future_extension_points": Array(Catalog.future_extension_points()),
 		}))
 	for entry: Dictionary in _current_definition().get("roster", []):

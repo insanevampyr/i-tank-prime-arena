@@ -7,6 +7,7 @@ const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const ArenaWaveStateMachine = preload("res://scripts/combat/arena_wave_state_machine.gd")
 const CommonGoblinFixture = preload("res://scripts/creatures/common_goblin_fixture.gd")
+const CommonSpadoodleFixture = preload("res://scripts/creatures/common_spadoodle_fixture.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -57,6 +58,8 @@ var _resolved_event_history_generation: int = 0
 var _arena_wave_state_machine: ArenaWaveStateMachine
 var _is_wave_one_goblin_encounter: bool = false
 var _goblin_actor_ids := PackedStringArray()
+var _is_wave_two_spadoodle_encounter: bool = false
+var _spadoodle_actor_ids := PackedStringArray()
 var _goblin_paths: Dictionary = {}
 var _goblin_path_targets: Dictionary = {}
 var _goblin_attack_destinations: Dictionary = {}
@@ -140,6 +143,8 @@ func initialize_wave_one_goblins(
 ) -> Dictionary:
 	if _initialized:
 		return _failure("encounter_already_initialized")
+	_is_wave_one_goblin_encounter = true
+	_is_wave_two_spadoodle_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_goblin_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -221,7 +226,6 @@ func initialize_wave_one_goblins(
 	_selected_target_location = &"torso"
 	_next_location_8_is_knee = true
 	_initialized = true
-	_is_wave_one_goblin_encounter = true
 	_encounter_active = start_active
 	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
 	_opponent_behavior_status = "goblin_wave_idle" if _opponent_behavior_enabled else "disabled"
@@ -256,6 +260,113 @@ func initialize_wave_one_goblins(
 	}
 
 
+func initialize_wave_two_spadoodles(
+	player_position_microfeet: Vector2i,
+	first_spadoodle_position_microfeet: Vector2i,
+	start_active: bool = true
+) -> Dictionary:
+	if _initialized:
+		return _failure("encounter_already_initialized")
+	_is_wave_one_goblin_encounter = false
+	_is_wave_two_spadoodle_encounter = true
+	_initial_player_position_microfeet = player_position_microfeet
+	_initial_opponent_position_microfeet = first_spadoodle_position_microfeet
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var wave_initialization := _arena_wave_state_machine.initialize_at_wave(&"wave_2", _roll_wave_quantity)
+	if not wave_initialization.get("success", false):
+		return _failure(String(wave_initialization.get("reason", "wave_initialization_failed")))
+	var spadoodle_count := _arena_wave_state_machine.get_resolved_enemy_count()
+	var spadoodle_positions := _make_wave_two_spadoodle_positions(first_spadoodle_position_microfeet, spadoodle_count)
+	if spadoodle_positions.size() != spadoodle_count:
+		return _failure("spadoodle_spawn_positions_unavailable")
+	var occupancy := {String(Fixture.PLAYER_ID): player_position_microfeet}
+	if not _battlefield.is_position_legal(Fixture.PLAYER_ID, player_position_microfeet, occupancy).get("legal", false):
+		return _failure("player_spawn_position_illegal")
+	for index in range(spadoodle_positions.size()):
+		var actor_id := _spadoodle_actor_id(index)
+		occupancy[String(actor_id)] = spadoodle_positions[index]
+		if not _battlefield.is_position_legal(actor_id, spadoodle_positions[index], occupancy).get("legal", false):
+			return _failure("spadoodle_spawn_position_illegal")
+
+	var player_attack := Fixture.make_attack_definition()
+	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
+	var player_validation := Fixture.validate_combatant_fixture(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_validation.get("success", false):
+		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
+	var player_registration := _register_wave_combatant(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_registration.get("success", false):
+		return player_registration
+	_attack_definition = player_attack
+	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
+
+	_spadoodle_actor_ids = PackedStringArray()
+	for index in range(spadoodle_count):
+		var spadoodle_id := _spadoodle_actor_id(index)
+		var spadoodle_actor := CommonSpadoodleFixture.make_actor(spadoodle_id, "Common Spadoodle %d" % (index + 1))
+		var spadoodle_attack := CommonSpadoodleFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+		var spadoodle_validation := CommonSpadoodleFixture.validate_actor(spadoodle_actor, spadoodle_attack)
+		if not spadoodle_validation.get("success", false):
+			return _failure(String(spadoodle_validation.get("reason", "spadoodle_fixture_invalid")))
+		var spadoodle_registration := _register_wave_combatant(
+			spadoodle_actor,
+			CommonSpadoodleFixture.make_defense_profile(spadoodle_id),
+			CommonSpadoodleFixture.make_damage_protection_profile(spadoodle_id),
+			spadoodle_attack
+		)
+		if not spadoodle_registration.get("success", false):
+			return spadoodle_registration
+		_attack_definitions_by_actor[String(spadoodle_id)] = spadoodle_attack
+		_spadoodle_actor_ids.append(String(spadoodle_id))
+
+	var player_position_result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, player_position_microfeet, 0)
+	if not player_position_result.get("success", false):
+		return player_position_result
+	for index in range(_spadoodle_actor_ids.size()):
+		var spadoodle_position_result := simulation.apply_authoritative_position(
+			StringName(_spadoodle_actor_ids[index]), spadoodle_positions[index], 180_000 + index * 180_000
+		)
+		if not spadoodle_position_result.get("success", false):
+			return spadoodle_position_result
+	var opening_result := simulation.begin_combat()
+	if not opening_result.get("success", false):
+		return opening_result
+	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	_publish_wave_transition(wave_initialization)
+	set_wave_creature_integration_available(CommonSpadoodleFixture.CREATURE_ID, true)
+	var activation := activate_current_wave(_spadoodle_actor_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = StringName(_spadoodle_actor_ids[0])
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialized = true
+	_encounter_active = start_active
+	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
+	_opponent_behavior_status = "spadoodle_wave_idle" if _opponent_behavior_enabled else "disabled"
+	_initialize_wave_enemy_navigation_state()
+	_resolved_event_history_generation += 1
+	_last_error = ""
+	if _opponent_behavior_enabled and _encounter_active:
+		_run_opponent_behavior()
+	return {
+		"success": true,
+		"opening_order": opening_result.get("opening_order", []),
+		"spadoodle_actor_ids": Array(_spadoodle_actor_ids),
+		"resolved_spadoodle_count": spadoodle_count,
+		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES),
+	}
+
+
 func _register_wave_combatant(
 	actor: CombatActorDefinition,
 	defense_profile: CombatDefenseProfile,
@@ -283,9 +394,9 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 func start_encounter() -> Dictionary:
 	if not _initialized:
 		return _failure("encounter_not_initialized")
-	if _arena_wave_state_machine != null and not _is_wave_one_goblin_encounter:
+	if _arena_wave_state_machine != null and not _is_playable_wave_encounter():
 		return _failure("wave_circuit_requires_creature_activation")
-	if _is_wave_one_goblin_encounter and _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_ACTIVE:
+	if _is_playable_wave_encounter() and _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_ACTIVE:
 		return _failure("wave_not_active")
 	if _encounter_active:
 		return _failure("encounter_already_running")
@@ -319,6 +430,7 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_opponent_movement_model = null
 	_arena_wave_state_machine = null
 	_goblin_actor_ids = PackedStringArray()
+	_spadoodle_actor_ids = PackedStringArray()
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
 	_goblin_attack_destinations.clear()
@@ -332,11 +444,11 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_goblin_last_movement_us = 0
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
-	return (
-		initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-		if _is_wave_one_goblin_encounter
-		else initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-	)
+	if _is_wave_one_goblin_encounter:
+		return initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	if _is_wave_two_spadoodle_encounter:
+		return initialize_wave_two_spadoodles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
 
 func set_arena_bounds_microfeet(bounds: Rect2i) -> void:
@@ -670,7 +782,7 @@ func advance_by(delta_us: int) -> void:
 			step_timestamp_us = mini(step_timestamp_us, movement_tick_us)
 		simulation.advance_to(step_timestamp_us)
 		if step_timestamp_us == movement_tick_us:
-			if _is_wave_one_goblin_encounter:
+			if _is_playable_wave_encounter():
 				_advance_goblin_movement(step_timestamp_us - _goblin_last_movement_us)
 				_goblin_last_movement_us = step_timestamp_us
 			else:
@@ -738,6 +850,8 @@ func get_encounter_fixture_id() -> StringName:
 func get_encounter_display_name() -> String:
 	if _is_wave_one_goblin_encounter:
 		return "WAVE 1: %d COMMON GOBLINS" % _goblin_actor_ids.size()
+	if _is_wave_two_spadoodle_encounter:
+		return "WAVE 2: %d COMMON SPADOODLES" % _spadoodle_actor_ids.size()
 	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
 
 
@@ -975,7 +1089,7 @@ func _run_opponent_behavior() -> void:
 	if not _encounter_active or _encounter_state != ENCOUNTER_RUNNING:
 		_opponent_behavior_status = "stopped"
 		return
-	if _is_wave_one_goblin_encounter:
+	if _is_playable_wave_encounter():
 		_run_goblin_wave_behavior()
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
@@ -1038,7 +1152,7 @@ func _run_goblin_wave_behavior() -> void:
 		_opponent_behavior_status = "stopped_target_defeated"
 		return
 	var statuses: Array[String] = []
-	for actor_id: String in _goblin_actor_ids:
+	for actor_id: String in _wave_enemy_actor_ids():
 		var goblin_id := StringName(actor_id)
 		var goblin_state := simulation.get_actor_state(goblin_id)
 		if goblin_state == null or goblin_state.current_hpc == null or int(goblin_state.current_hpc) <= 0:
@@ -1066,10 +1180,14 @@ func _run_goblin_wave_behavior() -> void:
 			var path_result := _ensure_current_goblin_path(goblin_id)
 			statuses.append("%s:%s" % [actor_id, "approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))])
 			continue
-		var attack_result := _request_actor_attack(goblin_id, Fixture.PLAYER_ID, "wave_1_scripted")
+		var attack_result := _request_actor_attack(
+			goblin_id,
+			Fixture.PLAYER_ID,
+			"wave_2_scripted" if _is_wave_two_spadoodle_encounter else "wave_1_scripted"
+		)
 		statuses.append("%s:%s" % [actor_id, "attacking" if attack_result.get("success", false) else "blocked_%s" % String(attack_result.get("reason", "attack_rejected"))])
 	statuses.sort()
-	_opponent_behavior_status = "goblin_wave " + ", ".join(PackedStringArray(statuses))
+	_opponent_behavior_status = ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave ") + ", ".join(PackedStringArray(statuses))
 
 
 func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
@@ -1223,7 +1341,7 @@ func _actor_occupancy_with_goblin_reservations(mover_id: StringName, target_posi
 func _advance_goblin_movement(delta_us: int) -> void:
 	if delta_us <= 0 or not _encounter_active or not _opponent_behavior_enabled:
 		return
-	for actor_id: String in _goblin_actor_ids:
+	for actor_id: String in _wave_enemy_actor_ids():
 		var goblin_id := StringName(actor_id)
 		var goblin_state := simulation.get_actor_state(goblin_id)
 		var movement_model: PrimeMovementModel = _goblin_movement_models.get(actor_id)
@@ -1314,7 +1432,7 @@ func _refresh_goblin_movement_ledger(goblin_id: StringName) -> void:
 
 func _update_encounter_outcome() -> void:
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
-	if _is_wave_one_goblin_encounter:
+	if _is_playable_wave_encounter():
 		if player_state == null:
 			return
 		if player_state.current_hpc != null and int(player_state.current_hpc) <= 0:
@@ -1326,7 +1444,7 @@ func _update_encounter_outcome() -> void:
 		if wave_victory.get("success", false) and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_VICTORY_DETECTED:
 			_encounter_state = ENCOUNTER_PLAYER_VICTORY
 			_encounter_active = false
-			_opponent_behavior_status = "wave_1_victory_detected"
+			_opponent_behavior_status = "%s_victory_detected" % ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1")
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	if player_state == null or opponent_state == null:
@@ -1493,7 +1611,7 @@ func _refresh_player_movement_ledger() -> void:
 
 
 func _has_authoritative_opponent_movement() -> bool:
-	return _opponent_behavior_enabled and (_is_wave_one_goblin_encounter or _opponent_movement_model != null)
+	return _opponent_behavior_enabled and (_is_playable_wave_encounter() or _opponent_movement_model != null)
 
 
 func _make_wave_one_goblin_positions(first_position: Vector2i, count: int) -> Array[Vector2i]:
@@ -1521,6 +1639,53 @@ func _make_wave_one_goblin_positions(first_position: Vector2i, count: int) -> Ar
 
 func _goblin_actor_id(index: int) -> StringName:
 	return StringName("wave_1_common_goblin_%02d" % (index + 1))
+
+
+func _spadoodle_actor_id(index: int) -> StringName:
+	return StringName("wave_2_common_spadoodle_%02d" % (index + 1))
+
+
+func _make_wave_two_spadoodle_positions(first_position: Vector2i, count: int) -> Array[Vector2i]:
+	var offsets := [
+		Vector2i.ZERO,
+		Vector2i(0, 2_000_000),
+		Vector2i(2_000_000, 0),
+	]
+	var positions: Array[Vector2i] = []
+	for index in range(count):
+		if index >= offsets.size():
+			return []
+		positions.append(first_position + offsets[index])
+	return positions
+
+
+func _is_playable_wave_encounter() -> bool:
+	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter
+
+
+func _wave_enemy_actor_ids() -> PackedStringArray:
+	return _spadoodle_actor_ids if _is_wave_two_spadoodle_encounter else _goblin_actor_ids
+
+
+func _initialize_wave_enemy_navigation_state() -> void:
+	_goblin_paths.clear()
+	_goblin_path_targets.clear()
+	_goblin_attack_destinations.clear()
+	_goblin_path_rebuild_counts.clear()
+	_goblin_failed_path_cache.clear()
+	_goblin_failed_path_cache_hits.clear()
+	_goblin_static_collision_counts.clear()
+	_goblin_movement_models.clear()
+	_goblin_movement_round_indices.clear()
+	_goblin_movement_spent.clear()
+	_goblin_last_movement_us = simulation.clock.get_elapsed_us()
+	for actor_id: String in _wave_enemy_actor_ids():
+		_goblin_movement_models[actor_id] = _make_goblin_movement_model(StringName(actor_id), simulation.get_actor_state(StringName(actor_id)).position_microfeet)
+		_goblin_movement_round_indices[actor_id] = simulation.clock.get_round_index()
+		_goblin_movement_spent[actor_id] = 0
+		_goblin_path_rebuild_counts[actor_id] = 0
+		_goblin_failed_path_cache_hits[actor_id] = 0
+		_goblin_static_collision_counts[actor_id] = 0
 
 
 func _next_opponent_movement_tick_us(current_us: int) -> int:

@@ -1,0 +1,62 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_common_spadoodle"
+display_name = "Common Spadoodle"
+actor_kind = &"prime_v3_creature"
+size_category = &"small"
+race_name = "Creature"
+class_names = PackedStringArray()
+level = -1
+attributes = {
+"app": 10,
+"dex": 6,
+"end": 1,
+"int": 1,
+"luk": 0,
+"man": 0,
+"spd": 10,
+"str": 4,
+"wis": 1,
+"wit": 1
+}
+combat_stats = {
+"acc": 7,
+"at": 1,
+"dp": 0,
+"dt": 6,
+"hpm": 10,
+"init": 1,
+"mr": 10,
+"nal": 2,
+"physical_soak": 0,
+"rb": 0,
+"sb": 1
+}
+resource_maxima = {
+"ap": 0
+}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": false,
+"weapon_block": false
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": -1,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("Common Spadoodle.doc: Common Spadoodle statistics, natural claws, and scale hide", "ITank Prime V3 printed p. 95: Small size category")
+field_sources = {
+"attributes": "Common Spadoodle.doc, attribute grid",
+"combat_stats": "Common Spadoodle.doc, combat statistics; effective NAL 2 from scale hide",
+"equipment": "Common Spadoodle.doc: 2 x claws, slash, reach 2, 1d6 damage; no held weapon, shield, or worn armor",
+"resource_maxima.ap": "Common Spadoodle.doc, AP 0",
+"running_profile": "Common Spadoodle.doc provides SCM 0 and RB 0, but no Running investment; Wave 2 behavior does not use Running",
+"size_category": "Common Spadoodle.doc states 2 feet long; ITank Prime V3 printed p. 95 classifies the verified 2-foot creature fixture as Small"
+}
+unresolved_fields = PackedStringArray("running_profile.running_skill_investment", "skills.climb_runtime")

@@ -50,6 +50,10 @@ Task 19 adds passive ATTACK and RUN rings sourced from the existing action, lega
 
 Task 31M lets Space, Enter, and touch ATTACK retain local held intent; Task 31N extends that presentation behavior to left mouse held on a living enemy. The next ordinary attack is submitted only at an exact authoritative legality boundary; releasing one source does not cancel an action already executing or another held source. Empty terrain, HUD/text input, focus loss and mouse cancellation cannot leave a retained mouse attack. No held input changes AT, queues an Act, bypasses final geometry, or adds an auto-attack state to simulation/replay.
 
+## Task 32A Wave 2 development encounter
+
+While READY, cycle the encounter selector to `WAVE 2`, optionally enter an authoritative seed, and press START. The seeded d3 creates one to three independent source-backed Common Spadoodles. Existing mouse/touch selection, Tab/Shift+Tab, numbered aim locations, held attack inputs, movement/Running controls, target locking, final reach/LOS validation, defenses, damage, criticals, HPC labels, FULL LOG and RESET remain on their existing pathways. Brown-gold `S` markers distinguish Spadoodles from green `G` Goblins. The encounter ends only after every registered Spadoodle is genuinely defeated; Wave 3 remains unavailable.
+
 ## Deliberate limits
 
 - The opponent's Task 15 behavior is a fixed, labeled encounter script rather than general AI. It initiates the same ordinary attack only when authoritative legality succeeds.

@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_common_spadoodle_claws"
+display_name = "Common Spadoodle Claws"
+damage_dice_count = 1
+damage_die_sides = 6
+fixed_damage_bonus = 0
+strength_bonus_eligible = true
+damage_types = PackedStringArray("slashing")
+reach_microfeet = 2000000
+strength_requirement = -1
+one_hand_strength_requirement = -1
+base_hands_required = 1
+block_target = -1
+required_acts = 1
+strikes_per_act = 2
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = true
+source_refs = PackedStringArray("Common Spadoodle.doc: 2 x claws, slash, reach 2, 1d6 damage", "Task 32A owner ruling: two independently resolved claw strikes in one AT-1 Act", "ITank Prime V3 generic Strength Bonus and natural critical rules")

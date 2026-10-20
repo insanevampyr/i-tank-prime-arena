@@ -49,17 +49,29 @@ Future creature work must explicitly register creature availability, spawn and b
 
 ## Task 31C: implemented Wave 1 Common Goblins
 
-Wave 1 is now the sole playable wave. Prime V3's `1d4` baseline is superseded for this Arena encounter by the Task 31O `2d4` quantity override. Both d4s use the existing seeded `CombatSimulation` RNG; their ordered results and draw indexes plus the resolved sum are retained as `arena_wave_quantity_resolved` evidence. The session registers one independent authoritative `Common Goblin` actor per resolved result, activates Wave 1 with those exact actor IDs, and uses the normal combat event, action, defense, damage, defeat, snapshot, replay, and two-client synchronization paths.
+Wave 1 remains an independently selectable playable wave. Prime V3's `1d4` baseline is superseded for this Arena encounter by the Task 31O `2d4` quantity override. Both d4s use the existing seeded `CombatSimulation` RNG; their ordered results and draw indexes plus the resolved sum are retained as `arena_wave_quantity_resolved` evidence. The session registers one independent authoritative `Common Goblin` actor per resolved result, activates Wave 1 with those exact actor IDs, and uses the normal combat event, action, defense, damage, defeat, snapshot, replay, and two-client synchronization paths.
 
 The reusable source-backed definition is `data/characters/prime_v3_common_goblin.tres`; the associated natural-fist attack data is `data/equipment/weapons/prime_v3_common_goblin_fists.tres`. The character resource records `Small` as a Task 31C designer ruling rather than a sheet value. Each Goblin uses MR 6 walking pursuit only; Task 31C does not issue Running requests because no Running investment is printed. Its one-foot fists are not marked approach-capable, so the existing deterministic behavior moves to legal reach before it declares an ordinary attack. The approved two-fist behavior is represented as two ordered attack instances attached to one AT-1 action: each fist independently verifies final legality and resolves ACC, defenses, damage and legitimate criticals without creating a second Act.
 
 The existing player target list, Tab cycling and numbered hit locations operate across all living Goblin IDs. The current test scene adds compact `#32864A` green-square Goblin markers with white `G` glyphs and individual HPC labels for Wave 1 through its pre-existing development encounter selector; `DUEL M/M` and `DUEL M/S*` remain intact. The selector's `WAVE 1` option is a development encounter control, not a production creature-selection interface.
 
-After the final active Goblin reaches zero authoritative HPC, the state machine records `arena_wave_victory_detected`. The playable encounter reports victory and stops; it deliberately does not enter recovery or advance into the unimplemented Wave 2 roster. The source's leader-defeat scattering statement is also deferred because no verified leader actor or morale rule has been integrated.
+After the final active Goblin reaches zero authoritative HPC, the state machine records `arena_wave_victory_detected`. The playable encounter reports victory and stops; it deliberately does not enter recovery or auto-advance. Wave 2 is a separate development selector option in Task 32A. The source's leader-defeat scattering statement is also deferred because no verified leader actor or morale rule has been integrated.
 
 ### Battlefield assessment and deferred Wave Arena configuration
 
 The retained Guard test battlefield is `44 x 23` feet (`x=2..46`, `y=2..25`) with one central wall. Task 31O verifies that its unchanged geometry can legally place and run the Arena maximum of eight Goblins. The original four spawn offsets remain unchanged; four additional offsets extend the same two-column formation by two feet above and below. This supports the quantity override without changing authoritative bounds, scale, collision, or navigation. The compact fixture remains a combat-development arena rather than a designed multi-direction wave map.
+
+## Task 32A: implemented Wave 2 Common Spadoodles
+
+Wave 2 can be initialized directly for development play without fabricating a Wave 1 victory. The state machine validates the requested catalog wave, performs one authoritative seeded d3 draw, records its draw index/result and resolved 1-3 count, then remains blocked until the real `common_spadoodle` integration registers the exact actor IDs. Waves 3-5 remain blocked and are never skipped or simulated.
+
+`Common Spadoodle.doc` supplies the physical-combat fixture: HPM 10, STR 4, SB 1, END 1, NAL +2 scale hide, SPD/MR 10, AT 1, DEX/DT 6, PD/DP 0, ACC 7, WIT/INIT 1, AP/RB/Physical Soak 0, and two slashing claws at two-foot reach for `1d6` damage. The verified two-foot creature uses Prime V3's Small directional hit-location tables. No held weapon, shield, worn armor, weapon Block, Running investment, Special, or additional combat skill is invented.
+
+The Task 32A owner ruling defines `2 x claws` as two independent ordered attack instances attached to one AT-1 action. Each locks the same declared target/location and independently performs final reach/LOS legality, ACC, defenses, damage and legitimate critical processing. The action still takes exactly five seconds and creates no second Act or extra movement. Eligible physical Strength Bonus remains handled by the existing Prime damage pipeline.
+
+Wave 2 reuses the authoritative Wave 1 multi-actor pursuit, collision, occupancy, target cycling, action scheduler, event history, replay and synchronization paths. Its maximum of three actors uses the unchanged `44 x 23`-foot battlefield and the first three legal wave formation offsets. Presentation uses distinct brown-gold squares with white `S` glyphs, individual HPC labels, target highlights and authoritative facing arrows. Defeating every registered Spadoodle ends the separately launched Wave 2 encounter; it does not begin Wave 3.
+
+The source lists Climb and fear of creatures bigger than Medium. The current flat Arena supplies no climbable surface, and the current Medium Guard is not bigger than Medium. Task 32A therefore adds no climbing or fear behavior; later use requires a source-driven environment/target trigger rather than a fabricated generic effect.
 
 ## Task 31D: fractional-position pursuit correction
 

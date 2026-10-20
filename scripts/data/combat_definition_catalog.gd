@@ -17,6 +17,9 @@ const LEATHER_HEAD_PATH := "res://data/equipment/armor/prime_v3_leather_head.tre
 const COMMON_GOBLIN_CHARACTER_PATH := "res://data/characters/prime_v3_common_goblin.tres"
 const COMMON_GOBLIN_FISTS_PATH := "res://data/equipment/weapons/prime_v3_common_goblin_fists.tres"
 const COMMON_GOBLIN_LOADOUT_PATH := "res://data/loadouts/prime_v3_common_goblin_fists.tres"
+const COMMON_SPADOODLE_CHARACTER_PATH := "res://data/characters/prime_v3_common_spadoodle.tres"
+const COMMON_SPADOODLE_CLAWS_PATH := "res://data/equipment/weapons/prime_v3_common_spadoodle_claws.tres"
+const COMMON_SPADOODLE_LOADOUT_PATH := "res://data/loadouts/prime_v3_common_spadoodle_claws.tres"
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -42,6 +45,9 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_character(load(COMMON_GOBLIN_CHARACTER_PATH) as CombatCharacterDefinitionResource)
 	catalog.register_weapon(load(COMMON_GOBLIN_FISTS_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_loadout(load(COMMON_GOBLIN_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
+	catalog.register_character(load(COMMON_SPADOODLE_CHARACTER_PATH) as CombatCharacterDefinitionResource)
+	catalog.register_weapon(load(COMMON_SPADOODLE_CLAWS_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_loadout(load(COMMON_SPADOODLE_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 
 
