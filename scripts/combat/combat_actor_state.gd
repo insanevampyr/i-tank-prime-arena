@@ -4,6 +4,13 @@ extends RefCounted
 var actor_id: StringName
 var current_hpc: Variant = null
 var resources: Dictionary = {}
+var ability_daily_maxima: Dictionary = {}
+var ability_daily_remaining: Dictionary = {}
+var timed_stat_effects: Dictionary = {}
+var pending_called_shot: Dictionary = {}
+var hand_occupancy: Dictionary = {"left": "", "right": ""}
+var hand_occupancy_authoritative: bool = false
+var held_materials: Dictionary = {}
 var equipment_refs: PackedStringArray = PackedStringArray()
 var conditions: PackedStringArray = PackedStringArray()
 var awareness: StringName = &"aware"
@@ -30,6 +37,11 @@ func _init(definition: CombatActorDefinition) -> void:
 	current_hpc = definition.get_combat_stat("hpm")
 	for resource_name: Variant in definition.resource_maxima:
 		resources[resource_name] = definition.resource_maxima[resource_name]
+	for ability_id: Variant in definition.ability_allowances:
+		var maximum: Variant = definition.get_ability_daily_maximum(StringName(String(ability_id)))
+		if maximum != null:
+			ability_daily_maxima[String(ability_id)] = int(maximum)
+			ability_daily_remaining[String(ability_id)] = int(maximum)
 	equipment_refs = definition.equipment_refs.duplicate()
 	var mr_value: Variant = definition.get_combat_stat("mr")
 	if mr_value != null:
@@ -41,6 +53,13 @@ func to_dictionary() -> Dictionary:
 		"actor_id": String(actor_id),
 		"current_hpc": current_hpc,
 		"resources": resources.duplicate(true),
+		"ability_daily_maxima": ability_daily_maxima.duplicate(true),
+		"ability_daily_remaining": ability_daily_remaining.duplicate(true),
+		"timed_stat_effects": timed_stat_effects.duplicate(true),
+		"pending_called_shot": pending_called_shot.duplicate(true),
+		"hand_occupancy": hand_occupancy.duplicate(true),
+		"hand_occupancy_authoritative": hand_occupancy_authoritative,
+		"held_materials": held_materials.duplicate(true),
 		"equipment_refs": Array(equipment_refs),
 		"conditions": Array(conditions),
 		"awareness": String(awareness),

@@ -39,7 +39,7 @@ The current wave state is copied into the simulation snapshot before publication
 Between non-final waves, the player restoration call uses only existing actor state:
 
 - `current_hpc` is restored from the registered `hpm` combat stat.
-- Each resource in the definition's `resource_maxima` dictionary is restored to its registered maximum. This includes Mana, AP, and ability-use entries only when those entries actually exist in the definition.
+- HPC and modeled Mana restore at the approved playtest recovery boundary. Task 32E corrects Ability User persistence: AP and independent per-Special daily counters do not refresh between continuous waves; only an explicit authoritative game-world-midnight event restores them.
 
 The framework does not invent absent resource pools, reset equipment, repair shields, remove conditions, refund unmodeled consumables, or interrupt an action in progress.
 
@@ -63,13 +63,27 @@ The retained Guard test battlefield is `44 x 23` feet (`x=2..46`, `y=2..25`) wit
 
 ## Task 32A: implemented Wave 2 Common Spadoodles
 
-Wave 2 can be initialized directly for development play without fabricating a Wave 1 victory. The state machine validates the requested catalog wave, performs one authoritative seeded d3 draw, records its draw index/result and resolved 1-3 count, then remains blocked until the real `common_spadoodle` integration registers the exact actor IDs. Waves 3-5 remain blocked and are never skipped or simulated.
+Wave 2 can be initialized directly for development play without fabricating a Wave 1 victory. The state machine validates the requested catalog wave, performs one authoritative seeded d3 draw, records its draw index/result and resolved 1-3 count, then remains blocked until the real `common_spadoodle` integration registers the exact actor IDs. Waves 4-5 remain blocked and are never skipped or simulated.
 
 `Common Spadoodle.doc` supplies the physical-combat fixture: HPM 10, STR 4, SB 1, END 1, NAL +2 scale hide, SPD/MR 10, AT 1, DEX/DT 6, PD/DP 0, ACC 7, WIT/INIT 1, AP/RB/Physical Soak 0, and two slashing claws at two-foot reach for `1d6` damage. The verified two-foot creature uses Prime V3's Small directional hit-location tables. No held weapon, shield, worn armor, weapon Block, Running investment, Special, or additional combat skill is invented.
 
 The Task 32A owner ruling defines `2 x claws` as two independent ordered attack instances attached to one AT-1 action. Each locks the same declared target/location and independently performs final reach/LOS legality, ACC, defenses, damage and legitimate critical processing. The action still takes exactly five seconds and creates no second Act or extra movement. Eligible physical Strength Bonus remains handled by the existing Prime damage pipeline.
 
 Wave 2 reuses the authoritative Wave 1 multi-actor pursuit, collision, occupancy, target cycling, action scheduler, event history, replay and synchronization paths. Its maximum of three actors uses the unchanged `44 x 23`-foot battlefield and the first three legal wave formation offsets. Presentation uses distinct brown-gold squares with white `S` glyphs, individual HPC labels, target highlights and authoritative facing arrows. Defeating every registered Spadoodle ends the separately launched Wave 2 encounter; it does not begin Wave 3.
+
+## Task 32B: implemented Wave 3 Skellys and Hades Combat Follower
+
+Wave 3 may be initialized directly for development play without simulating earlier victories. The wave state machine performs one authoritative seeded d2 draw for one or two `common_skelly` actors and adds exactly one fixed `hades_combat_follower` without consuming another RNG draw. Quantity evidence, unique actor IDs, mutable actor state, opening Initiative, movement, attacks, defeat and victory all remain in the existing authoritative event/snapshot paths.
+
+Skellys use the source-correct Medium profile, two one-foot `1d6` slashing claws in one AT-1 Act, and exact piercing immunity. The owner-approved general natural-attack rule is represented by `strikes_per_act`: verified natural weapons determine the independent strikes inside the Act, while AT controls only Act frequency. Skelly Light-Special weakness, Faith, Turning, live summoner control, Dispel/Banish and summon expiry remain gated outside this physical Wave 3 slice.
+
+The fixed follower uses its verified Human profile and STR-6 Short Sword. Its deterministic tactical driver selects only among the four verified Combat Specials and an ordinary Short Sword attack. It evaluates current HPC, independent daily allowances, shared AP, active nonstacking effects, attack opportunity, legal self/ally recipients, held dirt and explicitly authored terrain. It records the chosen action, recipient and rejected alternatives without reading hidden player data. Rage remains a two-Act action at AT 2 and its qualifying damaging hits automatically apply the approved two-foot collision-limited knockback. Called Shot covers every verified strike in the following Act; Rejuvenating Mist heals `2d6+2` up to HPM; Defensive Buff requires gathered dirt and adds `+2 NAL` for two minutes.
+
+The test Arena declares its existing floor as packed dirt in authoritative terrain data. Gathering dirt requires a free left hand and one completed Act; terrain remains validated at completion. The material remains in that hand until a successfully completed two-Act Defensive Buff consumes it, while the right-hand Short Sword remains equipped. Self/ally Mist and Buff require a living legal recipient; a different recipient must stay in touch and unobstructed through completion. The deterministic driver can approach an eligible ally without treating the player as an ally. Hand/material state, daily uses/AP payment, recipient, effects, interruption and expiry are retained in snapshots and event history. Other battlefield definitions provide no dirt unless they author a matching material region.
+
+Task 32E models the printed parenthetical numbers as free daily uses: Called Shot 2, Rejuvenating Mist 3, Rage 2 and Defensive Buff 2. Each counter is independent. Once a counter reaches zero, another activation spends exactly one point from the shared AP pool. Ability activation makes no SS check. Fresh initialization and RESET construct full counters/AP; between-wave recovery preserves them. A distinct idempotent game-world-midnight command restores them without consulting the host clock.
+
+The unchanged `44 x 23`-foot battlefield supports the two-to-three enemy roster at legal nonoverlapping starts. Existing deterministic pursuit, occupancy reservations, targeting, nine locations, final reach/LOS, HPC labels and facing indicators are reused. Bone-colored `K` and purple `H` placeholders distinguish the two types. Defeating all registered Wave 3 actors ends that development encounter without beginning Wave 4; Waves 4-5 remain blocked.
 
 The source lists Climb and fear of creatures bigger than Medium. The current flat Arena supplies no climbable surface, and the current Medium Guard is not bigger than Medium. Task 32A therefore adds no climbing or fear behavior; later use requires a source-driven environment/target trigger rather than a fabricated generic effect.
 

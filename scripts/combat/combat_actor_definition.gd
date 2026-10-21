@@ -17,6 +17,7 @@ var base_combat_stats: Dictionary
 var combat_stats: Dictionary
 var equipment_stat_modifiers: Dictionary
 var resource_maxima: Dictionary
+var ability_allowances: Dictionary
 var equipment_refs: PackedStringArray
 var defensive_capabilities: Dictionary
 var field_sources: Dictionary
@@ -34,7 +35,8 @@ func _init(
 	p_defensive_capabilities: Dictionary = {},
 	p_field_sources: Dictionary = {},
 	p_unresolved_fields: PackedStringArray = PackedStringArray(),
-	p_size_category: StringName = &""
+	p_size_category: StringName = &"",
+	p_ability_allowances: Dictionary = {}
 ) -> void:
 	assert(not String(p_actor_id).is_empty(), "Combat actors require a stable identifier.")
 	assert(not String(p_actor_kind).is_empty(), "Combat actors require a stable kind.")
@@ -47,6 +49,7 @@ func _init(
 	combat_stats = base_combat_stats.duplicate(true)
 	equipment_stat_modifiers = {"mr": 0, "dt": 0, "dp": 0}
 	resource_maxima = p_resource_maxima.duplicate(true)
+	ability_allowances = p_ability_allowances.duplicate(true)
 	equipment_refs = p_equipment_refs.duplicate()
 	defensive_capabilities = p_defensive_capabilities.duplicate(true)
 	field_sources = p_field_sources.duplicate(true)
@@ -92,6 +95,7 @@ func to_dictionary() -> Dictionary:
 		"combat_stats": combat_stats.duplicate(true),
 		"equipment_stat_modifiers": equipment_stat_modifiers.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),
+		"ability_allowances": ability_allowances.duplicate(true),
 		"equipment_refs": Array(equipment_refs),
 		"defensive_capabilities": defensive_capabilities.duplicate(true),
 		"field_sources": field_sources.duplicate(true),
@@ -124,7 +128,25 @@ func _validate_known_values() -> void:
 	for field_name: Variant in resource_maxima:
 		assert(typeof(resource_maxima[field_name]) == TYPE_INT, "Known resource maxima must be stored as integers.")
 		assert(resource_maxima[field_name] >= 0, "Resource maxima cannot be negative.")
+	for ability_id: Variant in ability_allowances:
+		var allowance: Variant = ability_allowances[ability_id]
+		assert(typeof(allowance) == TYPE_DICTIONARY, "Ability allowances must be dictionaries.")
+		var profile: Dictionary = allowance
+		assert(int(profile.get("base_daily_uses", 0)) > 0, "Ability base daily uses must be positive.")
+		assert(int(profile.get("repurchase_count", 0)) >= 0, "Ability repurchase counts cannot be negative.")
+		assert(int(profile.get("bonus_daily_uses", 0)) >= 0, "Ability bonus daily uses cannot be negative.")
 	if combat_stats.has("hpm"):
 		assert(combat_stats["hpm"] >= 0, "HPM cannot be negative.")
 	if combat_stats.has("at"):
 		assert(combat_stats["at"] > 0, "A resolved AT must be positive.")
+
+
+func get_ability_daily_maximum(ability_id: StringName) -> Variant:
+	var key := String(ability_id)
+	if not ability_allowances.has(key):
+		return null
+	var profile: Dictionary = ability_allowances[key]
+	var base_daily_uses := int(profile.get("base_daily_uses", 0))
+	var repurchase_count := int(profile.get("repurchase_count", 0))
+	var bonus_daily_uses := int(profile.get("bonus_daily_uses", 0))
+	return base_daily_uses * (repurchase_count + 1) + bonus_daily_uses

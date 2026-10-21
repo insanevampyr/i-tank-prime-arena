@@ -30,6 +30,7 @@ var start_event_id: String = ""
 var final_event_id: String = ""
 var finalization_scheduled: bool = false
 var revision: int = 0
+var execution_context: Dictionary = {}
 
 
 func _init(
@@ -90,4 +91,5 @@ func to_dictionary() -> Dictionary:
 		"final_event_id": final_event_id,
 		"finalization_scheduled": finalization_scheduled,
 		"revision": revision,
+		"execution_context": execution_context.duplicate(true),
 	}

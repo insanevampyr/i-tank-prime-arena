@@ -116,7 +116,7 @@ func _test_recovery_restores_only_modeled_resources() -> void:
 	var recovery := simulation.restore_actor_between_wave_resources(&"recovery_actor")
 	_expect_true(recovery.get("success", false), "Modeled between-wave recovery must restore legal maxima.")
 	_expect_equal(state.current_hpc, 25, "Recovery must restore HPC from the registered HPM value.")
-	_expect_equal(state.resources, {"mana": 7, "ap": 3, "ability_uses": 2}, "Recovery must restore only maxima-backed resources, including modeled ability uses.")
+	_expect_equal(state.resources, {"mana": 7, "ap": 0, "ability_uses": 2}, "Between-wave recovery restores modeled Mana but must preserve spent AP until game-world midnight.")
 
 
 func _test_reset_replays_wave_draws_and_history() -> void:

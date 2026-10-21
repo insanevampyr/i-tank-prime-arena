@@ -8,6 +8,8 @@ const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.g
 const ArenaWaveStateMachine = preload("res://scripts/combat/arena_wave_state_machine.gd")
 const CommonGoblinFixture = preload("res://scripts/creatures/common_goblin_fixture.gd")
 const CommonSpadoodleFixture = preload("res://scripts/creatures/common_spadoodle_fixture.gd")
+const CommonSkellyFixture = preload("res://scripts/creatures/common_skelly_fixture.gd")
+const HadesCombatFollowerFixture = preload("res://scripts/creatures/hades_combat_follower_fixture.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -60,8 +62,13 @@ var _is_wave_one_goblin_encounter: bool = false
 var _goblin_actor_ids := PackedStringArray()
 var _is_wave_two_spadoodle_encounter: bool = false
 var _spadoodle_actor_ids := PackedStringArray()
+var _is_wave_three_skelly_hades_encounter: bool = false
+var _skelly_actor_ids := PackedStringArray()
+var _hades_follower_actor_ids := PackedStringArray()
 var _goblin_paths: Dictionary = {}
 var _goblin_path_targets: Dictionary = {}
+var _goblin_path_target_actor_ids: Dictionary = {}
+var _goblin_path_reaches: Dictionary = {}
 var _goblin_attack_destinations: Dictionary = {}
 var _goblin_path_rebuild_counts: Dictionary = {}
 var _goblin_failed_path_cache: Dictionary = {}
@@ -71,6 +78,8 @@ var _goblin_movement_models: Dictionary = {}
 var _goblin_movement_round_indices: Dictionary = {}
 var _goblin_movement_spent: Dictionary = {}
 var _goblin_last_movement_us: int = 0
+var _hades_last_tactical_signature: Dictionary = {}
+var _hades_support_target_ids: Dictionary = {}
 
 
 func _init(
@@ -104,6 +113,9 @@ func initialize(
 	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet, _encounter_fixture_id)
 	if result.get("success", false):
 		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+		simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+		simulation.set_special_touch_resolver(_resolve_special_touch)
+		simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
 		_attack_definition = result["attack_definition"]
 		_attack_definitions_by_actor = {
 			String(Fixture.PLAYER_ID): _attack_definition,
@@ -145,6 +157,7 @@ func initialize_wave_one_goblins(
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = true
 	_is_wave_two_spadoodle_encounter = false
+	_is_wave_three_skelly_hades_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_goblin_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -217,6 +230,9 @@ func initialize_wave_one_goblins(
 	if not opening_result.get("success", false):
 		return opening_result
 	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+	simulation.set_special_touch_resolver(_resolve_special_touch)
+	simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
 	_publish_wave_transition(wave_initialization)
 	set_wave_creature_integration_available(CommonGoblinFixture.CREATURE_ID, true)
 	var activation := activate_current_wave(_goblin_actor_ids)
@@ -231,6 +247,9 @@ func initialize_wave_one_goblins(
 	_opponent_behavior_status = "goblin_wave_idle" if _opponent_behavior_enabled else "disabled"
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
+	_goblin_path_target_actor_ids.clear()
+	_goblin_path_reaches.clear()
+	_hades_support_target_ids.clear()
 	_goblin_attack_destinations.clear()
 	_goblin_path_rebuild_counts.clear()
 	_goblin_failed_path_cache.clear()
@@ -269,6 +288,7 @@ func initialize_wave_two_spadoodles(
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = false
 	_is_wave_two_spadoodle_encounter = true
+	_is_wave_three_skelly_hades_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_spadoodle_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -341,6 +361,9 @@ func initialize_wave_two_spadoodles(
 	if not opening_result.get("success", false):
 		return opening_result
 	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+	simulation.set_special_touch_resolver(_resolve_special_touch)
+	simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
 	_publish_wave_transition(wave_initialization)
 	set_wave_creature_integration_available(CommonSpadoodleFixture.CREATURE_ID, true)
 	var activation := activate_current_wave(_spadoodle_actor_ids)
@@ -364,6 +387,153 @@ func initialize_wave_two_spadoodles(
 		"spadoodle_actor_ids": Array(_spadoodle_actor_ids),
 		"resolved_spadoodle_count": spadoodle_count,
 		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES),
+	}
+
+
+func initialize_wave_three_skelly_hades(
+	player_position_microfeet: Vector2i,
+	first_enemy_position_microfeet: Vector2i,
+	start_active: bool = true
+) -> Dictionary:
+	if _initialized:
+		return _failure("encounter_already_initialized")
+	_is_wave_one_goblin_encounter = false
+	_is_wave_two_spadoodle_encounter = false
+	_is_wave_three_skelly_hades_encounter = true
+	_initial_player_position_microfeet = player_position_microfeet
+	_initial_opponent_position_microfeet = first_enemy_position_microfeet
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var wave_initialization := _arena_wave_state_machine.initialize_at_wave(&"wave_3", _roll_wave_quantity)
+	if not wave_initialization.get("success", false):
+		return _failure(String(wave_initialization.get("reason", "wave_initialization_failed")))
+	var skelly_count := 0
+	var hades_count := 0
+	for roster_entry: Dictionary in _arena_wave_state_machine.get_resolved_roster():
+		var creature_id := String(roster_entry.get("creature_id", ""))
+		if creature_id == String(CommonSkellyFixture.CREATURE_ID):
+			skelly_count = int(roster_entry.get("resolved_count", 0))
+		elif creature_id == String(HadesCombatFollowerFixture.CREATURE_ID):
+			hades_count = int(roster_entry.get("resolved_count", 0))
+	if skelly_count < 1 or skelly_count > 2 or hades_count != 1:
+		return _failure("wave_three_roster_invalid")
+	var spawn_positions := _make_wave_three_positions(first_enemy_position_microfeet, skelly_count)
+	if spawn_positions.size() != skelly_count + hades_count:
+		return _failure("wave_three_spawn_positions_unavailable")
+	var occupancy := {String(Fixture.PLAYER_ID): player_position_microfeet}
+	if not _battlefield.is_position_legal(Fixture.PLAYER_ID, player_position_microfeet, occupancy).get("legal", false):
+		return _failure("player_spawn_position_illegal")
+	for index in range(spawn_positions.size()):
+		var spawn_actor_id := _skelly_actor_id(index) if index < skelly_count else _hades_follower_actor_id()
+		occupancy[String(spawn_actor_id)] = spawn_positions[index]
+		if not _battlefield.is_position_legal(spawn_actor_id, spawn_positions[index], occupancy).get("legal", false):
+			return _failure("wave_three_spawn_position_illegal")
+
+	var player_attack := Fixture.make_attack_definition()
+	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
+	var player_validation := Fixture.validate_combatant_fixture(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_validation.get("success", false):
+		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
+	var player_registration := _register_wave_combatant(
+		player_actor,
+		Fixture.make_defense_profile(Fixture.PLAYER_ID),
+		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
+		player_attack
+	)
+	if not player_registration.get("success", false):
+		return player_registration
+	_attack_definition = player_attack
+	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
+
+	_skelly_actor_ids = PackedStringArray()
+	for index in range(skelly_count):
+		var skelly_id := _skelly_actor_id(index)
+		var skelly_actor := CommonSkellyFixture.make_actor(skelly_id, "Common Skelly %d" % (index + 1))
+		var skelly_attack := CommonSkellyFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+		var skelly_validation := CommonSkellyFixture.validate_actor(skelly_actor, skelly_attack)
+		if not skelly_validation.get("success", false):
+			return _failure(String(skelly_validation.get("reason", "skelly_fixture_invalid")))
+		var skelly_registration := _register_wave_combatant(
+			skelly_actor,
+			CommonSkellyFixture.make_defense_profile(skelly_id),
+			CommonSkellyFixture.make_damage_protection_profile(skelly_id),
+			skelly_attack
+		)
+		if not skelly_registration.get("success", false):
+			return skelly_registration
+		_attack_definitions_by_actor[String(skelly_id)] = skelly_attack
+		_skelly_actor_ids.append(String(skelly_id))
+
+	_hades_follower_actor_ids = PackedStringArray()
+	var hades_id := _hades_follower_actor_id()
+	var hades_actor := HadesCombatFollowerFixture.make_actor(hades_id, "Uncommon Hades Combat Follower")
+	var hades_attack := HadesCombatFollowerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+	var hades_validation := HadesCombatFollowerFixture.validate_actor(hades_actor, hades_attack)
+	if not hades_validation.get("success", false):
+		return _failure(String(hades_validation.get("reason", "hades_follower_fixture_invalid")))
+	var hades_registration := _register_wave_combatant(
+		hades_actor,
+		HadesCombatFollowerFixture.make_defense_profile(hades_id),
+		HadesCombatFollowerFixture.make_damage_protection_profile(hades_id),
+		hades_attack
+	)
+	if not hades_registration.get("success", false):
+		return hades_registration
+	_attack_definitions_by_actor[String(hades_id)] = hades_attack
+	_hades_follower_actor_ids.append(String(hades_id))
+	var hand_configuration := simulation.configure_actor_hand_occupancy(hades_id, {
+		"left": "",
+		"right": String(HadesCombatFollowerFixture.WEAPON_REF),
+	})
+	if not hand_configuration.get("success", false):
+		return _failure(String(hand_configuration.get("reason", "hades_hand_configuration_failed")))
+
+	var player_position_result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, player_position_microfeet, 0)
+	if not player_position_result.get("success", false):
+		return player_position_result
+	var wave_actor_ids := _wave_enemy_actor_ids()
+	for index in range(wave_actor_ids.size()):
+		var enemy_position_result := simulation.apply_authoritative_position(
+			StringName(wave_actor_ids[index]), spawn_positions[index], 180_000 + index * 120_000
+		)
+		if not enemy_position_result.get("success", false):
+			return enemy_position_result
+	var opening_result := simulation.begin_combat()
+	if not opening_result.get("success", false):
+		return opening_result
+	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+	simulation.set_special_touch_resolver(_resolve_special_touch)
+	simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
+	_publish_wave_transition(wave_initialization)
+	set_wave_creature_integration_available(CommonSkellyFixture.CREATURE_ID, true)
+	set_wave_creature_integration_available(HadesCombatFollowerFixture.CREATURE_ID, true)
+	var activation := activate_current_wave(wave_actor_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = StringName(wave_actor_ids[0])
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialized = true
+	_encounter_active = start_active
+	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
+	_opponent_behavior_status = "wave_three_idle" if _opponent_behavior_enabled else "disabled"
+	_initialize_wave_enemy_navigation_state()
+	_resolved_event_history_generation += 1
+	_last_error = ""
+	if _opponent_behavior_enabled and _encounter_active:
+		_run_opponent_behavior()
+	return {
+		"success": true,
+		"opening_order": opening_result.get("opening_order", []),
+		"skelly_actor_ids": Array(_skelly_actor_ids),
+		"hades_follower_actor_ids": Array(_hades_follower_actor_ids),
+		"resolved_skelly_count": skelly_count,
+		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES),
 	}
 
 
@@ -431,8 +601,13 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_arena_wave_state_machine = null
 	_goblin_actor_ids = PackedStringArray()
 	_spadoodle_actor_ids = PackedStringArray()
+	_skelly_actor_ids = PackedStringArray()
+	_hades_follower_actor_ids = PackedStringArray()
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
+	_goblin_path_target_actor_ids.clear()
+	_goblin_path_reaches.clear()
+	_hades_support_target_ids.clear()
 	_goblin_attack_destinations.clear()
 	_goblin_path_rebuild_counts.clear()
 	_goblin_failed_path_cache.clear()
@@ -448,6 +623,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 		return initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	if _is_wave_two_spadoodle_encounter:
 		return initialize_wave_two_spadoodles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	if _is_wave_three_skelly_hades_encounter:
+		return initialize_wave_three_skelly_hades(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
 
@@ -465,6 +642,9 @@ func configure_battlefield(battlefield: ArenaBattlefield) -> void:
 	_opponent_path_target_microfeet = null
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
+	_goblin_path_target_actor_ids.clear()
+	_goblin_path_reaches.clear()
+	_hades_support_target_ids.clear()
 	_goblin_attack_destinations.clear()
 	_goblin_path_rebuild_counts.clear()
 	_goblin_failed_path_cache.clear()
@@ -637,6 +817,7 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 	if not result.get("success", false):
 		return _movement_rejected(String(result.get("reason", "position_update_rejected")), player_state.position_microfeet)
 	_player_movement_spent_microfeet += movement_cost
+	_interrupt_invalid_special_contacts()
 	return {
 		"success": true,
 		"position_microfeet": destination,
@@ -852,6 +1033,8 @@ func get_encounter_display_name() -> String:
 		return "WAVE 1: %d COMMON GOBLINS" % _goblin_actor_ids.size()
 	if _is_wave_two_spadoodle_encounter:
 		return "WAVE 2: %d COMMON SPADOODLES" % _spadoodle_actor_ids.size()
+	if _is_wave_three_skelly_hades_encounter:
+		return "WAVE 3: %d COMMON SKELLY + 1 HADES FOLLOWER" % _skelly_actor_ids.size()
 	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
 
 
@@ -1082,6 +1265,59 @@ func _resolve_attack_final_line_of_sight(attacker_id: StringName, target_id: Str
 	return _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
 
 
+func _resolve_special_touch(actor_id: StringName, target_id: StringName) -> bool:
+	if actor_id == target_id:
+		return true
+	if _is_playable_wave_encounter():
+		var actor_is_enemy := _wave_enemy_actor_ids().has(String(actor_id))
+		var target_is_enemy := _wave_enemy_actor_ids().has(String(target_id))
+		if actor_is_enemy != target_is_enemy:
+			return false
+	var actor_state := simulation.get_actor_state(actor_id)
+	var target_state := simulation.get_actor_state(target_id)
+	if actor_state == null or target_state == null:
+		return false
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0 \
+	or target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		return false
+	return _battlefield.is_attack_position_legal(
+		actor_state.position_microfeet,
+		target_state.position_microfeet,
+		MICROFEET_PER_FOOT
+	) and _battlefield.has_line_of_sight(actor_state.position_microfeet, target_state.position_microfeet)
+
+
+func _resolve_gatherable_material(actor_id: StringName, material_id: StringName, surface_id: String) -> bool:
+	var actor_state := simulation.get_actor_state(actor_id)
+	if actor_state == null:
+		return false
+	var fact := _battlefield.get_gatherable_material_at(actor_state.position_microfeet, material_id)
+	return bool(fact.get("available", false)) and String(fact.get("surface_id", "")) == surface_id
+
+
+func _resolve_rage_knockback(attacker_id: StringName, target_id: StringName, distance_microfeet: int) -> Dictionary:
+	var attacker_state := simulation.get_actor_state(attacker_id)
+	var target_state := simulation.get_actor_state(target_id)
+	if attacker_state == null or target_state == null:
+		return {"success": false, "reason": "knockback_actor_unavailable"}
+	var offset := target_state.position_microfeet - attacker_state.position_microfeet
+	if offset == Vector2i.ZERO:
+		return {"success": false, "reason": "knockback_direction_unresolved"}
+	var direction := Vector2(offset).normalized()
+	var desired := target_state.position_microfeet + Vector2i(
+		roundi(direction.x * float(distance_microfeet)),
+		roundi(direction.y * float(distance_microfeet))
+	)
+	var result := _battlefield.resolve_motion(
+		target_id,
+		target_state.position_microfeet,
+		desired,
+		_actor_occupancy()
+	)
+	result["facing_millidegrees"] = target_state.facing_millidegrees
+	return result
+
+
 func _run_opponent_behavior() -> void:
 	if not _opponent_behavior_enabled:
 		_opponent_behavior_status = "disabled"
@@ -1170,8 +1406,20 @@ func _run_goblin_wave_behavior() -> void:
 			statuses.append("%s:%s" % [actor_id, "standing" if stand_result.get("success", false) else "blocked_stand"])
 			continue
 		if not goblin_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(goblin_id):
-			statuses.append("%s:action_in_progress" % actor_id)
+			if not _is_actor_attack_in_flight(goblin_id) and _actor_current_action_allows_movement(goblin_id):
+				var rage_path := _ensure_current_goblin_path(goblin_id)
+				statuses.append("%s:%s" % [actor_id, "acting_while_approaching" if rage_path.get("success", false) else "action_in_progress"])
+			else:
+				statuses.append("%s:action_in_progress" % actor_id)
 			continue
+		if _is_hades_follower(goblin_id):
+			var tactical_result := _run_hades_tactical_selection(goblin_id, Fixture.PLAYER_ID)
+			if tactical_result.get("action_started", false):
+				statuses.append("%s:%s" % [actor_id, String(tactical_result.get("status", "special_started"))])
+				continue
+			if tactical_result.get("suppress_attack", false):
+				statuses.append("%s:%s" % [actor_id, String(tactical_result.get("status", "support_approach"))])
+				continue
 		var legality := _get_actor_attack_legality(goblin_id, Fixture.PLAYER_ID, true)
 		if not legality.get("success", false):
 			statuses.append("%s:blocked_%s" % [actor_id, String(legality.get("reason", "attack_illegal"))])
@@ -1183,30 +1431,57 @@ func _run_goblin_wave_behavior() -> void:
 		var attack_result := _request_actor_attack(
 			goblin_id,
 			Fixture.PLAYER_ID,
-			"wave_2_scripted" if _is_wave_two_spadoodle_encounter else "wave_1_scripted"
+			("wave_3_scripted" if _is_wave_three_skelly_hades_encounter else ("wave_2_scripted" if _is_wave_two_spadoodle_encounter else "wave_1_scripted"))
 		)
 		statuses.append("%s:%s" % [actor_id, "attacking" if attack_result.get("success", false) else "blocked_%s" % String(attack_result.get("reason", "attack_rejected"))])
 	statuses.sort()
-	_opponent_behavior_status = ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave ") + ", ".join(PackedStringArray(statuses))
+	var wave_prefix := "wave_three " if _is_wave_three_skelly_hades_encounter else ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave ")
+	_opponent_behavior_status = wave_prefix + ", ".join(PackedStringArray(statuses))
+
+
+func _get_wave_enemy_navigation_goal(actor_id: StringName) -> Dictionary:
+	var actor_state := simulation.get_actor_state(actor_id)
+	if actor_state != null and not actor_state.current_action_instance_id.is_empty():
+		var action := simulation.get_action(actor_state.current_action_instance_id)
+		if action != null and bool(action.execution_context.get("touch_required", false)):
+			return {
+				"target_actor_id": StringName(action.execution_context.get("target_actor_id", "")),
+				"reach_microfeet": MICROFEET_PER_FOOT,
+			}
+	var support_target := StringName(_hades_support_target_ids.get(String(actor_id), ""))
+	if not String(support_target).is_empty():
+		var support_state := simulation.get_actor_state(support_target)
+		if support_state != null and support_state.current_hpc != null and int(support_state.current_hpc) > 0:
+			return {"target_actor_id": support_target, "reach_microfeet": MICROFEET_PER_FOOT}
+		_hades_support_target_ids.erase(String(actor_id))
+	var attack_definition := _get_attack_definition_for_actor(actor_id)
+	return {
+		"target_actor_id": Fixture.PLAYER_ID,
+		"reach_microfeet": 0 if attack_definition == null else int(attack_definition.maximum_range_microfeet),
+	}
 
 
 func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
 	var goblin_state := simulation.get_actor_state(goblin_id)
-	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
-	var attack_definition := _get_attack_definition_for_actor(goblin_id)
-	if goblin_state == null or player_state == null or attack_definition == null:
+	var goal := _get_wave_enemy_navigation_goal(goblin_id)
+	var target_id := StringName(goal.get("target_actor_id", ""))
+	var target_state := simulation.get_actor_state(target_id)
+	var reach_microfeet := int(goal.get("reach_microfeet", 0))
+	if goblin_state == null or target_state == null or reach_microfeet <= 0:
 		return {"success": false, "reason": "missing_actor_or_attack_definition"}
 	var path_result := _battlefield.find_path_to_attack_position(
 		goblin_id,
 		goblin_state.position_microfeet,
-		player_state.position_microfeet,
-		int(attack_definition.maximum_range_microfeet),
-		_actor_occupancy_with_goblin_reservations(goblin_id, player_state.position_microfeet)
+		target_state.position_microfeet,
+		reach_microfeet,
+		_actor_occupancy_with_goblin_reservations(goblin_id, target_state.position_microfeet)
 	)
 	var key := String(goblin_id)
-	var navigation_signature := _goblin_navigation_state_signature(goblin_id, player_state.position_microfeet)
+	var navigation_signature := _goblin_navigation_state_signature(goblin_id, target_state.position_microfeet, reach_microfeet)
 	_goblin_paths[key] = []
-	_goblin_path_targets[key] = player_state.position_microfeet
+	_goblin_path_targets[key] = target_state.position_microfeet
+	_goblin_path_target_actor_ids[key] = String(target_id)
+	_goblin_path_reaches[key] = reach_microfeet
 	_goblin_path_rebuild_counts[key] = int(_goblin_path_rebuild_counts.get(key, 0)) + 1
 	if path_result.get("success", false):
 		var path: Array[Vector2i] = []
@@ -1225,14 +1500,21 @@ func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
 
 
 func _ensure_current_goblin_path(goblin_id: StringName) -> Dictionary:
-	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
-	if player_state == null:
+	var goal := _get_wave_enemy_navigation_goal(goblin_id)
+	var target_id := StringName(goal.get("target_actor_id", ""))
+	var target_state := simulation.get_actor_state(target_id)
+	var reach_microfeet := int(goal.get("reach_microfeet", 0))
+	if target_state == null or reach_microfeet <= 0:
 		return {"success": false, "reason": "missing_actor_state"}
 	var key := String(goblin_id)
 	var path: Array = _goblin_paths.get(key, [])
 	var remembered_target: Variant = _goblin_path_targets.get(key, null)
+	if String(_goblin_path_target_actor_ids.get(key, "")) != String(target_id) \
+	or int(_goblin_path_reaches.get(key, -1)) != reach_microfeet:
+		_invalidate_goblin_path(goblin_id)
+		return _build_goblin_approach_path(goblin_id)
 	if path.is_empty() or remembered_target == null:
-		var signature := _goblin_navigation_state_signature(goblin_id, player_state.position_microfeet)
+		var signature := _goblin_navigation_state_signature(goblin_id, target_state.position_microfeet, reach_microfeet)
 		var cached_failure: Dictionary = _goblin_failed_path_cache.get(key, {})
 		if not signature.is_empty() and String(cached_failure.get("signature", "")) == signature:
 			_goblin_failed_path_cache_hits[key] = int(_goblin_failed_path_cache_hits.get(key, 0)) + 1
@@ -1241,19 +1523,20 @@ func _ensure_current_goblin_path(goblin_id: StringName) -> Dictionary:
 				"reason": "cached_%s" % String(cached_failure.get("reason", "no_legal_path")),
 			}
 		return _build_goblin_approach_path(goblin_id)
-	var target_offset: Vector2i = player_state.position_microfeet - remembered_target
-	if target_offset != Vector2i.ZERO and _retarget_current_goblin_path(goblin_id, player_state.position_microfeet, target_offset).get("success", false):
+	var target_offset: Vector2i = target_state.position_microfeet - remembered_target
+	if target_offset != Vector2i.ZERO and _retarget_current_goblin_path(goblin_id, target_state.position_microfeet, target_offset, reach_microfeet).get("success", false):
 		return {"success": true, "reason": "retargeted_existing_path"}
 	if target_offset.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET * OPPONENT_REPATH_DISTANCE_MICROFEET:
 		return _build_goblin_approach_path(goblin_id)
 	return {"success": true, "reason": "stable_existing_path"}
 
 
-func _goblin_navigation_state_signature(goblin_id: StringName, target_position: Vector2i) -> String:
+func _goblin_navigation_state_signature(goblin_id: StringName, target_position: Vector2i, reach_microfeet: int = -1) -> String:
 	var goblin_state := simulation.get_actor_state(goblin_id)
 	var attack_definition := _get_attack_definition_for_actor(goblin_id)
 	if goblin_state == null or attack_definition == null:
 		return ""
+	var effective_reach := int(attack_definition.maximum_range_microfeet) if reach_microfeet < 0 else reach_microfeet
 	var occupancy := _actor_occupancy_with_goblin_reservations(goblin_id, target_position)
 	var occupied_entries: Array[Dictionary] = []
 	for occupancy_key: Variant in occupancy.keys():
@@ -1269,7 +1552,7 @@ func _goblin_navigation_state_signature(goblin_id: StringName, target_position: 
 	var parts := PackedStringArray([
 		"start=%d,%d" % [goblin_state.position_microfeet.x, goblin_state.position_microfeet.y],
 		"target=%d,%d" % [target_position.x, target_position.y],
-		"reach=%d" % int(attack_definition.maximum_range_microfeet),
+		"reach=%d" % effective_reach,
 	])
 	for entry: Dictionary in occupied_entries:
 		var position: Vector2i = entry["position"]
@@ -1281,6 +1564,8 @@ func _invalidate_goblin_path(goblin_id: StringName) -> void:
 	var key := String(goblin_id)
 	_goblin_paths[key] = []
 	_goblin_path_targets.erase(key)
+	_goblin_path_target_actor_ids.erase(key)
+	_goblin_path_reaches.erase(key)
 	_goblin_attack_destinations.erase(key)
 	_goblin_failed_path_cache.erase(key)
 
@@ -1289,23 +1574,26 @@ func _release_goblin_navigation_state(goblin_id: StringName) -> void:
 	var key := String(goblin_id)
 	_goblin_paths.erase(key)
 	_goblin_path_targets.erase(key)
+	_goblin_path_target_actor_ids.erase(key)
+	_goblin_path_reaches.erase(key)
 	_goblin_attack_destinations.erase(key)
 	_goblin_failed_path_cache.erase(key)
 
 
-func _retarget_current_goblin_path(goblin_id: StringName, target_position: Vector2i, target_offset: Vector2i) -> Dictionary:
+func _retarget_current_goblin_path(goblin_id: StringName, target_position: Vector2i, target_offset: Vector2i, reach_microfeet: int = -1) -> Dictionary:
 	var key := String(goblin_id)
 	var path: Array = _goblin_paths.get(key, [])
 	var goblin_state := simulation.get_actor_state(goblin_id)
 	var attack_definition := _get_attack_definition_for_actor(goblin_id)
 	if path.is_empty() or goblin_state == null or attack_definition == null:
 		return {"success": false, "reason": "missing_route_state"}
+	var effective_reach := int(attack_definition.maximum_range_microfeet) if reach_microfeet < 0 else reach_microfeet
 	var destination: Vector2i = path[-1] + target_offset
 	var segment_start: Vector2i = goblin_state.position_microfeet if path.size() == 1 else path[-2]
 	var static_occupancy := {String(goblin_id): goblin_state.position_microfeet}
 	if not _battlefield.is_position_legal(goblin_id, destination, static_occupancy).get("legal", false):
 		return {"success": false, "reason": "static_topology_changed"}
-	if not _battlefield.is_attack_position_legal(destination, target_position, int(attack_definition.maximum_range_microfeet)):
+	if not _battlefield.is_attack_position_legal(destination, target_position, effective_reach):
 		return {"success": false, "reason": "static_topology_changed"}
 	if not _battlefield.is_direct_path_clear(goblin_id, segment_start, destination, static_occupancy):
 		return {"success": false, "reason": "static_topology_changed"}
@@ -1317,6 +1605,7 @@ func _retarget_current_goblin_path(goblin_id: StringName, target_position: Vecto
 	path[-1] = destination
 	_goblin_paths[key] = path
 	_goblin_path_targets[key] = target_position
+	_goblin_path_reaches[key] = effective_reach
 	_goblin_attack_destinations[key] = destination
 	return {"success": true, "reason": "retargeted"}
 
@@ -1351,8 +1640,19 @@ func _advance_goblin_movement(delta_us: int) -> void:
 			movement_model.set_prone(goblin_state.conditions.has("prone"))
 			movement_model.advance(delta_us, Vector2.ZERO)
 			continue
-		var geometry := _get_actor_attack_geometry(goblin_id, Fixture.PLAYER_ID)
-		if geometry.get("success", false) or not goblin_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(goblin_id):
+		var goal := _get_wave_enemy_navigation_goal(goblin_id)
+		var goal_target_id := StringName(goal.get("target_actor_id", ""))
+		var goal_target_state := simulation.get_actor_state(goal_target_id)
+		var goal_reach := int(goal.get("reach_microfeet", 0))
+		var geometry := _get_actor_attack_geometry(goblin_id, Fixture.PLAYER_ID) \
+			if goal_target_id == Fixture.PLAYER_ID else {"success": false}
+		var goal_reached: bool = bool(geometry.get("success", false))
+		if goal_target_state != null and goal_target_id != Fixture.PLAYER_ID:
+			goal_reached = _battlefield.is_attack_position_legal(
+				goblin_state.position_microfeet, goal_target_state.position_microfeet, goal_reach
+			) and _battlefield.has_line_of_sight(goblin_state.position_microfeet, goal_target_state.position_microfeet)
+		var movement_blocked_by_action := not goblin_state.current_action_instance_id.is_empty() and not _actor_current_action_allows_movement(goblin_id)
+		if goal_reached or movement_blocked_by_action or _is_actor_attack_in_flight(goblin_id):
 			movement_model.advance(delta_us, Vector2.ZERO)
 			continue
 		var path_result := _ensure_current_goblin_path(goblin_id)
@@ -1404,6 +1704,27 @@ func _advance_goblin_movement(delta_us: int) -> void:
 			elif resolved["position_microfeet"] == waypoint:
 				path.pop_front()
 				_goblin_paths[actor_id] = path
+	_interrupt_invalid_special_contacts()
+
+
+func _interrupt_invalid_special_contacts() -> void:
+	var interruption_scheduled := false
+	for actor_id: String in _wave_enemy_actor_ids():
+		var state := simulation.get_actor_state(StringName(actor_id))
+		if state == null or state.current_action_instance_id.is_empty():
+			continue
+		var action := simulation.get_action(state.current_action_instance_id)
+		if action == null or not bool(action.execution_context.get("touch_required", false)):
+			continue
+		var target_id := StringName(action.execution_context.get("target_actor_id", ""))
+		if _resolve_special_touch(StringName(actor_id), target_id):
+			continue
+		var interruption := simulation.schedule_interruption(
+			action.action_instance_id, simulation.clock.get_elapsed_us(), target_id, "special_touch_lost"
+		)
+		interruption_scheduled = interruption_scheduled or bool(interruption.get("success", false))
+	if interruption_scheduled:
+		simulation.advance_to(simulation.clock.get_elapsed_us())
 
 
 func _make_goblin_movement_model(goblin_id: StringName, position_microfeet: Vector2i) -> PrimeMovementModel:
@@ -1444,7 +1765,8 @@ func _update_encounter_outcome() -> void:
 		if wave_victory.get("success", false) and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_VICTORY_DETECTED:
 			_encounter_state = ENCOUNTER_PLAYER_VICTORY
 			_encounter_active = false
-			_opponent_behavior_status = "%s_victory_detected" % ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1")
+			var wave_label := "wave_3" if _is_wave_three_skelly_hades_encounter else ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1")
+			_opponent_behavior_status = "%s_victory_detected" % wave_label
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	if player_state == null or opponent_state == null:
@@ -1659,17 +1981,239 @@ func _make_wave_two_spadoodle_positions(first_position: Vector2i, count: int) ->
 	return positions
 
 
+func _skelly_actor_id(index: int) -> StringName:
+	return StringName("wave_3_common_skelly_%02d" % (index + 1))
+
+
+func _hades_follower_actor_id() -> StringName:
+	return &"wave_3_hades_combat_follower_01"
+
+
+func _make_wave_three_positions(first_position: Vector2i, skelly_count: int) -> Array[Vector2i]:
+	var positions: Array[Vector2i] = []
+	var offsets := [Vector2i.ZERO, Vector2i(0, 2_000_000)]
+	for index in range(skelly_count):
+		positions.append(first_position + offsets[index])
+	positions.append(first_position + Vector2i(2_000_000, 0))
+	return positions
+
+
 func _is_playable_wave_encounter() -> bool:
-	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter
+	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter or _is_wave_three_skelly_hades_encounter
 
 
 func _wave_enemy_actor_ids() -> PackedStringArray:
+	if _is_wave_three_skelly_hades_encounter:
+		var combined := _skelly_actor_ids.duplicate()
+		combined.append_array(_hades_follower_actor_ids)
+		return combined
 	return _spadoodle_actor_ids if _is_wave_two_spadoodle_encounter else _goblin_actor_ids
+
+
+func _is_hades_follower(actor_id: StringName) -> bool:
+	return String(actor_id).begins_with("wave_3_hades_combat_follower_")
+
+
+func _actor_current_action_allows_movement(actor_id: StringName) -> bool:
+	var actor_state := simulation.get_actor_state(actor_id)
+	if actor_state == null or actor_state.current_action_instance_id.is_empty():
+		return false
+	var action := simulation.get_action(actor_state.current_action_instance_id)
+	if action == null:
+		return false
+	var definition := simulation.get_action_definition(action.action_definition_id)
+	return definition != null and definition.allows_movement
+
+
+func _run_hades_tactical_selection(actor_id: StringName, target_id: StringName) -> Dictionary:
+	var actor_state := simulation.get_actor_state(actor_id)
+	var actor_definition := simulation.get_actor_definition(actor_id)
+	if actor_state == null or actor_definition == null:
+		return {"action_started": false, "status": "missing_actor"}
+	if not actor_state.pending_called_shot.is_empty():
+		_record_hades_tactical_decision(actor_id, target_id, "normal_attack", [
+			{"action": "called_shot", "reason": "called_shot_already_prepared"},
+		])
+		return {"action_started": false, "status": "called_shot_attack_due"}
+	var hpc := int(actor_state.current_hpc)
+	var hpm := int(actor_definition.get_combat_stat("hpm"))
+	var rejected: Array[Dictionary] = []
+	var mist_definition := HadesCombatFollowerFixture.make_rejuvenating_mist_action_definition()
+	var mist_target := _select_hades_healing_target(actor_id)
+	var mist_payment := simulation.get_ability_payment_preview(actor_id, mist_definition)
+	if not String(mist_target).is_empty() and mist_payment.get("success", false):
+		if mist_target != actor_id and not _resolve_special_touch(actor_id, mist_target):
+			_hades_support_target_ids[String(actor_id)] = String(mist_target)
+			_invalidate_goblin_path(actor_id)
+			_record_hades_tactical_decision(actor_id, mist_target, "approach_rejuvenating_mist", rejected)
+			return {"action_started": false, "suppress_attack": true, "status": "approaching_mist_ally"}
+		var mist := simulation.start_verified_special_action(
+			actor_id, mist_target, mist_definition,
+			_next_request_id("%s_rejuvenating_mist" % String(actor_id)), &"",
+			mist_target == actor_id or _resolve_special_touch(actor_id, mist_target)
+		)
+		if mist.get("success", false):
+			_hades_support_target_ids.erase(String(actor_id))
+			_record_hades_tactical_decision(actor_id, mist_target, "rejuvenating_mist", rejected)
+			return {"action_started": true, "status": "casting_rejuvenating_mist"}
+		rejected.append({"action": "rejuvenating_mist", "reason": String(mist.get("reason", "rejected"))})
+	else:
+		rejected.append({"action": "rejuvenating_mist", "reason": "no_injured_ally_or_ability_resource"})
+	var buff_definition := HadesCombatFollowerFixture.make_defensive_buff_action_definition()
+	var buff_target := _select_hades_buff_target(actor_id)
+	var buff_payment := simulation.get_ability_payment_preview(actor_id, buff_definition)
+	if not String(buff_target).is_empty() and buff_payment.get("success", false):
+		if int(actor_state.held_materials.get("dirt", 0)) > 0:
+			if buff_target != actor_id and not _resolve_special_touch(actor_id, buff_target):
+				_hades_support_target_ids[String(actor_id)] = String(buff_target)
+				_invalidate_goblin_path(actor_id)
+				_record_hades_tactical_decision(actor_id, buff_target, "approach_defensive_buff", rejected)
+				return {"action_started": false, "suppress_attack": true, "status": "approaching_buff_ally"}
+			var buff := simulation.start_verified_special_action(
+				actor_id, buff_target, buff_definition,
+				_next_request_id("%s_defensive_buff" % String(actor_id)), &"",
+				buff_target == actor_id or _resolve_special_touch(actor_id, buff_target)
+			)
+			if buff.get("success", false):
+				_hades_support_target_ids.erase(String(actor_id))
+				_record_hades_tactical_decision(actor_id, buff_target, "defensive_buff", rejected)
+				return {"action_started": true, "status": "casting_defensive_buff"}
+			rejected.append({"action": "defensive_buff", "reason": String(buff.get("reason", "rejected"))})
+		else:
+			var surface := _battlefield.get_gatherable_material_at(actor_state.position_microfeet, &"dirt")
+			if surface.get("available", false):
+				var gather := simulation.start_gather_material_action(
+					actor_id, &"dirt", String(surface.get("surface_id", "")),
+					_next_request_id("%s_gather_dirt" % String(actor_id))
+				)
+				if gather.get("success", false):
+					_record_hades_tactical_decision(actor_id, target_id, "gather_dirt", rejected)
+					return {"action_started": true, "status": "gathering_dirt"}
+				rejected.append({"action": "gather_dirt", "reason": String(gather.get("reason", "rejected"))})
+			else:
+				rejected.append({"action": "defensive_buff", "reason": "dirt_unavailable"})
+	else:
+		rejected.append({"action": "defensive_buff", "reason": "no_eligible_ally_or_ability_resource"})
+	var rage_definition := HadesCombatFollowerFixture.make_rage_action_definition()
+	var rage_payment := simulation.get_ability_payment_preview(actor_id, rage_definition)
+	if not actor_state.timed_stat_effects.has(String(HadesCombatFollowerFixture.RAGE_EFFECT_ID)) \
+	and rage_payment.get("success", false):
+		var rage := simulation.start_verified_timed_stat_effect_action(
+			actor_id, rage_definition,
+			_next_request_id("%s_rage" % String(actor_id))
+		)
+		if rage.get("success", false):
+			_record_hades_tactical_decision(actor_id, target_id, "rage", rejected)
+			return {"action_started": true, "status": "casting_rage"}
+		rejected.append({"action": "rage", "reason": String(rage.get("reason", "rejected"))})
+	else:
+		rejected.append({"action": "rage", "reason": "active_or_ability_resource_unavailable"})
+	var geometry := _get_actor_attack_geometry(actor_id, target_id)
+	var called_definition := HadesCombatFollowerFixture.make_called_shot_action_definition()
+	var called_payment := simulation.get_ability_payment_preview(actor_id, called_definition)
+	if called_payment.get("success", false) and geometry.get("success", false):
+		var called := simulation.start_verified_special_action(
+			actor_id, target_id, called_definition,
+			_next_request_id("%s_called_shot" % String(actor_id)), &"torso"
+		)
+		if called.get("success", false):
+			_record_hades_tactical_decision(actor_id, target_id, "called_shot", rejected)
+			return {"action_started": true, "status": "preparing_called_shot"}
+		rejected.append({"action": "called_shot", "reason": String(called.get("reason", "rejected"))})
+	else:
+		rejected.append({"action": "called_shot", "reason": "no_current_attack_opportunity_or_ability_resource_unavailable"})
+	_hades_support_target_ids.erase(String(actor_id))
+	_record_hades_tactical_decision(actor_id, target_id, "normal_attack", rejected)
+	return {"action_started": false, "status": "normal_attack"}
+
+
+func _hades_eligible_ally_ids(actor_id: StringName) -> PackedStringArray:
+	var allies := PackedStringArray()
+	for candidate_id: String in _wave_enemy_actor_ids():
+		var state := simulation.get_actor_state(StringName(candidate_id))
+		if state == null or state.current_hpc == null or int(state.current_hpc) <= 0:
+			continue
+		allies.append(candidate_id)
+	if not allies.has(String(actor_id)):
+		allies.append(String(actor_id))
+	allies.sort()
+	return allies
+
+
+func _select_hades_healing_target(actor_id: StringName) -> StringName:
+	var ranked: Array[Dictionary] = []
+	for candidate_id: String in _hades_eligible_ally_ids(actor_id):
+		var state := simulation.get_actor_state(StringName(candidate_id))
+		var definition := simulation.get_actor_definition(StringName(candidate_id))
+		if state == null or definition == null:
+			continue
+		var missing := int(definition.get_combat_stat("hpm")) - int(state.current_hpc)
+		if missing < 4:
+			continue
+		ranked.append({"actor_id": candidate_id, "missing": missing})
+	ranked.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return int(left["missing"]) > int(right["missing"]) \
+			if int(left["missing"]) != int(right["missing"]) \
+			else String(left["actor_id"]) < String(right["actor_id"])
+	)
+	return &"" if ranked.is_empty() else StringName(ranked[0]["actor_id"])
+
+
+func _select_hades_buff_target(actor_id: StringName) -> StringName:
+	var ranked: Array[Dictionary] = []
+	for candidate_id: String in _hades_eligible_ally_ids(actor_id):
+		var state := simulation.get_actor_state(StringName(candidate_id))
+		var definition := simulation.get_actor_definition(StringName(candidate_id))
+		if state == null or definition == null \
+		or state.timed_stat_effects.has(String(HadesCombatFollowerFixture.DEFENSIVE_BUFF_EFFECT_ID)):
+			continue
+		var hpm := int(definition.get_combat_stat("hpm"))
+		if int(state.current_hpc) * 4 > hpm * 3:
+			continue
+		ranked.append({"actor_id": candidate_id, "hpc": int(state.current_hpc), "hpm": hpm})
+	ranked.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		var left_score := int(left["hpc"]) * int(right["hpm"])
+		var right_score := int(right["hpc"]) * int(left["hpm"])
+		return left_score < right_score if left_score != right_score \
+			else String(left["actor_id"]) < String(right["actor_id"])
+	)
+	return &"" if ranked.is_empty() else StringName(ranked[0]["actor_id"])
+
+
+func _record_hades_tactical_decision(
+	actor_id: StringName,
+	target_id: StringName,
+	selected_action: String,
+	rejected_alternatives: Array[Dictionary]
+) -> void:
+	var actor_state := simulation.get_actor_state(actor_id)
+	var signature := "%s|%s|%s|%s|%s|%s" % [
+		selected_action,
+		actor_state.current_hpc if actor_state != null else "?",
+		actor_state.resources.get("ap", "?") if actor_state != null else "?",
+		actor_state.ability_daily_remaining if actor_state != null else {},
+		actor_state.timed_stat_effects.keys() if actor_state != null else [],
+		actor_state.held_materials if actor_state != null else {},
+	]
+	if String(_hades_last_tactical_signature.get(String(actor_id), "")) == signature:
+		return
+	_hades_last_tactical_signature[String(actor_id)] = signature
+	simulation.record_tactical_decision(actor_id, target_id, {
+		"selected_action": selected_action,
+		"rejected_alternatives": rejected_alternatives.duplicate(true),
+		"hpc": actor_state.current_hpc if actor_state != null else null,
+		"ap_remaining": actor_state.resources.get("ap", null) if actor_state != null else null,
+		"ability_daily_remaining": actor_state.ability_daily_remaining.duplicate(true) if actor_state != null else {},
+		"active_effects": actor_state.timed_stat_effects.keys() if actor_state != null else [],
+		"held_materials": actor_state.held_materials.duplicate(true) if actor_state != null else {},
+	})
 
 
 func _initialize_wave_enemy_navigation_state() -> void:
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
+	_goblin_path_target_actor_ids.clear()
+	_goblin_path_reaches.clear()
 	_goblin_attack_destinations.clear()
 	_goblin_path_rebuild_counts.clear()
 	_goblin_failed_path_cache.clear()
@@ -1678,6 +2222,8 @@ func _initialize_wave_enemy_navigation_state() -> void:
 	_goblin_movement_models.clear()
 	_goblin_movement_round_indices.clear()
 	_goblin_movement_spent.clear()
+	_hades_last_tactical_signature.clear()
+	_hades_support_target_ids.clear()
 	_goblin_last_movement_us = simulation.clock.get_elapsed_us()
 	for actor_id: String in _wave_enemy_actor_ids():
 		_goblin_movement_models[actor_id] = _make_goblin_movement_model(StringName(actor_id), simulation.get_actor_state(StringName(actor_id)).position_microfeet)

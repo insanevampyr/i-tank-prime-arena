@@ -32,10 +32,13 @@ var _damage_by_attack_id: Dictionary = {}
 var _critical_records: Dictionary = {}
 var _critical_record_by_roll_id: Dictionary = {}
 var _critical_reaction_definitions: Dictionary = {}
+var _verified_special_damage_definitions: Dictionary = {}
 var _deferred_critical_records_by_attack: Dictionary = {}
 var _accepted_request_ids: Dictionary = {}
 var _accepted_defense_request_ids: Dictionary = {}
 var _accepted_damage_request_ids: Dictionary = {}
+var _accepted_special_damage_request_ids: Dictionary = {}
+var _processed_midnight_ids: Dictionary = {}
 var _resolved_events: Array = []
 var _arena_wave_state: Dictionary = {}
 var _combat_started: bool = false
@@ -43,6 +46,9 @@ var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
 var _opening_rank_count: int = 0
 var _attack_final_line_of_sight_resolver: Callable
+var _rage_knockback_resolver: Callable
+var _special_touch_resolver: Callable
+var _gatherable_material_resolver: Callable
 
 
 func _init(seed_value: int) -> void:
@@ -86,6 +92,180 @@ func roll_int(min_inclusive: int, max_inclusive: int) -> int:
 
 func set_attack_final_line_of_sight_resolver(resolver: Callable) -> void:
 	_attack_final_line_of_sight_resolver = resolver
+
+
+func set_rage_knockback_resolver(resolver: Callable) -> void:
+	_rage_knockback_resolver = resolver
+
+
+func set_special_touch_resolver(resolver: Callable) -> void:
+	_special_touch_resolver = resolver
+
+
+func set_gatherable_material_resolver(resolver: Callable) -> void:
+	_gatherable_material_resolver = resolver
+
+
+func get_ability_payment_preview(actor_id: StringName, definition: CombatActionDefinition) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	return _validate_ability_activation(actor_state, definition)
+
+
+func apply_authoritative_midnight_refresh(midnight_id: String) -> Dictionary:
+	if midnight_id.is_empty():
+		return _failure("midnight_id_required")
+	if _processed_midnight_ids.has(midnight_id):
+		return _failure("duplicate_midnight_refresh")
+	_processed_midnight_ids[midnight_id] = true
+	var refreshed: Array = []
+	var actor_keys: Array = _actor_states.keys()
+	actor_keys.sort()
+	for actor_key: String in actor_keys:
+		var state: CombatActorState = _actor_states[actor_key]
+		if state.ability_daily_maxima.is_empty():
+			continue
+		var definition: CombatActorDefinition = _actor_definitions[actor_key]
+		var daily_before := state.ability_daily_remaining.duplicate(true)
+		var ap_before: Variant = state.resources.get("ap")
+		state.ability_daily_remaining = state.ability_daily_maxima.duplicate(true)
+		if definition.resource_maxima.has("ap"):
+			state.resources["ap"] = int(definition.resource_maxima["ap"])
+		state.revision += 1
+		_state_revision += 1
+		var payload := {
+			"midnight_id": midnight_id,
+			"daily_uses_before": daily_before,
+			"daily_uses_after": state.ability_daily_remaining.duplicate(true),
+			"ap_before": ap_before,
+			"ap_after": state.resources.get("ap"),
+		}
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"ability_resources_midnight_refreshed",
+			_get_actor_initiative(actor_key), state.actor_id, &"", payload
+		)
+		refreshed.append({"actor_id": actor_key, "resources": payload})
+	return _success({"midnight_id": midnight_id, "refreshed_actors": refreshed})
+
+
+func configure_actor_hand_occupancy(actor_id: StringName, assignments: Dictionary) -> Dictionary:
+	if _combat_started:
+		return _failure("combat_already_started")
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	var normalized := {"left": "", "right": ""}
+	var assigned_items := {}
+	for hand: Variant in assignments:
+		var hand_name := String(hand)
+		var equipment_ref := String(assignments[hand])
+		if not normalized.has(hand_name):
+			return _failure("invalid_hand")
+		if equipment_ref.is_empty():
+			continue
+		if not actor_state.equipment_refs.has(equipment_ref):
+			return _failure("equipment_not_available")
+		if assigned_items.has(equipment_ref):
+			return _failure("equipment_assigned_to_multiple_hands")
+		normalized[hand_name] = equipment_ref
+		assigned_items[equipment_ref] = true
+	actor_state.hand_occupancy = normalized
+	actor_state.hand_occupancy_authoritative = true
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"actor_hand_occupancy_configured", _get_actor_initiative(String(actor_id)), actor_id, &"", {
+		"hand_occupancy": normalized.duplicate(true),
+	})
+	return _success({"hand_occupancy": normalized.duplicate(true)})
+
+
+func start_gather_material_action(
+	actor_id: StringName,
+	material_id: StringName,
+	surface_id: String,
+	request_id: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if String(material_id).is_empty() or surface_id.is_empty():
+		return _failure("gatherable_material_unverified")
+	if _gatherable_material_resolver.is_valid() \
+	and not bool(_gatherable_material_resolver.call(actor_id, material_id, surface_id)):
+		return _failure("gatherable_material_unverified")
+	if not String(actor_state.hand_occupancy.get("left", "")).is_empty():
+		return _failure("left_hand_occupied")
+	if int(actor_state.held_materials.get(String(material_id), 0)) > 0:
+		return _failure("material_already_held")
+	var definition := CombatActionDefinition.new(
+		StringName("gather_material:%s" % String(material_id)), 1, true, true, {},
+		{"gather_material": {"material_id": String(material_id), "surface_id": surface_id, "hand": "left"}},
+		PackedStringArray(["Task 32D owner ruling: gathering source-verified dirt costs one completed Act and occupies the left hand"])
+	)
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	var action := get_action(String(result["action_instance_id"]))
+	action.execution_context = {"material_id": String(material_id), "surface_id": surface_id, "hand": "left"}
+	action.revision += 1
+	return result
+
+
+func start_equip_hand_item_action(
+	actor_id: StringName,
+	equipment_ref: StringName,
+	hand: StringName,
+	request_id: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	var hand_name := String(hand)
+	if not ["left", "right"].has(hand_name):
+		return _failure("invalid_hand")
+	if not actor_state.equipment_refs.has(String(equipment_ref)):
+		return _failure("equipment_not_available")
+	if not String(actor_state.hand_occupancy.get(hand_name, "")).is_empty():
+		return _failure("hand_occupied")
+	for occupied_ref: Variant in actor_state.hand_occupancy.values():
+		if String(occupied_ref) == String(equipment_ref):
+			return _failure("equipment_already_in_hand")
+	var definition := CombatActionDefinition.new(
+		StringName("equip_hand_item:%s:%s" % [String(equipment_ref), hand_name]), 1, true, true, {},
+		{"equip_hand_item": {"equipment_ref": String(equipment_ref), "hand": hand_name}},
+		PackedStringArray(["Task 32D owner ruling: equipping a weapon or shield requires one completed Act"])
+	)
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	var action := get_action(String(result["action_instance_id"]))
+	action.execution_context = {"equipment_ref": String(equipment_ref), "hand": hand_name}
+	action.revision += 1
+	return result
+
+
+func record_tactical_decision(actor_id: StringName, target_id: StringName, payload: Dictionary) -> CombatEvent:
+	return _record_resolved_event(
+		clock.get_elapsed_us(), &"tactical_action_selected", _get_actor_initiative(String(actor_id)),
+		actor_id, target_id, payload.duplicate(true)
+	)
+
+
+func register_verified_special_damage_definition(
+	special_id: StringName,
+	special_field: StringName,
+	source_ref: String
+) -> Dictionary:
+	var key := String(special_id)
+	if key.is_empty() or String(special_field).is_empty() or source_ref.is_empty():
+		return _failure("special_damage_definition_unresolved")
+	var definition := {"special_id": key, "special_field": String(special_field), "source_ref": source_ref}
+	if _verified_special_damage_definitions.has(key) and _verified_special_damage_definitions[key] != definition:
+		return _failure("conflicting_special_damage_definition")
+	_verified_special_damage_definitions[key] = definition
+	_state_revision += 1
+	return _success({"special_id": key})
 
 
 func begin_combat() -> Dictionary:
@@ -318,6 +498,20 @@ func start_action(
 	for dependency_id: String in dependency_action_ids:
 		if not _actions.has(dependency_id):
 			return _failure("unknown_dependency")
+	if not actor_state.pending_called_shot.is_empty() \
+	and String(definition.extension_metadata.get("kind", "")) != "physical_attack":
+		var expired_preparation := actor_state.pending_called_shot.duplicate(true)
+		actor_state.pending_called_shot.clear()
+		actor_state.revision += 1
+		_state_revision += 1
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"called_shot_expired", _get_actor_initiative(actor_key), actor_id, &"",
+			{
+				"reason": "next_act_was_not_physical_attack",
+				"prepared_target_actor_id": expired_preparation.get("target_actor_id", ""),
+				"prepared_target_location": expired_preparation.get("target_location", ""),
+			}, String(expired_preparation.get("source_event_id", ""))
+		)
 
 	var definition_key := String(definition.action_definition_id)
 	if _action_definitions.has(definition_key):
@@ -381,6 +575,7 @@ func start_action(
 		&"",
 		{
 			"action_instance_id": action_instance_id,
+			"action_definition_id": definition_key,
 			"completed_acts": action.completed_acts,
 			"required_acts": action.required_acts,
 			"at_at_start": action.at_at_start,
@@ -428,6 +623,156 @@ func start_stand_action(actor_id: StringName, request_id: String) -> Dictionary:
 	return start_action(actor_id, definition, request_id)
 
 
+func start_verified_timed_stat_effect_action(
+	actor_id: StringName,
+	definition: CombatActionDefinition,
+	request_id: String
+) -> Dictionary:
+	if definition == null:
+		return _failure("invalid_action_definition")
+	var effect: Variant = definition.extension_metadata.get("timed_stat_effect")
+	if typeof(effect) != TYPE_DICTIONARY:
+		return _failure("timed_stat_effect_unresolved")
+	var effect_definition: Dictionary = effect
+	var effect_id := String(effect_definition.get("effect_id", ""))
+	var duration_us := int(effect_definition.get("duration_us", 0))
+	var modifiers: Variant = effect_definition.get("stat_modifiers")
+	if effect_id.is_empty() or duration_us <= 0 or typeof(modifiers) != TYPE_DICTIONARY:
+		return _failure("timed_stat_effect_invalid")
+	for field_name: Variant in (modifiers as Dictionary):
+		if not ["sb", "nal", "dt", "dp"].has(String(field_name)) or typeof((modifiers as Dictionary)[field_name]) != TYPE_INT:
+			return _failure("timed_stat_modifier_invalid")
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if actor_state.timed_stat_effects.has(effect_id):
+		return _failure("timed_stat_effect_already_active")
+	for resource_name: Variant in definition.resource_commitments:
+		var cost: Variant = definition.resource_commitments[resource_name]
+		if typeof(cost) != TYPE_INT or int(cost) <= 0:
+			return _failure("invalid_resource_commitment")
+		if not actor_state.resources.has(resource_name) or int(actor_state.resources[resource_name]) < int(cost):
+			return _failure("insufficient_committed_resource")
+	var ability_payment := _validate_ability_activation(actor_state, definition)
+	if not ability_payment.get("success", false):
+		return ability_payment
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	for resource_name: Variant in definition.resource_commitments:
+		actor_state.resources[resource_name] = int(actor_state.resources[resource_name]) - int(definition.resource_commitments[resource_name])
+	var action := get_action(String(result["action_instance_id"]))
+	if not definition.resource_commitments.is_empty():
+		actor_state.revision += 1
+		_state_revision += 1
+		_record_resolved_event(
+			clock.get_elapsed_us(),
+			&"actor_resources_committed",
+			action.initiative,
+			actor_id,
+			&"",
+			{
+				"action_instance_id": action.action_instance_id,
+				"action_definition_id": String(action.action_definition_id),
+				"resource_commitments": definition.resource_commitments.duplicate(true),
+				"resources_after": actor_state.resources.duplicate(true),
+			},
+			action.start_event_id,
+			PackedStringArray(),
+			definition.resource_commitments
+		)
+	_commit_ability_activation(actor_state, action, definition, ability_payment)
+	return result
+
+
+func start_verified_special_action(
+	actor_id: StringName,
+	target_id: StringName,
+	definition: CombatActionDefinition,
+	request_id: String,
+	target_location: StringName = &"",
+	authoritative_touch: bool = false
+) -> Dictionary:
+	if definition == null:
+		return _failure("invalid_action_definition")
+	var special: Variant = definition.extension_metadata.get("verified_special")
+	if typeof(special) != TYPE_DICTIONARY:
+		return _failure("verified_special_unresolved")
+	var special_definition: Dictionary = special
+	var kind := String(special_definition.get("kind", ""))
+	if not ["called_shot", "healing", "timed_stat_effect"].has(kind):
+		return _failure("verified_special_kind_unresolved")
+	var actor_state := get_actor_state(actor_id)
+	var target_state := get_actor_state(target_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if target_state == null:
+		return _failure("unknown_target")
+	if target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		return _failure("target_not_eligible")
+	var target_mode := String(special_definition.get("target_mode", ""))
+	if target_mode == "self" and target_id != actor_id:
+		return _failure("special_self_target_required")
+	if target_mode == "other" and target_id == actor_id:
+		return _failure("special_other_target_required")
+	if target_mode == "self_or_touch" and target_id != actor_id \
+	and not _is_special_touch_legal(actor_id, target_id, authoritative_touch):
+		return _failure("special_touch_unverified")
+	if kind == "called_shot" and HitLocations.get_by_id(target_location).is_empty():
+		return _failure("illegal_target_location")
+	if kind == "timed_stat_effect":
+		var effect: Dictionary = definition.extension_metadata.get("timed_stat_effect", {})
+		if effect.is_empty():
+			return _failure("timed_stat_effect_unresolved")
+		if target_state.timed_stat_effects.has(String(effect.get("effect_id", ""))):
+			return _failure("timed_stat_effect_already_active")
+	var required_material := String(special_definition.get("requires_material", ""))
+	if not required_material.is_empty():
+		var held_count := int(actor_state.held_materials.get(required_material, 0))
+		var held_in_left := String(actor_state.hand_occupancy.get("left", "")) == "material:%s" % required_material
+		if held_count <= 0 or not held_in_left:
+			return _failure("special_required_material_missing")
+	for resource_name: Variant in definition.resource_commitments:
+		var cost: Variant = definition.resource_commitments[resource_name]
+		if typeof(cost) != TYPE_INT or int(cost) <= 0:
+			return _failure("invalid_resource_commitment")
+		if not actor_state.resources.has(resource_name) or int(actor_state.resources[resource_name]) < int(cost):
+			return _failure("insufficient_committed_resource")
+	var ability_payment := _validate_ability_activation(actor_state, definition)
+	if not ability_payment.get("success", false):
+		return ability_payment
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	var action := get_action(String(result["action_instance_id"]))
+	action.execution_context = {
+		"target_actor_id": String(target_id),
+		"target_location": String(target_location),
+		"authoritative_touch": authoritative_touch,
+		"touch_required": target_mode == "self_or_touch" and target_id != actor_id,
+		"required_material": required_material,
+	}
+	for resource_name: Variant in definition.resource_commitments:
+		actor_state.resources[resource_name] = int(actor_state.resources[resource_name]) - int(definition.resource_commitments[resource_name])
+	action.revision += 1
+	if not definition.resource_commitments.is_empty():
+		actor_state.revision += 1
+		_state_revision += 1
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"actor_resources_committed", action.initiative, actor_id, target_id,
+			{
+				"action_instance_id": action.action_instance_id,
+				"action_definition_id": String(action.action_definition_id),
+				"resource_commitments": definition.resource_commitments.duplicate(true),
+				"resources_after": actor_state.resources.duplicate(true),
+				"special_kind": kind,
+			},
+			action.start_event_id, PackedStringArray(), definition.resource_commitments
+		)
+	_commit_ability_activation(actor_state, action, definition, ability_payment)
+	return result
+
+
 func start_physical_attack(
 	attacker_id: StringName,
 	target_id: StringName,
@@ -462,6 +807,9 @@ func start_physical_attack(
 		return _failure("target_not_eligible")
 	if not attacker_state.equipment_refs.has(String(definition.weapon_ref)):
 		return _failure("weapon_not_equipped")
+	if attacker_state.hand_occupancy_authoritative \
+	and not attacker_state.hand_occupancy.values().has(String(definition.weapon_ref)):
+		return _failure("weapon_not_in_hand")
 	var attacker_definition: CombatActorDefinition = _actor_definitions[attacker_key]
 	var base_acc_value: Variant = attacker_definition.get_combat_stat("acc")
 	if base_acc_value == null:
@@ -495,6 +843,10 @@ func start_physical_attack(
 			return _failure("target_out_of_range")
 
 	var definition_key := String(definition.attack_definition_id)
+	var pending_called_shot: Dictionary = attacker_state.pending_called_shot.duplicate(true)
+	var called_shot_matches: bool = not pending_called_shot.is_empty() \
+		and String(pending_called_shot.get("target_actor_id", "")) == target_key \
+		and String(pending_called_shot.get("target_location", "")) == String(resolved_location)
 	if _attack_definitions.has(definition_key):
 		if (_attack_definitions[definition_key] as CombatAttackDefinition).to_dictionary() != definition.to_dictionary():
 			return _failure("conflicting_attack_definition")
@@ -522,6 +874,8 @@ func start_physical_attack(
 		attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
 		attack.declared_target_position_microfeet = target_state.position_microfeet
 		attack.declaration_line_of_sight_verified = authoritative_line_of_sight
+		if called_shot_matches:
+			attack.automatic_accuracy_reason = "called_shot"
 		_attacks[attack_instance_id] = attack
 		attack_instance_ids.append(attack_instance_id)
 		_record_resolved_event(
@@ -539,6 +893,20 @@ func start_physical_attack(
 			}
 		)
 	_attack_by_action_id[action_instance_id] = attack_instance_ids
+	if not pending_called_shot.is_empty():
+		attacker_state.pending_called_shot.clear()
+		attacker_state.revision += 1
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"called_shot_consumed", _get_actor_initiative(attacker_key), attacker_id, target_id,
+			{
+				"action_instance_id": action_instance_id,
+				"prepared_target_actor_id": pending_called_shot.get("target_actor_id", ""),
+				"prepared_target_location": pending_called_shot.get("target_location", ""),
+				"applied_to_attack": called_shot_matches,
+				"applied_strike_count": definition.strikes_per_act if called_shot_matches else 0,
+			},
+			String(pending_called_shot.get("source_event_id", ""))
+		)
 	_state_revision += 1
 	return _success({"attack_instance_id": attack_instance_ids[0], "attack_instance_ids": attack_instance_ids, "action_instance_id": action_instance_id})
 
@@ -954,6 +1322,7 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 			"attack_instance_id": attack_instance_id,
 			"weapon_rolls": resolution.weapon_rolls.duplicate(),
 			"strength_bonus": resolution.strength_bonus,
+			"pre_multiplier_total": resolution.pre_multiplier_total,
 			"combined_multiplier_numerator": resolution.combined_multiplier_numerator,
 			"combined_multiplier_denominator": resolution.combined_multiplier_denominator,
 			"multiplied_total": resolution.multiplied_total,
@@ -969,8 +1338,131 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		{"hpc": resolution.final_damage}
 	)
 	resolution.event_id = event.event_id
+	if resolution.final_damage > 0:
+		_schedule_special_interruption_for_physical_hit(attack.target_id, attack.attacker_id, event.event_id)
+		_apply_successful_hit_knockback(attack, event.event_id)
 	_finalize_deferred_critical_consequences(attack)
 	return _success({"damage_resolution_id": resolution_id, "final_damage": resolution.final_damage})
+
+
+func _schedule_special_interruption_for_physical_hit(target_id: StringName, source_id: StringName, parent_event_id: String) -> void:
+	var target_state := get_actor_state(target_id)
+	if target_state == null or target_state.current_action_instance_id.is_empty():
+		return
+	var action := get_action(target_state.current_action_instance_id)
+	if action == null or action.is_terminal():
+		return
+	var definition: CombatActionDefinition = _action_definitions.get(String(action.action_definition_id))
+	if definition == null or not definition.extension_metadata.has("verified_special"):
+		return
+	var result := schedule_interruption(action.action_instance_id, clock.get_elapsed_us(), source_id, "physical_hit_interrupts_special", parent_event_id)
+	if result.get("success", false):
+		advance_to(clock.get_elapsed_us())
+
+
+func apply_verified_special_damage(
+	source_actor_id: StringName,
+	target_actor_id: StringName,
+	special_id: StringName,
+	special_field: StringName,
+	otherwise_applicable_damage: int,
+	request_id: String
+) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_special_damage_request_ids.has(request_id):
+		return _failure("duplicate_special_damage_request")
+	if otherwise_applicable_damage < 0:
+		return _failure("invalid_special_damage")
+	if String(special_id).is_empty() or String(special_field).is_empty():
+		return _failure("special_damage_definition_unresolved")
+	if not _verified_special_damage_definitions.has(String(special_id)):
+		return _failure("special_damage_definition_unregistered")
+	var registered_definition: Dictionary = _verified_special_damage_definitions[String(special_id)]
+	if String(registered_definition.get("special_field", "")) != String(special_field):
+		return _failure("special_damage_field_mismatch")
+	var target_state := get_actor_state(target_actor_id)
+	var profile: CombatDamageProtectionProfile = _damage_protection_profiles.get(String(target_actor_id))
+	if get_actor_state(source_actor_id) == null or target_state == null:
+		return _failure("unknown_special_damage_actor")
+	if int(target_state.current_hpc) <= 0:
+		return _failure("target_not_eligible")
+	if profile == null:
+		return _failure("special_field_target_eligibility_unresolved")
+	var response: Variant = profile.get_special_field_response(special_field)
+	if response == null or not bool((response as Dictionary).get("eligible", false)):
+		return _failure("target_not_eligible_for_special_field")
+	var response_data: Dictionary = response
+	var final_damage := _apply_multiplier_product_once(
+		otherwise_applicable_damage,
+		int(response_data["numerator"]),
+		int(response_data["denominator"])
+	)
+	var hpc_before := int(target_state.current_hpc)
+	target_state.current_hpc = hpc_before - final_damage
+	target_state.revision += 1
+	_state_revision += 1
+	_accepted_special_damage_request_ids[request_id] = true
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"verified_special_damage_resolved", _get_actor_initiative(String(source_actor_id)),
+		source_actor_id, target_actor_id,
+		{
+			"special_id": String(special_id),
+			"special_field": String(special_field),
+			"otherwise_applicable_damage": otherwise_applicable_damage,
+			"field_multiplier_numerator": int(response_data["numerator"]),
+			"field_multiplier_denominator": int(response_data["denominator"]),
+			"final_damage": final_damage,
+			"hpc_before": hpc_before,
+			"hpc_after": int(target_state.current_hpc),
+			"source_ref": String(response_data.get("source_ref", "")),
+		}
+	)
+	return _success({"event_id": event.event_id, "final_damage": final_damage})
+
+
+func _apply_successful_hit_knockback(attack: CombatAttackInstance, parent_event_id: String) -> void:
+	var attacker_state := get_actor_state(attack.attacker_id)
+	var target_state := get_actor_state(attack.target_id)
+	if attacker_state == null or target_state == null:
+		return
+	var knockback_microfeet := 0
+	var effect_id := ""
+	var effect_keys: Array = attacker_state.timed_stat_effects.keys()
+	effect_keys.sort()
+	for key: Variant in effect_keys:
+		var effect: Dictionary = attacker_state.timed_stat_effects[key]
+		var amount := int(effect.get("successful_hit_knockback_microfeet", 0))
+		if amount > 0:
+			knockback_microfeet = amount
+			effect_id = String(key)
+			break
+	if knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
+		return
+	var result: Variant = _rage_knockback_resolver.call(attack.attacker_id, attack.target_id, knockback_microfeet)
+	if typeof(result) != TYPE_DICTIONARY:
+		return
+	var resolution: Dictionary = result
+	if not resolution.get("success", false):
+		return
+	var destination: Vector2i = resolution.get("position_microfeet", target_state.position_microfeet)
+	var start := target_state.position_microfeet
+	if destination != start:
+		apply_authoritative_forced_position(attack.target_id, destination, int(resolution.get("facing_millidegrees", target_state.facing_millidegrees)), parent_event_id, "rage_knockback")
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"rage_knockback_resolved", _get_actor_initiative(String(attack.attacker_id)),
+		attack.attacker_id, attack.target_id,
+		{
+			"attack_instance_id": attack.attack_instance_id,
+			"effect_id": effect_id,
+			"requested_distance_microfeet": knockback_microfeet,
+			"start_microfeet": [start.x, start.y],
+			"position_microfeet": [destination.x, destination.y],
+			"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
+			"blocked": bool(resolution.get("blocked", false)),
+			"collision_reason": String(resolution.get("reason", "")),
+		}, parent_event_id
+	)
 
 
 func schedule_interruption(
@@ -1066,6 +1558,35 @@ func apply_authoritative_position(
 	return _success()
 
 
+func apply_authoritative_forced_position(
+	actor_id: StringName,
+	position: Vector2i,
+	facing_millidegrees: int,
+	parent_event_id: String,
+	reason: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	var previous := actor_state.position_microfeet
+	actor_state.set_position(position, facing_millidegrees)
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"actor_position_changed", _get_actor_initiative(String(actor_id)), actor_id, &"",
+		{
+			"position_microfeet": [position.x, position.y],
+			"previous_position_microfeet": [previous.x, previous.y],
+			"facing_millidegrees": facing_millidegrees,
+			"movement_cost_microfeet": 0,
+			"remaining_mr_microfeet": actor_state.remaining_mr_microfeet,
+			"forced_displacement": true,
+			"forced_displacement_reason": reason,
+			"action_continues": not actor_state.current_action_instance_id.is_empty(),
+		}, parent_event_id
+	)
+	return _success()
+
+
 func get_actor_state(actor_id: StringName) -> CombatActorState:
 	return _actor_states.get(String(actor_id)) as CombatActorState
 
@@ -1074,8 +1595,38 @@ func get_actor_definition(actor_id: StringName) -> CombatActorDefinition:
 	return _actor_definitions.get(String(actor_id)) as CombatActorDefinition
 
 
+func get_effective_actor_combat_stat(actor_id: StringName, field_name: String) -> Variant:
+	var actor_key := String(actor_id)
+	if not _actor_definitions.has(actor_key) or not _actor_states.has(actor_key):
+		return null
+	var value: Variant = (_actor_definitions[actor_key] as CombatActorDefinition).get_combat_stat(field_name)
+	if value == null:
+		return null
+	var total := int(value)
+	var state: CombatActorState = _actor_states[actor_key]
+	var effect_ids: Array = state.timed_stat_effects.keys()
+	effect_ids.sort()
+	for effect_key: Variant in effect_ids:
+		var active_effect: Dictionary = state.timed_stat_effects[effect_key]
+		var modifiers: Dictionary = active_effect.get("stat_modifiers", {})
+		if modifiers.has(field_name):
+			total += int(modifiers[field_name])
+	return total
+
+
+func _effective_stats_snapshot(actor_id: StringName, field_names: Array) -> Dictionary:
+	var result := {}
+	for field_name: Variant in field_names:
+		result[String(field_name)] = get_effective_actor_combat_stat(actor_id, String(field_name))
+	return result
+
+
 func get_action(action_instance_id: String) -> CombatActionInstance:
 	return _actions.get(action_instance_id) as CombatActionInstance
+
+
+func get_action_definition(action_definition_id: StringName) -> CombatActionDefinition:
+	return _action_definitions.get(String(action_definition_id)) as CombatActionDefinition
 
 
 func get_attack(attack_instance_id: String) -> CombatAttackInstance:
@@ -1155,7 +1706,11 @@ func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
 	var previous_hpc: Variant = state.current_hpc
 	var previous_resources := state.resources.duplicate(true)
 	state.current_hpc = definition.get_combat_stat("hpm")
-	state.resources = definition.resource_maxima.duplicate(true)
+	for resource_name: Variant in definition.resource_maxima:
+		# Task 32E owner ruling: AP and daily ability uses persist through continuous waves.
+		if String(resource_name) == "ap":
+			continue
+		state.resources[resource_name] = definition.resource_maxima[resource_name]
 	state.revision += 1
 	_state_revision += 1
 	return _success({
@@ -1257,9 +1812,16 @@ func get_state_snapshot() -> Dictionary:
 	deferred_attack_keys.sort()
 	for attack_key: String in deferred_attack_keys:
 		deferred_critical_snapshots.append({"attack_instance_id": attack_key, "entries": (_deferred_critical_records_by_attack[attack_key] as Array).duplicate(true)})
+	var special_damage_definition_snapshots: Array = []
+	var special_definition_keys: Array = _verified_special_damage_definitions.keys()
+	special_definition_keys.sort()
+	for special_key: String in special_definition_keys:
+		special_damage_definition_snapshots.append((_verified_special_damage_definitions[special_key] as Dictionary).duplicate(true))
+	var processed_midnight_ids: Array = _processed_midnight_ids.keys()
+	processed_midnight_ids.sort()
 
 	return {
-		"schema_version": 8,
+		"schema_version": 10,
 		"timestamp_us": clock.get_elapsed_us(),
 		"round_index": clock.get_round_index(),
 		"state_revision": _state_revision,
@@ -1271,6 +1833,7 @@ func get_state_snapshot() -> Dictionary:
 		"next_damage_sequence": _next_damage_sequence,
 		"next_critical_sequence": _next_critical_sequence,
 		"arena_wave_state": _arena_wave_state.duplicate(true),
+		"processed_midnight_ids": processed_midnight_ids,
 		"combat_started": _combat_started,
 		"opening_sequence_complete": _opening_sequence_complete,
 		"current_opening_rank": _current_opening_rank,
@@ -1286,6 +1849,7 @@ func get_state_snapshot() -> Dictionary:
 		"critical_records": critical_record_snapshots,
 		"critical_reaction_definitions": reaction_definition_snapshots,
 		"deferred_critical_consequences": deferred_critical_snapshots,
+		"verified_special_damage_definitions": special_damage_definition_snapshots,
 		"pending_events": event_queue.snapshot(),
 	}
 
@@ -1301,6 +1865,9 @@ func _resolve_due_event(event: CombatEvent) -> void:
 		"action_interrupt_due":
 			_resolved_events.append(event)
 			_resolve_action_interrupt_due(event)
+		"timed_stat_effect_expire_due":
+			_resolved_events.append(event)
+			_resolve_timed_stat_effect_expire_due(event)
 		_:
 			_resolved_events.append(event)
 
@@ -1433,6 +2000,7 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		&"",
 		{
 			"action_instance_id": action.action_instance_id,
+			"action_definition_id": String(action.action_definition_id),
 			"completed_acts": action.completed_acts,
 			"required_acts": action.required_acts,
 			"dependency_action_ids": Array(action.dependency_action_ids),
@@ -1446,7 +2014,273 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		_record_resolved_event(clock.get_elapsed_us(), &"actor_stood_from_prone", action.initiative, action.actor_id, &"", {
 			"action_instance_id": action.action_instance_id,
 		}, completed.event_id)
+	var special: Dictionary = definition.extension_metadata.get("verified_special", {})
+	var special_kind := String(special.get("kind", ""))
+	var completion_prerequisites_satisfied := true
+	if not special.is_empty():
+		completion_prerequisites_satisfied = _validate_verified_special_completion(action, completed.event_id)
+	if definition.extension_metadata.has("gather_material"):
+		completion_prerequisites_satisfied = _apply_gathered_material(actor_state, action, completed.event_id)
+	if definition.extension_metadata.has("equip_hand_item"):
+		completion_prerequisites_satisfied = _apply_equipped_hand_item(actor_state, action, completed.event_id)
+	var required_material := String(special.get("requires_material", ""))
+	if completion_prerequisites_satisfied and not required_material.is_empty():
+		completion_prerequisites_satisfied = _consume_held_material(actor_state, action, required_material, completed.event_id)
+	if special_kind == "called_shot" and completion_prerequisites_satisfied:
+		_apply_called_shot_preparation(actor_state, action, completed.event_id)
+	elif special_kind == "healing" and completion_prerequisites_satisfied:
+		_apply_verified_healing(action, special, completed.event_id)
+	if completion_prerequisites_satisfied and definition.extension_metadata.has("timed_stat_effect"):
+		var effect_target := actor_state
+		var target_actor_id := StringName(action.execution_context.get("target_actor_id", String(action.actor_id)))
+		if String(target_actor_id) != String(action.actor_id):
+			effect_target = get_actor_state(target_actor_id)
+		if effect_target != null:
+			_apply_timed_stat_effect(effect_target, action, definition.extension_metadata["timed_stat_effect"], completed.event_id)
 	_resolve_linked_attack_accuracy(action, completed.event_id)
+
+
+func _validate_verified_special_completion(action: CombatActionInstance, parent_event_id: String) -> bool:
+	var target_id := StringName(action.execution_context.get("target_actor_id", String(action.actor_id)))
+	var target_state := get_actor_state(target_id)
+	var failure_reason := ""
+	if target_state == null or target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		failure_reason = "special_target_no_longer_eligible"
+	elif bool(action.execution_context.get("touch_required", false)) \
+	and not _is_special_touch_legal(action.actor_id, target_id, false):
+		failure_reason = "special_touch_lost_before_completion"
+	if failure_reason.is_empty():
+		return true
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"verified_special_completion_failed", action.initiative,
+		action.actor_id, target_id,
+		{
+			"action_instance_id": action.action_instance_id,
+			"action_definition_id": String(action.action_definition_id),
+			"reason": failure_reason,
+			"material_preserved": true,
+		}, parent_event_id
+	)
+	return false
+
+
+func _apply_gathered_material(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> bool:
+	var material_id := String(action.execution_context.get("material_id", ""))
+	var surface_id := String(action.execution_context.get("surface_id", ""))
+	var hand := String(action.execution_context.get("hand", ""))
+	var surface_still_legal := not _gatherable_material_resolver.is_valid() \
+		or bool(_gatherable_material_resolver.call(actor_state.actor_id, StringName(material_id), surface_id))
+	if material_id.is_empty() or surface_id.is_empty() or hand != "left" \
+	or not String(actor_state.hand_occupancy.get(hand, "")).is_empty() or not surface_still_legal:
+		_record_resolved_event(clock.get_elapsed_us(), &"material_gather_failed", action.initiative, action.actor_id, &"", {
+			"action_instance_id": action.action_instance_id,
+			"material_id": material_id,
+			"surface_id": surface_id,
+			"reason": "gather_completion_prerequisite_failed",
+		}, parent_event_id)
+		return false
+	actor_state.hand_occupancy[hand] = "material:%s" % material_id
+	actor_state.held_materials[material_id] = int(actor_state.held_materials.get(material_id, 0)) + 1
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"material_gathered", action.initiative, action.actor_id, &"", {
+		"action_instance_id": action.action_instance_id,
+		"material_id": material_id,
+		"surface_id": surface_id,
+		"hand": hand,
+		"held_materials_after": actor_state.held_materials.duplicate(true),
+		"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+	}, parent_event_id)
+	return true
+
+
+func _apply_equipped_hand_item(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> bool:
+	var equipment_ref := String(action.execution_context.get("equipment_ref", ""))
+	var hand := String(action.execution_context.get("hand", ""))
+	if equipment_ref.is_empty() or not ["left", "right"].has(hand) \
+	or not actor_state.equipment_refs.has(equipment_ref) \
+	or not String(actor_state.hand_occupancy.get(hand, "")).is_empty():
+		_record_resolved_event(clock.get_elapsed_us(), &"hand_item_equip_failed", action.initiative, action.actor_id, &"", {
+			"action_instance_id": action.action_instance_id,
+			"equipment_ref": equipment_ref,
+			"hand": hand,
+			"reason": "equip_completion_prerequisite_failed",
+		}, parent_event_id)
+		return false
+	actor_state.hand_occupancy[hand] = equipment_ref
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"hand_item_equipped", action.initiative, action.actor_id, &"", {
+		"action_instance_id": action.action_instance_id,
+		"equipment_ref": equipment_ref,
+		"hand": hand,
+		"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+	}, parent_event_id)
+	return true
+
+
+func _consume_held_material(
+	actor_state: CombatActorState,
+	action: CombatActionInstance,
+	material_id: String,
+	parent_event_id: String
+) -> bool:
+	if int(actor_state.held_materials.get(material_id, 0)) <= 0 \
+	or String(actor_state.hand_occupancy.get("left", "")) != "material:%s" % material_id:
+		_record_resolved_event(clock.get_elapsed_us(), &"special_material_consumption_failed", action.initiative, action.actor_id, &"", {
+			"action_instance_id": action.action_instance_id,
+			"material_id": material_id,
+			"reason": "held_material_missing_at_completion",
+		}, parent_event_id)
+		return false
+	var remaining := int(actor_state.held_materials[material_id]) - 1
+	if remaining <= 0:
+		actor_state.held_materials.erase(material_id)
+	else:
+		actor_state.held_materials[material_id] = remaining
+	actor_state.hand_occupancy["left"] = ""
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"special_material_consumed", action.initiative, action.actor_id, actor_state.actor_id, {
+		"action_instance_id": action.action_instance_id,
+		"material_id": material_id,
+		"hand": "left",
+		"held_materials_after": actor_state.held_materials.duplicate(true),
+		"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+	}, parent_event_id)
+	return true
+
+
+func _apply_called_shot_preparation(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> void:
+	actor_state.pending_called_shot = {
+		"target_actor_id": String(action.execution_context.get("target_actor_id", "")),
+		"target_location": String(action.execution_context.get("target_location", "")),
+		"prepared_at_us": clock.get_elapsed_us(),
+		"source_action_instance_id": action.action_instance_id,
+		"source_event_id": parent_event_id,
+	}
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"called_shot_prepared", action.initiative, action.actor_id,
+		StringName(actor_state.pending_called_shot["target_actor_id"]),
+		{
+			"action_instance_id": action.action_instance_id,
+			"target_location": actor_state.pending_called_shot["target_location"],
+			"attacks_this_act_automatically_accurate": true,
+		}, parent_event_id
+	)
+
+
+func _apply_verified_healing(action: CombatActionInstance, special: Dictionary, parent_event_id: String) -> void:
+	var target_id := StringName(action.execution_context.get("target_actor_id", String(action.actor_id)))
+	var target_state := get_actor_state(target_id)
+	var target_definition := get_actor_definition(target_id)
+	if target_state == null or target_definition == null:
+		return
+	var rolls: Array[int] = []
+	var draw_indices: Array[int] = []
+	var rolled_total := 0
+	for _index in range(int(special.get("dice_count", 0))):
+		var value := roll_int(1, int(special.get("die_sides", 0)))
+		rolls.append(value)
+		draw_indices.append(random.get_draw_count())
+		rolled_total += value
+	var amount := rolled_total + int(special.get("flat_bonus", 0))
+	var hpc_before := int(target_state.current_hpc)
+	var hpc_max := int(target_definition.get_combat_stat("hpm"))
+	target_state.current_hpc = mini(hpc_before + amount, hpc_max)
+	target_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"verified_healing_resolved", action.initiative, action.actor_id, target_id,
+		{
+			"action_instance_id": action.action_instance_id,
+			"rolls": rolls,
+			"rng_draw_indices": draw_indices,
+			"flat_bonus": int(special.get("flat_bonus", 0)),
+			"rolled_healing": amount,
+			"hpc_before": hpc_before,
+			"hpc_after": int(target_state.current_hpc),
+			"hpc_max": hpc_max,
+		}, parent_event_id
+	)
+
+
+func _apply_timed_stat_effect(
+	actor_state: CombatActorState,
+	action: CombatActionInstance,
+	effect_definition: Dictionary,
+	parent_event_id: String
+) -> void:
+	var effect_id := String(effect_definition["effect_id"])
+	var expires_at_us := clock.get_elapsed_us() + int(effect_definition["duration_us"])
+	var stats_before := {}
+	for stat_name: Variant in (effect_definition["stat_modifiers"] as Dictionary):
+		stats_before[String(stat_name)] = get_effective_actor_combat_stat(actor_state.actor_id, String(stat_name))
+	actor_state.timed_stat_effects[effect_id] = {
+		"effect_id": effect_id,
+		"applied_at_us": clock.get_elapsed_us(),
+		"expires_at_us": expires_at_us,
+		"stat_modifiers": (effect_definition["stat_modifiers"] as Dictionary).duplicate(true),
+		"source_action_instance_id": action.action_instance_id,
+		"successful_hit_knockback_microfeet": int(effect_definition.get("successful_hit_knockback_microfeet", 0)),
+	}
+	_add_actor_condition(actor_state, effect_id)
+	var applied := _record_resolved_event(
+		clock.get_elapsed_us(),
+		&"timed_stat_effect_applied",
+		action.initiative,
+		action.actor_id,
+		actor_state.actor_id,
+		{
+			"action_instance_id": action.action_instance_id,
+			"effect_id": effect_id,
+			"expires_at_us": expires_at_us,
+			"stat_modifiers": (effect_definition["stat_modifiers"] as Dictionary).duplicate(true),
+			"stats_before": stats_before,
+			"stats_after": _effective_stats_snapshot(actor_state.actor_id, (effect_definition["stat_modifiers"] as Dictionary).keys()),
+		},
+		parent_event_id
+	)
+	schedule_event(
+		expires_at_us,
+		&"timed_stat_effect_expire_due",
+		action.initiative,
+		actor_state.actor_id,
+		&"",
+		{"effect_id": effect_id, "expected_expires_at_us": expires_at_us},
+		applied.event_id
+	)
+
+
+func _resolve_timed_stat_effect_expire_due(event: CombatEvent) -> void:
+	var actor_state := get_actor_state(event.source_actor_id)
+	var effect_id := String(event.payload.get("effect_id", ""))
+	if actor_state == null or not actor_state.timed_stat_effects.has(effect_id):
+		return
+	var active_effect: Dictionary = actor_state.timed_stat_effects[effect_id]
+	if int(active_effect.get("expires_at_us", -1)) != int(event.payload.get("expected_expires_at_us", -2)):
+		return
+	var modifier_names: Array = (active_effect.get("stat_modifiers", {}) as Dictionary).keys()
+	var stats_before := _effective_stats_snapshot(actor_state.actor_id, modifier_names)
+	actor_state.timed_stat_effects.erase(effect_id)
+	_remove_actor_condition(actor_state, effect_id)
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		event.timestamp_us,
+		&"timed_stat_effect_expired",
+		event.initiative,
+		event.source_actor_id,
+		&"",
+		{
+			"effect_id": effect_id,
+			"stats_before": stats_before,
+			"stats_after": _effective_stats_snapshot(actor_state.actor_id, modifier_names),
+		},
+		event.event_id
+	)
 
 
 func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_id: String) -> void:
@@ -1492,18 +2326,25 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 		)
 		attack.result_event_id = failed.event_id
 		return
-	attack.natural_roll = roll_int(1, 20)
-	attack.rng_draw_index = random.get_draw_count()
-	attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
-	var critical_result := definition.critical_trigger_policy.classify(int(attack.natural_roll))
-	attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
-	attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
-	if attack.critical_success:
+	var critical_result := CombatCriticalTriggerPolicy.RESULT_NONE
+	if attack.automatic_accuracy_reason == "called_shot":
+		attack.natural_roll = null
+		attack.rng_draw_index = null
+		attack.adjusted_roll = null
 		attack.accuracy_success = true
-	elif attack.critical_failure:
-		attack.accuracy_success = false
 	else:
-		attack.accuracy_success = int(attack.adjusted_roll) <= attack.acc_target
+		attack.natural_roll = roll_int(1, 20)
+		attack.rng_draw_index = random.get_draw_count()
+		attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
+		critical_result = definition.critical_trigger_policy.classify(int(attack.natural_roll))
+		attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
+		attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
+		if attack.critical_success:
+			attack.accuracy_success = true
+		elif attack.critical_failure:
+			attack.accuracy_success = false
+		else:
+			attack.accuracy_success = int(attack.adjusted_roll) <= attack.acc_target
 	attack.status = CombatAttackInstance.STATUS_PENDING_DEFENSE if attack.accuracy_success else CombatAttackInstance.STATUS_MISSED
 	attack.resolved_at_us = clock.get_elapsed_us()
 	attack.revision += 1
@@ -1537,6 +2378,8 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 			"damage_applied": false,
 			"strike_index": attack.strike_index,
 			"strikes_per_act": attack.strikes_per_act,
+			"accuracy_rolled": attack.automatic_accuracy_reason.is_empty(),
+			"automatic_accuracy_reason": attack.automatic_accuracy_reason,
 		},
 		parent_event_id
 	)
@@ -1657,7 +2500,7 @@ func _dodge_needs_context(
 	if defender_state.conditions.has("held") or defender_state.conditions.has("immobilized"):
 		return false
 	var stat_name := _get_dodge_stat_name(attack.delivery_class)
-	if stat_name.is_empty() or defender_definition.get_combat_stat(stat_name) == null:
+	if stat_name.is_empty() or get_effective_actor_combat_stat(defender_state.actor_id, stat_name) == null:
 		return false
 	return true
 
@@ -1694,7 +2537,7 @@ func _evaluate_defense_eligibility(
 			if stat_name.is_empty():
 				result["reason"] = "attack_delivery_unresolved"
 				return result
-			result["base_target"] = defender_definition.get_combat_stat(stat_name)
+			result["base_target"] = get_effective_actor_combat_stat(defender_state.actor_id, stat_name)
 			if result["base_target"] == null:
 				result["reason"] = "dodge_target_unresolved"
 				return result
@@ -1729,7 +2572,7 @@ func _evaluate_defense_eligibility(
 			if attack.damage_types.has("piercing") or attack.physical_soak_eligible == false:
 				result["reason"] = "attack_not_physical_soak_eligible"
 				return result
-			result["base_target"] = defender_definition.get_combat_stat("physical_soak")
+			result["base_target"] = get_effective_actor_combat_stat(defender_state.actor_id, "physical_soak")
 			if result["base_target"] == null:
 				result["reason"] = "physical_soak_target_unresolved"
 				return result
@@ -1977,12 +2820,12 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 	var attacker_definition: CombatActorDefinition = _actor_definitions[String(attack.attacker_id)]
 	var strength_bonus := 0
 	if damage_definition.strength_bonus_eligible == true:
-		var sb_value: Variant = attacker_definition.get_combat_stat("sb")
+		var sb_value: Variant = get_effective_actor_combat_stat(attack.attacker_id, "sb")
 		if sb_value == null:
 			return _failure("attacker_strength_bonus_unresolved")
 		strength_bonus = int(sb_value)
 	var target_definition: CombatActorDefinition = _actor_definitions[String(attack.target_id)]
-	var nal_value: Variant = target_definition.get_combat_stat("nal")
+	var nal_value: Variant = get_effective_actor_combat_stat(attack.target_id, "nal")
 	if nal_value == null:
 		return _failure("target_nal_unresolved")
 	var target_key := String(attack.target_id)
@@ -2819,6 +3662,88 @@ func _refresh_actor_movement_budgets() -> void:
 		changed = true
 	if changed:
 		_state_revision += 1
+
+
+func _is_special_touch_legal(actor_id: StringName, target_id: StringName, fallback_fact: bool) -> bool:
+	if actor_id == target_id:
+		return true
+	if _special_touch_resolver.is_valid():
+		return bool(_special_touch_resolver.call(actor_id, target_id))
+	return fallback_fact
+
+
+func _validate_ability_activation(
+	actor_state: CombatActorState,
+	definition: CombatActionDefinition
+) -> Dictionary:
+	var ability_value: Variant = definition.extension_metadata.get("ability_use")
+	if typeof(ability_value) != TYPE_DICTIONARY:
+		return _success({"uses_ability": false})
+	var ability: Dictionary = ability_value
+	var ability_id := String(ability.get("ability_id", ""))
+	var fallback_ap_cost := int(ability.get("fallback_ap_cost", 0))
+	if ability_id.is_empty() or fallback_ap_cost != 1:
+		return _failure("invalid_ability_use_definition")
+	if not actor_state.ability_daily_maxima.has(ability_id) \
+	or not actor_state.ability_daily_remaining.has(ability_id):
+		return _failure("ability_allowance_unregistered")
+	var remaining_before := int(actor_state.ability_daily_remaining[ability_id])
+	var ap_before := int(actor_state.resources.get("ap", 0))
+	if remaining_before > 0:
+		return _success({
+			"uses_ability": true,
+			"ability_id": ability_id,
+			"payment_kind": "daily_use",
+			"daily_before": remaining_before,
+			"daily_after": remaining_before - 1,
+			"ap_before": ap_before,
+			"ap_after": ap_before,
+			"ap_spent": 0,
+		})
+	if ap_before >= fallback_ap_cost:
+		return _success({
+			"uses_ability": true,
+			"ability_id": ability_id,
+			"payment_kind": "ability_point",
+			"daily_before": 0,
+			"daily_after": 0,
+			"ap_before": ap_before,
+			"ap_after": ap_before - fallback_ap_cost,
+			"ap_spent": fallback_ap_cost,
+		})
+	return _failure("insufficient_ability_resources")
+
+
+func _commit_ability_activation(
+	actor_state: CombatActorState,
+	action: CombatActionInstance,
+	definition: CombatActionDefinition,
+	payment: Dictionary
+) -> void:
+	if not bool(payment.get("uses_ability", false)):
+		return
+	var ability_id := String(payment["ability_id"])
+	actor_state.ability_daily_remaining[ability_id] = int(payment["daily_after"])
+	if String(payment["payment_kind"]) == "ability_point":
+		actor_state.resources["ap"] = int(payment["ap_after"])
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"ability_use_committed", action.initiative,
+		action.actor_id, StringName(action.execution_context.get("target_actor_id", "")),
+		{
+			"action_instance_id": action.action_instance_id,
+			"action_definition_id": String(definition.action_definition_id),
+			"ability_id": ability_id,
+			"daily_maximum": int(actor_state.ability_daily_maxima[ability_id]),
+			"daily_before": int(payment["daily_before"]),
+			"daily_after": int(payment["daily_after"]),
+			"payment_kind": String(payment["payment_kind"]),
+			"ap_before": int(payment["ap_before"]),
+			"ap_after": int(payment["ap_after"]),
+			"ap_spent": int(payment["ap_spent"]),
+		}, action.start_event_id
+	)
 
 
 func _make_action_instance_id(sequence: int) -> String:

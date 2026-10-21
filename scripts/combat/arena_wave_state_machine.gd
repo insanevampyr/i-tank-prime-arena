@@ -114,6 +114,10 @@ func get_resolved_enemy_count() -> int:
 	return _resolved_enemy_count()
 
 
+func get_resolved_roster() -> Array[Dictionary]:
+	return _resolved_roster.duplicate(true)
+
+
 func get_active_enemy_ids() -> PackedStringArray:
 	return _active_enemy_ids.duplicate()
 

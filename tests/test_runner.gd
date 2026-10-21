@@ -38,6 +38,9 @@ const HoldToAttackTests = preload("res://tests/test_hold_to_attack.gd")
 const MouseHoldArrowMovementTests = preload("res://tests/test_mouse_hold_arrow_movement.gd")
 const Task31OPagesAndWaveQuantityTests = preload("res://tests/test_task31o_pages_and_wave_quantity.gd")
 const CommonSpadoodleWaveTests = preload("res://tests/test_common_spadoodle_wave.gd")
+const WaveThreeSkellyHadesTests = preload("res://tests/test_wave_three_skelly_hades.gd")
+const Task32DHadesSpecialsTests = preload("res://tests/test_task_32d_hades_specials.gd")
+const Task32EAbilitySystemTests = preload("res://tests/test_task_32e_ability_system.gd")
 
 
 func _initialize() -> void:
@@ -46,6 +49,9 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 32E Ability resources and ally targeting", "instance": Task32EAbilitySystemTests.new()},
+		{"name": "Task 32C Wave 3 combat mechanics", "instance": WaveThreeSkellyHadesTests.new()},
+		{"name": "Task 32D Hades tactical Specials", "instance": Task32DHadesSpecialsTests.new()},
 		{"name": "Task 32A Common Spadoodle Wave 2", "instance": CommonSpadoodleWaveTests.new()},
 		{"name": "Task 31O Pages deployment and 2d4 Wave 1", "instance": Task31OPagesAndWaveQuantityTests.new()},
 		{"name": "Task 31N mouse hold and arrow movement", "instance": MouseHoldArrowMovementTests.new()},

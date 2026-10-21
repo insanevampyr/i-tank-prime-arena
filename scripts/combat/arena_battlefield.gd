@@ -11,6 +11,7 @@ var actor_radius_microfeet: int
 var navigation_authoritative: bool
 var _obstacles: Array[Dictionary] = []
 var _hazards: Array[Dictionary] = []
+var _gatherable_material_regions: Array[Dictionary] = []
 var _direct_path_exact_sample_count: int = 0
 
 
@@ -19,7 +20,8 @@ func _init(
 	p_obstacles: Array[Dictionary] = [],
 	p_actor_radius_microfeet: int = DEFAULT_ACTOR_RADIUS_MICROFEET,
 	p_navigation_authoritative: bool = false,
-	p_hazards: Array[Dictionary] = []
+	p_hazards: Array[Dictionary] = [],
+	p_gatherable_material_regions: Array[Dictionary] = []
 ) -> void:
 	assert(p_bounds_microfeet.size.x > 0 and p_bounds_microfeet.size.y > 0, "Battlefield bounds must be positive.")
 	assert(p_actor_radius_microfeet >= 0, "Actor collision radius cannot be negative.")
@@ -42,6 +44,14 @@ func _init(
 			"hazard_tier": int(hazard["hazard_tier"]),
 		})
 	_hazards.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left["id"]) < String(right["id"]))
+	for region: Dictionary in p_gatherable_material_regions:
+		assert(region.has("id") and region.has("rect_microfeet") and region.has("material_id"), "Gatherable terrain requires an ID, rectangle and material ID.")
+		_gatherable_material_regions.append({
+			"id": String(region["id"]),
+			"rect_microfeet": region["rect_microfeet"],
+			"material_id": String(region["material_id"]),
+		})
+	_gatherable_material_regions.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left["id"]) < String(right["id"]))
 
 
 static func create_open(bounds: Rect2i) -> ArenaBattlefield:
@@ -68,6 +78,13 @@ static func create_task16_test_arena() -> ArenaBattlefield:
 				"rect_microfeet": Rect2i(7_000_000, 20_000_000, 5_000_000, 3_000_000),
 				"hazard_tier": 1,
 			},
+		],
+		[
+			{
+				"id": "arena_packed_dirt_floor",
+				"rect_microfeet": Rect2i(2_000_000, 2_000_000, 44_000_000, 23_000_000),
+				"material_id": "dirt",
+			},
 		]
 	)
 
@@ -78,6 +95,13 @@ func get_obstacles() -> Array[Dictionary]:
 
 func get_hazards() -> Array[Dictionary]:
 	return _hazards.duplicate(true)
+
+
+func get_gatherable_material_at(position_microfeet: Vector2i, material_id: StringName) -> Dictionary:
+	for region: Dictionary in _gatherable_material_regions:
+		if String(region["material_id"]) == String(material_id) and (region["rect_microfeet"] as Rect2i).has_point(position_microfeet):
+			return {"available": true, "material_id": String(material_id), "surface_id": String(region["id"])}
+	return {"available": false, "material_id": String(material_id), "reason": "material_not_available_at_position"}
 
 
 func to_dictionary() -> Dictionary:
@@ -97,12 +121,21 @@ func to_dictionary() -> Dictionary:
 			"rect_microfeet": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
 			"hazard_tier": hazard["hazard_tier"],
 		})
+	var serialized_material_regions: Array[Dictionary] = []
+	for region: Dictionary in _gatherable_material_regions:
+		var rect: Rect2i = region["rect_microfeet"]
+		serialized_material_regions.append({
+			"id": region["id"],
+			"rect_microfeet": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
+			"material_id": region["material_id"],
+		})
 	return {
 		"bounds_microfeet": [bounds_microfeet.position.x, bounds_microfeet.position.y, bounds_microfeet.size.x, bounds_microfeet.size.y],
 		"actor_radius_microfeet": actor_radius_microfeet,
 		"navigation_authoritative": navigation_authoritative,
 		"obstacles": serialized_obstacles,
 		"hazards": serialized_hazards,
+		"gatherable_material_regions": serialized_material_regions,
 		"navigation_step_microfeet": NAVIGATION_STEP_MICROFEET,
 	}
 

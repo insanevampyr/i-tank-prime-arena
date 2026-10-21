@@ -11,6 +11,7 @@ extends Resource
 @export var attributes: Dictionary = {}
 @export var combat_stats: Dictionary = {}
 @export var resource_maxima: Dictionary = {}
+@export var ability_allowances: Dictionary = {}
 @export var defensive_capabilities: Dictionary = {}
 @export var running_profile: Dictionary = {}
 @export var source_refs: PackedStringArray = PackedStringArray()
@@ -35,6 +36,16 @@ func validate_definition() -> Array[Dictionary]:
 	for field_name: Variant in resource_maxima:
 		if typeof(resource_maxima[field_name]) != TYPE_INT or int(resource_maxima[field_name]) < 0:
 			issues.append(_issue("invalid", "malformed_resource_maximum", {"field": String(field_name)}))
+	for ability_id: Variant in ability_allowances:
+		var allowance: Variant = ability_allowances[ability_id]
+		if typeof(allowance) != TYPE_DICTIONARY:
+			issues.append(_issue("invalid", "malformed_ability_allowance", {"ability_id": String(ability_id)}))
+			continue
+		var profile: Dictionary = allowance
+		if int(profile.get("base_daily_uses", 0)) <= 0 \
+		or int(profile.get("repurchase_count", 0)) < 0 \
+		or int(profile.get("bonus_daily_uses", 0)) < 0:
+			issues.append(_issue("invalid", "malformed_ability_allowance", {"ability_id": String(ability_id)}))
 	for field_name: String in ["running_skill_investment", "skill_check_modifier", "roll_bonus"]:
 		_validate_integer_field(issues, running_profile, field_name, "running_profile", true)
 	if source_refs.is_empty():
@@ -59,7 +70,8 @@ func instantiate_actor(actor_id: StringName, instance_display_name: String, equi
 		defensive_capabilities,
 		field_sources,
 		unresolved_fields,
-		size_category
+		size_category,
+		ability_allowances
 	)
 
 
@@ -75,6 +87,7 @@ func to_dictionary() -> Dictionary:
 		"attributes": attributes.duplicate(true),
 		"combat_stats": combat_stats.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),
+		"ability_allowances": ability_allowances.duplicate(true),
 		"defensive_capabilities": defensive_capabilities.duplicate(true),
 		"running_profile": running_profile.duplicate(true),
 		"source_refs": Array(source_refs),

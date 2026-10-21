@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_hades_follower_short_sword"
+display_name = "Short Sword"
+damage_dice_count = 1
+damage_die_sides = 6
+fixed_damage_bonus = 1
+strength_bonus_eligible = true
+damage_types = PackedStringArray("slashing", "piercing")
+reach_microfeet = 2000000
+strength_requirement = 6
+one_hand_strength_requirement = -1
+base_hands_required = 1
+block_target = 0
+required_acts = 1
+strikes_per_act = 1
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = true
+source_refs = PackedStringArray("Uncommon Hades Follower Combat.doc: Short Sword equipped, slash/piercing, reach 2, 1d6+1", "ITank Prime V3 Short Sword chart: Required STR 6")

@@ -1,0 +1,70 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_uncommon_hades_combat_follower"
+display_name = "Uncommon Hades Combat Follower"
+actor_kind = &"prime_v3_human_follower"
+size_category = &"medium"
+race_name = "Human"
+class_names = PackedStringArray("Specials Combat")
+level = 3
+attributes = {
+"app": 8,
+"dex": 16,
+"end": 2,
+"int": 4,
+"luk": 0,
+"man": 9,
+"spd": 12,
+"str": 6,
+"wis": 10,
+"wit": 8
+}
+combat_stats = {
+"acc": 14,
+"at": 2,
+"dp": 8,
+"dt": 8,
+"hpm": 50,
+"init": 4,
+"mr": 12,
+"nal": 1,
+"physical_soak": 0,
+"rb": 0,
+"sb": 1
+}
+resource_maxima = {
+"ap": 9,
+"mana": 9
+}
+ability_allowances = {
+"prime_v3_hades_combat_follower_called_shot": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_hades_combat_follower_defensive_buff": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_hades_combat_follower_rage": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_hades_combat_follower_rejuvenating_mist": {"base_daily_uses": 3, "repurchase_count": 0}
+}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": false,
+"weapon_block": false
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": -1,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("Uncommon Hades Follower Combat.doc: complete follower profile, Short Sword, NAL +1, Combat Rage (2)", "ITank Prime V3 Combat Rage entry and Short Sword chart")
+field_sources = {
+"attributes": "Uncommon Hades Follower Combat.doc, attribute grid",
+"combat_stats": "Uncommon Hades Follower Combat.doc; NAL 1 includes printed Hades follower NAL +1 ability",
+"equipment": "Uncommon Hades Follower Combat.doc: Short Sword already equipped",
+"ability_allowances": "ITank Prime V3 pp. 21 and 24; Task 32E owner clarification: parenthetical values are daily uses, then each additional activation costs 1 shared AP",
+"resource_maxima": "Uncommon Hades Follower Combat.doc: MAN 9 and AP 9",
+"running_profile": "No Running investment is printed; Wave 3 behavior does not use Running",
+"size_category": "Source identifies an adult Human; Prime V3 Medium category applies to the verified human combat fixture"
+}
+unresolved_fields = PackedStringArray("running_profile.running_skill_investment")

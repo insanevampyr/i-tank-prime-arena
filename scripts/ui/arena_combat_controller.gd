@@ -543,6 +543,7 @@ func _on_encounter_selector_pressed() -> void:
 		Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD,
 		Fixture.ENCOUNTER_WAVE_ONE_GOBLINS,
 		Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES,
+		Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES,
 	]
 	var current_index := cycle.find(_encounter_fixture_id)
 	var next_fixture: StringName = cycle[posmod(current_index + 1, cycle.size())]
@@ -613,7 +614,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
-	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES].has(encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(encounter_fixture_id):
 		return {"success": false, "reason": "unsupported_encounter_fixture"}
 	_encounter_fixture_id = encounter_fixture_id
 	_player.reset_for_encounter(_initial_player_position_feet)
@@ -644,6 +645,8 @@ func _prepare_encounter_fixture() -> Dictionary:
 		setup = _session.initialize_wave_one_goblins(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES:
 		setup = _session.initialize_wave_two_spadoodles(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
+	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES:
+		setup = _session.initialize_wave_three_skelly_hades(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	else:
 		setup = _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	if not setup.get("success", false):
@@ -657,7 +660,11 @@ func _prepare_encounter_fixture() -> Dictionary:
 		else (
 			"Wave 1 Common Goblins ready. The seeded Arena 2d4 count is authoritative."
 			if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
-			else ("Wave 2 Common Spadoodles ready. The seeded Arena 1d3 count is authoritative." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else "Verified Prime V3 Guard fixture ready.")
+				else (
+					"Wave 2 Common Spadoodles ready. The seeded Arena 1d3 count is authoritative."
+					if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES
+					else ("Wave 3 ready: authoritative 1d2 Common Skelly plus one Hades Combat Follower." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else "Verified Prime V3 Guard fixture ready.")
+				)
 		)
 	)
 	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
@@ -838,6 +845,10 @@ func _update_last_message_for_event(event: CombatEvent) -> void:
 		"physical_attack_final_legality_failed":
 			var final_reason := String(payload.get("reason", "final legality failed"))
 			_last_ui_message = "%s attack finished, but %s; ACC was not rolled." % [actor_name, _friendly_reason(final_reason)]
+		"timed_stat_effect_applied":
+			_last_ui_message = "%s activated %s." % [actor_name, String(payload.get("effect_id", "effect")).replace("_", " ")]
+		"timed_stat_effect_expired":
+			_last_ui_message = "%s %s ended." % [actor_name, String(payload.get("effect_id", "effect")).replace("_", " ")]
 
 
 func _apply_authoritative_combat_displacements() -> void:
@@ -877,7 +888,7 @@ func _rebuild_encounter_visuals() -> void:
 		if is_instance_valid(visual):
 			(visual as Node).queue_free()
 	_goblin_visuals.clear()
-	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES].has(_encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(_encounter_fixture_id):
 		_opponent.visible = true
 		return
 	_opponent.visible = false
@@ -887,11 +898,13 @@ func _rebuild_encounter_visuals() -> void:
 			continue
 		var visual := Node2D.new()
 		var is_spadoodle := String(actor_id).begins_with("wave_2_common_spadoodle_")
-		visual.name = ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s") % actor_id
+		var is_skelly := String(actor_id).begins_with("wave_3_common_skelly_")
+		var is_hades_follower := String(actor_id).begins_with("wave_3_hades_combat_follower_")
+		visual.name = ("HadesFollower_%s" if is_hades_follower else ("CommonSkelly_%s" if is_skelly else ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s"))) % actor_id
 		visual.position = _microfeet_to_pixels(state.position_microfeet)
 		var body := Polygon2D.new()
 		body.polygon = PackedVector2Array([Vector2(-13, -13), Vector2(13, -13), Vector2(13, 13), Vector2(-13, 13)])
-		body.color = Color("#9B7A3C" if is_spadoodle else "#32864A")
+		body.color = Color("#552A72" if is_hades_follower else ("#D8D1B8" if is_skelly else ("#9B7A3C" if is_spadoodle else "#32864A")))
 		visual.add_child(body)
 		var glyph := Label.new()
 		glyph.name = "Glyph"
@@ -900,9 +913,9 @@ func _rebuild_encounter_visuals() -> void:
 		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		glyph.add_theme_font_size_override("font_size", 18)
-		glyph.add_theme_color_override("font_color", Color("#FFFFFF"))
+		glyph.add_theme_color_override("font_color", Color("#191919" if is_skelly else "#FFFFFF"))
 		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		glyph.text = "S" if is_spadoodle else "G"
+		glyph.text = "H" if is_hades_follower else ("K" if is_skelly else ("S" if is_spadoodle else "G"))
 		visual.add_child(glyph)
 		var facing_marker := Polygon2D.new()
 		facing_marker.name = "FacingMarker"
@@ -1022,7 +1035,7 @@ func _update_presentation() -> void:
 	if _encounter_selector != null:
 		_encounter_selector.text = (
 			"WAVE 1" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
-			else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M"))
+				else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("WAVE 3" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M")))
 		)
 		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	var seed_editable := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
@@ -1091,6 +1104,10 @@ static func compact_actor_name(actor_id: StringName) -> String:
 		return "GOBLIN %d" % int(raw.trim_prefix("wave_1_common_goblin_"))
 	if raw.begins_with("wave_2_common_spadoodle_"):
 		return "SPADOODLE %d" % int(raw.trim_prefix("wave_2_common_spadoodle_"))
+	if raw.begins_with("wave_3_common_skelly_"):
+		return "SKELLY %d" % int(raw.trim_prefix("wave_3_common_skelly_"))
+	if raw.begins_with("wave_3_hades_combat_follower_"):
+		return "HADES FOLLOWER"
 	var display := raw.replace("_", " ").to_upper()
 	return display if display.length() <= 20 else display.substr(0, 17) + "..."
 
@@ -1101,6 +1118,10 @@ static func _compact_wave_actor_label(actor_id: StringName) -> String:
 		return name.replace("GOBLIN ", "G")
 	if name.begins_with("SPADOODLE "):
 		return name.replace("SPADOODLE ", "S")
+	if name.begins_with("SKELLY "):
+		return name.replace("SKELLY ", "K")
+	if name == "HADES FOLLOWER":
+		return "H"
 	return name
 
 
@@ -1250,7 +1271,7 @@ func _update_actor_label_layout() -> void:
 		return
 	_anchor_actor_health_label(_player, _player_hpc_label)
 	_anchor_actor_health_label(_opponent, _opponent_hpc_label)
-	if [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES].has(_encounter_fixture_id):
+	if [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(_encounter_fixture_id):
 		_layout_goblin_hpc_labels()
 
 

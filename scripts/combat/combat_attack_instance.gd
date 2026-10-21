@@ -60,6 +60,7 @@ var same_attack_condition_protected_actor_id: StringName = &""
 var revision: int = 0
 var strike_index: int = 1
 var strikes_per_act: int = 1
+var automatic_accuracy_reason: String = ""
 
 
 func _init(
@@ -158,4 +159,5 @@ func to_dictionary() -> Dictionary:
 		"revision": revision,
 		"strike_index": strike_index,
 		"strikes_per_act": strikes_per_act,
+		"automatic_accuracy_reason": automatic_accuracy_reason,
 	}
