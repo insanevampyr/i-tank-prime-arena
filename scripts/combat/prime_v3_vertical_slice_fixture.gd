@@ -16,6 +16,7 @@ const ENCOUNTER_SYNTHETIC_SMALL_GUARD := &"medium_guard_vs_synthetic_small_guard
 const ENCOUNTER_WAVE_ONE_GOBLINS := &"wave_1_common_goblins"
 const ENCOUNTER_WAVE_TWO_SPADOODLES := &"wave_2_common_spadoodles"
 const ENCOUNTER_WAVE_THREE_SKELLY_HADES := &"wave_3_skelly_hades_follower"
+const ENCOUNTER_WAVE_FOUR_GARGOYLES := &"wave_4_mini_gargoyle_swarmers"
 
 const PRIME_GUARD_SOURCE := "PRIME-V3 p. 336, Uncommon Guard"
 const PRIME_BATTLE_AXE_SOURCE := "PRIME-V3 p. 127, Battle Axe"

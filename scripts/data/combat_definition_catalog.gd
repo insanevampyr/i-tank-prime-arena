@@ -26,6 +26,9 @@ const COMMON_SKELLY_LOADOUT_PATH := "res://data/loadouts/prime_v3_common_skelly_
 const HADES_COMBAT_FOLLOWER_CHARACTER_PATH := "res://data/characters/prime_v3_uncommon_hades_combat_follower.tres"
 const HADES_SHORT_SWORD_PATH := "res://data/equipment/weapons/prime_v3_hades_follower_short_sword.tres"
 const HADES_COMBAT_FOLLOWER_LOADOUT_PATH := "res://data/loadouts/prime_v3_hades_combat_follower_short_sword.tres"
+const MINI_GARGOYLE_CHARACTER_PATH := "res://data/characters/prime_v3_uncommon_mini_gargoyle_swarmer.tres"
+const MINI_GARGOYLE_NATURAL_ATTACKS_PATH := "res://data/equipment/weapons/prime_v3_mini_gargoyle_natural_attacks.tres"
+const MINI_GARGOYLE_LOADOUT_PATH := "res://data/loadouts/prime_v3_mini_gargoyle_natural_attacks.tres"
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -60,6 +63,9 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_character(load(HADES_COMBAT_FOLLOWER_CHARACTER_PATH) as CombatCharacterDefinitionResource)
 	catalog.register_weapon(load(HADES_SHORT_SWORD_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_loadout(load(HADES_COMBAT_FOLLOWER_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
+	catalog.register_character(load(MINI_GARGOYLE_CHARACTER_PATH) as CombatCharacterDefinitionResource)
+	catalog.register_weapon(load(MINI_GARGOYLE_NATURAL_ATTACKS_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_loadout(load(MINI_GARGOYLE_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 
 

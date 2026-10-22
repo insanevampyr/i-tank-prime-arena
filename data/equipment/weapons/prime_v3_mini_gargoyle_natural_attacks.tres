@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_mini_gargoyle_natural_attacks"
+display_name = "Mini Gargoyle Claw / Claw / Bite"
+damage_dice_count = 1
+damage_die_sides = 6
+fixed_damage_bonus = 0
+strength_bonus_eligible = true
+damage_types = PackedStringArray("slashing")
+reach_microfeet = 1000000
+strength_requirement = -1
+one_hand_strength_requirement = -1
+base_hands_required = 1
+block_target = -1
+required_acts = 1
+strikes_per_act = 3
+critical_success_max_natural = 1
+approach_attack_eligible = true
+ducking_policy = &"unresolved"
+combat_ready = true
+source_refs = PackedStringArray("Uncommon Mini Gargoyle Swarmers.doc: two claws 1d6+SB slashing and bite 1d8+SB piercing; claw, claw and bite each action")

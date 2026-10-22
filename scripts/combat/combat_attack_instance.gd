@@ -30,10 +30,14 @@ var is_back_attack: bool
 var declared_at_us: int
 var declared_attacker_position_microfeet := Vector2i.ZERO
 var declared_target_position_microfeet := Vector2i.ZERO
+var declared_attacker_elevation_microfeet: int = 0
+var declared_target_elevation_microfeet: int = 0
 var declaration_line_of_sight_verified: Variant = null
 var resolved_at_us: Variant = null
 var final_attacker_position_microfeet: Variant = null
 var final_target_position_microfeet: Variant = null
+var final_attacker_elevation_microfeet: Variant = null
+var final_target_elevation_microfeet: Variant = null
 var final_distance_squared_microfeet: Variant = null
 var final_range_legal: Variant = null
 var final_line_of_sight_legal: Variant = null
@@ -61,6 +65,9 @@ var revision: int = 0
 var strike_index: int = 1
 var strikes_per_act: int = 1
 var automatic_accuracy_reason: String = ""
+var strike_label: String = ""
+var damage_dice_count_override: Variant = null
+var damage_die_sides_override: Variant = null
 
 
 func _init(
@@ -129,10 +136,14 @@ func to_dictionary() -> Dictionary:
 		"declared_at_us": declared_at_us,
 		"declared_attacker_position_microfeet": [declared_attacker_position_microfeet.x, declared_attacker_position_microfeet.y],
 		"declared_target_position_microfeet": [declared_target_position_microfeet.x, declared_target_position_microfeet.y],
+		"declared_attacker_elevation_microfeet": declared_attacker_elevation_microfeet,
+		"declared_target_elevation_microfeet": declared_target_elevation_microfeet,
 		"declaration_line_of_sight_verified": declaration_line_of_sight_verified,
 		"resolved_at_us": resolved_at_us,
 		"final_attacker_position_microfeet": null if final_attacker_position_microfeet == null else [final_attacker_position_microfeet.x, final_attacker_position_microfeet.y],
 		"final_target_position_microfeet": null if final_target_position_microfeet == null else [final_target_position_microfeet.x, final_target_position_microfeet.y],
+		"final_attacker_elevation_microfeet": final_attacker_elevation_microfeet,
+		"final_target_elevation_microfeet": final_target_elevation_microfeet,
 		"final_distance_squared_microfeet": final_distance_squared_microfeet,
 		"final_range_legal": final_range_legal,
 		"final_line_of_sight_legal": final_line_of_sight_legal,
@@ -160,4 +171,7 @@ func to_dictionary() -> Dictionary:
 		"strike_index": strike_index,
 		"strikes_per_act": strikes_per_act,
 		"automatic_accuracy_reason": automatic_accuracy_reason,
+		"strike_label": strike_label,
+		"damage_dice_count_override": damage_dice_count_override,
+		"damage_die_sides_override": damage_die_sides_override,
 	}

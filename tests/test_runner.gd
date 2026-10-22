@@ -41,6 +41,8 @@ const CommonSpadoodleWaveTests = preload("res://tests/test_common_spadoodle_wave
 const WaveThreeSkellyHadesTests = preload("res://tests/test_wave_three_skelly_hades.gd")
 const Task32DHadesSpecialsTests = preload("res://tests/test_task_32d_hades_specials.gd")
 const Task32EAbilitySystemTests = preload("res://tests/test_task_32e_ability_system.gd")
+const WaveFourMiniGargoyleTests = preload("res://tests/test_wave_four_mini_gargoyles.gd")
+const WaveFourSwarmerTacticsTests = preload("res://tests/test_wave_four_swarmer_tactics.gd")
 
 
 func _initialize() -> void:
@@ -49,6 +51,8 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 33B Wave 4 swarmer tactics", "instance": WaveFourSwarmerTacticsTests.new()},
+		{"name": "Task 33A Wave 4 Mini Gargoyle Swarmers", "instance": WaveFourMiniGargoyleTests.new()},
 		{"name": "Task 32E Ability resources and ally targeting", "instance": Task32EAbilitySystemTests.new()},
 		{"name": "Task 32C Wave 3 combat mechanics", "instance": WaveThreeSkellyHadesTests.new()},
 		{"name": "Task 32D Hades tactical Specials", "instance": Task32DHadesSpecialsTests.new()},

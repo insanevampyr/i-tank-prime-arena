@@ -26,6 +26,7 @@ var critical_trigger_policy: CombatCriticalTriggerPolicy
 var allows_approach_during_execution: bool
 var uses_size_based_location_acc: bool
 var strikes_per_act: int
+var strike_profiles: Array[Dictionary]
 
 
 func _init(
@@ -49,7 +50,8 @@ func _init(
 	p_critical_trigger_policy: CombatCriticalTriggerPolicy = null,
 	p_allows_approach_during_execution: bool = false,
 	p_uses_size_based_location_acc: bool = false,
-	p_strikes_per_act: int = 1
+	p_strikes_per_act: int = 1,
+	p_strike_profiles: Array[Dictionary] = []
 ) -> void:
 	assert(not String(p_attack_definition_id).is_empty(), "Physical attack definitions require a stable identifier.")
 	assert(not String(p_weapon_ref).is_empty(), "Physical attack definitions require an equipment reference.")
@@ -97,12 +99,25 @@ func _init(
 	allows_approach_during_execution = p_allows_approach_during_execution
 	uses_size_based_location_acc = p_uses_size_based_location_acc
 	strikes_per_act = p_strikes_per_act
+	strike_profiles = p_strike_profiles.duplicate(true)
+	if not strike_profiles.is_empty():
+		assert(strike_profiles.size() == strikes_per_act, "Strike profiles must define every strike in the Act.")
+		for profile: Dictionary in strike_profiles:
+			assert(int(profile.get("dice_count", 0)) > 0 and int(profile.get("die_sides", 0)) > 0, "Strike profiles require valid damage dice.")
+			assert(not String(profile.get("label", "")).is_empty(), "Strike profiles require a stable label.")
 	if critical_trigger_policy == null:
 		critical_trigger_policy = CombatCriticalTriggerPolicy.new()
 
 
 func has_resolved_range() -> bool:
 	return maximum_range_microfeet != null
+
+
+func get_strike_profile(strike_index: int) -> Dictionary:
+	assert(strike_index >= 1 and strike_index <= strikes_per_act, "Strike index is outside the attack sequence.")
+	if strike_profiles.is_empty():
+		return {}
+	return strike_profiles[strike_index - 1].duplicate(true)
 
 
 func get_location_acc_modifier(target_location: StringName) -> Variant:
@@ -151,4 +166,5 @@ func to_dictionary() -> Dictionary:
 		"allows_approach_during_execution": allows_approach_during_execution,
 		"uses_size_based_location_acc": uses_size_based_location_acc,
 		"strikes_per_act": strikes_per_act,
+		"strike_profiles": strike_profiles.duplicate(true),
 	}

@@ -15,6 +15,7 @@ var equipment_refs: PackedStringArray = PackedStringArray()
 var conditions: PackedStringArray = PackedStringArray()
 var awareness: StringName = &"aware"
 var position_microfeet: Vector2i = Vector2i.ZERO
+var elevation_microfeet: int = 0
 var facing_millidegrees: int = 0
 var movement_round_index: int = 0
 var remaining_mr_microfeet: Variant = null
@@ -28,6 +29,8 @@ var critical_stagger_until_us: int = 0
 var action_timing_anchor_us: int = 0
 var action_timing_cursor_us: int = 0
 var next_action_interval_index: int = 0
+var nac_round_index: int = -1
+var nac_uses_this_round: int = 0
 var revision: int = 0
 
 
@@ -64,6 +67,8 @@ func to_dictionary() -> Dictionary:
 		"conditions": Array(conditions),
 		"awareness": String(awareness),
 		"position_microfeet": [position_microfeet.x, position_microfeet.y],
+		"elevation_microfeet": elevation_microfeet,
+		"is_airborne": elevation_microfeet > 0,
 		"facing_millidegrees": facing_millidegrees,
 		"movement_round_index": movement_round_index,
 		"remaining_mr_microfeet": remaining_mr_microfeet,
@@ -77,12 +82,22 @@ func to_dictionary() -> Dictionary:
 		"action_timing_anchor_us": action_timing_anchor_us,
 		"action_timing_cursor_us": action_timing_cursor_us,
 		"next_action_interval_index": next_action_interval_index,
+		"nac_round_index": nac_round_index,
+		"nac_uses_this_round": nac_uses_this_round,
 		"revision": revision,
 	}
 
 
 func set_position(value: Vector2i, facing: int) -> void:
 	position_microfeet = value
+	facing_millidegrees = facing
+	revision += 1
+
+
+func set_spatial_position(value: Vector2i, elevation: int, facing: int) -> void:
+	assert(elevation >= 0, "Authoritative elevation cannot be negative.")
+	position_microfeet = value
+	elevation_microfeet = elevation
 	facing_millidegrees = facing
 	revision += 1
 

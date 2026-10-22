@@ -1,0 +1,66 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_uncommon_mini_gargoyle_swarmer"
+display_name = "Uncommon Mini Gargoyle Swarmer"
+actor_kind = &"prime_v3_creature"
+size_category = &"small"
+race_name = "Gargoyle"
+class_names = PackedStringArray()
+level = -1
+attributes = {
+"app": 7,
+"dex": 15,
+"end": 5,
+"int": 8,
+"luk": 0,
+"man": 10,
+"spd": 11,
+"str": 6,
+"wis": 9,
+"wit": 16
+}
+combat_stats = {
+"acc": 13,
+"at": 1,
+"dp": 0,
+"dt": 15,
+"hpm": 15,
+"init": 8,
+"mr": 16,
+"nal": 2,
+"physical_soak": 3,
+"rb": 0,
+"sb": 1
+}
+resource_maxima = {
+"ap": 10,
+"mana": 10
+}
+ability_allowances = {
+"fury": {"base_daily_uses": 1, "repurchase_count": 0, "bonus_daily_uses": 0}
+}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": false,
+"weapon_block": false
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": -1,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("Uncommon Mini Gargoyle Swarmers.doc: creature statistics, natural attacks, flight, Dark Sight, Fury", "ITank Prime V3 p. 166: Gargoyle NAL, natural attacks, flight and Dark Sight", "Task 33A owner ruling: Small size category")
+field_sources = {
+"attributes": "Uncommon Mini Gargoyle Swarmers.doc attribute grid",
+"combat_stats": "Uncommon Mini Gargoyle Swarmers.doc combat statistics",
+"equipment": "Uncommon Mini Gargoyle Swarmers.doc: claw, claw and bite natural attack sequence",
+"flight": "Source Flight at normal MR; Task 33A owner-approved Arena 3D flight contract",
+"fury": "Source Fury 1/day x2 damage NAC; Task 33A owner-approved one-natural-attack-Act contract",
+"size_category": "Task 33A explicit owner-approved Arena classification: Small"
+}
+unresolved_fields = PackedStringArray("running_profile.running_skill_investment")

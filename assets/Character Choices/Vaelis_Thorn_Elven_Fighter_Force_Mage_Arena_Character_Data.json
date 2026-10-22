@@ -1,0 +1,315 @@
+{
+  "schema": "itank-prime-arena-character-v1",
+  "record_status": "transcribed_from_prior_completed_character_pack; not independently re-audited against rulebook",
+  "character": {
+    "name": "Vaelis Thorn",
+    "player": "Lee",
+    "campaign": "ITank Prime Arena",
+    "race": "Elf",
+    "classes": [
+      "Fighter",
+      "Mage"
+    ],
+    "level": 1,
+    "type": "Mana User",
+    "experience_type": 8,
+    "hit_dice": "1d6",
+    "size_category": "M",
+    "age": 122,
+    "sex": "Female",
+    "eyes": "Silver",
+    "hair": "Black",
+    "height": "5 ft 7 in",
+    "weight_lb": 125,
+    "outlook": "Cocky",
+    "home": "Arena entrant",
+    "job": "Competitor",
+    "title": "The Thorn",
+    "religion": null,
+    "description": "Smirking, quick-footed Elven duelist; dark hair, silver eyes. Loves the crowd."
+  },
+  "progression": {
+    "EXPM": 0,
+    "EXPC": 0,
+    "unused_skills": 0,
+    "creation_method": 2,
+    "creation_attribute_points": 41,
+    "starting_FP": 25,
+    "drawback_FP": 11,
+    "total_FP": 36,
+    "FP_spent_on_attributes": 25,
+    "FP_spent_on_force_HSF": 10,
+    "FP_unspent": 1
+  },
+  "attributes": {
+    "STR": 9,
+    "END": 6,
+    "SPD": 11,
+    "DEX": 9,
+    "WIS": 10,
+    "INT": 5,
+    "WIT": 3,
+    "MAN": 0,
+    "LUK": 0,
+    "APP": 14,
+    "SR": 1,
+    "TB": 0
+  },
+  "derived": {
+    "SB": 2,
+    "PPG": 8,
+    "MWC_lb": 250,
+    "NAL": 1,
+    "PS": 3,
+    "HPB": 1,
+    "MR_ft": 10,
+    "AT": 1,
+    "DT": 3,
+    "DP": 6,
+    "ACC": 9,
+    "SS": 9,
+    "MSL": 3,
+    "MR_per_hour": 6,
+    "skill_number": 30,
+    "SCM": 0,
+    "MIUR": 1,
+    "INIT": 2,
+    "MNS": 4,
+    "RCL": 2,
+    "AP_persuasion": 0,
+    "KP": 0,
+    "RB": 0,
+    "rerolls_per_game": 0,
+    "twists_of_fate": 0,
+    "PAR": 7,
+    "CHA": 4
+  },
+  "resources": {
+    "HPM": 9,
+    "HPC": 9,
+    "BM": 10,
+    "BC": 10,
+    "mana_max": 20,
+    "mana_current": 20,
+    "ability_points": null,
+    "abilities_used": null,
+    "gold_gp": 75
+  },
+  "skills": [
+    {
+      "name": "Running",
+      "investment": 3,
+      "attribute": "END",
+      "modifier": "Automatic",
+      "arena_automatic": true
+    },
+    {
+      "name": "Ambidextrous",
+      "investment": 1,
+      "attribute": "DEX",
+      "modifier": -2
+    },
+    {
+      "name": "Alertness",
+      "investment": 4,
+      "attribute": "WIT",
+      "modifier": 1
+    },
+    {
+      "name": "Special Recognition",
+      "investment": 4,
+      "attribute": "WIS",
+      "modifier": -1
+    },
+    {
+      "name": "Meditation",
+      "investment": 4,
+      "attribute": "WIS",
+      "modifier": -1
+    },
+    {
+      "name": "Magic Item Identify",
+      "investment": 3,
+      "attribute": "WIS",
+      "modifier": -3
+    },
+    {
+      "name": "Mana Burn",
+      "investment": 2,
+      "attribute": "WIS",
+      "modifier": -3
+    },
+    {
+      "name": "Leaping",
+      "investment": 2,
+      "attribute": "STR/SPD",
+      "modifier": -1
+    },
+    {
+      "name": "Blind Fighting",
+      "investment": 2,
+      "attribute": "WIT/INT",
+      "modifier": "-3/-1"
+    },
+    {
+      "name": "Balance",
+      "investment": 2,
+      "attribute": "DEX",
+      "modifier": 0
+    },
+    {
+      "name": "Creature Knowledge",
+      "investment": 2,
+      "attribute": "INT",
+      "modifier": -2
+    },
+    {
+      "name": "Quick to Act",
+      "investment": 1,
+      "attribute": "WIT",
+      "modifier": -4
+    }
+  ],
+  "natural_abilities": [
+    "Elf: Dark Sight 60 ft",
+    "Elf: Hidden Passage +2 (10 ft)",
+    "Elf: Local History",
+    "Elf: Elven Wine Tolerance",
+    "Elf: Bows; Alertness +2",
+    "Elf: Literacy",
+    "Fighter: All shields",
+    "Fighter: Weapons except sling/wands/staffs/rods",
+    "Mage: Wand, staff, rod, dagger, sling",
+    "Mage: Bucklers; Item Identify",
+    "Fighter: Camping",
+    "Mage: Arcane Speech"
+  ],
+  "automatic_skills": [
+    "Ambidextrous (1 investment)",
+    "Running (3 investments; Arena automatic)",
+    "Elf: Bows; Literacy",
+    "Mage: Item Identify",
+    "Fighter: Camping"
+  ],
+  "languages": [
+    "Elven",
+    "Common",
+    "Arcane Speech"
+  ],
+  "backgrounds": [
+    "Arena challenger (unranked)"
+  ],
+  "drawbacks": [
+    {
+      "name": "Deep Sleeper",
+      "FP_bonus": 6
+    },
+    {
+      "name": "Infamous",
+      "FP_bonus": 5
+    }
+  ],
+  "fears": [],
+  "equipment": {
+    "armor": [
+      {
+        "location": "Torso",
+        "type": "None (light clothing)",
+        "LTAL": 0
+      }
+    ],
+    "weapons": [
+      {
+        "name": "Short Sword",
+        "hand": "Right",
+        "stored": "Right hip",
+        "type": "S/P",
+        "range_ft": 2,
+        "damage": "1d6+1+SB",
+        "other_weapon_columns": "unfilled / -"
+      },
+      {
+        "name": "Short Wand",
+        "hand": "Left",
+        "stored": "Left hand",
+        "type": "B",
+        "range_ft": 1,
+        "damage": "1d4+SB",
+        "other_weapon_columns": "unfilled / -",
+        "note": "May cast through wand"
+      }
+    ],
+    "shield": null,
+    "inventory": [
+      {
+        "name": "Short sword sheath",
+        "quantity": 1,
+        "notes": "With sword"
+      },
+      {
+        "name": "Short wand",
+        "quantity": 1,
+        "notes": "Left hand; may cast"
+      },
+      {
+        "name": "Basic clothing",
+        "quantity": 1,
+        "notes": "No purchased armor"
+      },
+      {
+        "name": "Gold pieces",
+        "quantity": 75,
+        "notes": "200 start - 100 sword - 25 wand"
+      }
+    ],
+    "magic_items": [],
+    "rations": null,
+    "drinks": null
+  },
+  "home_special_fields": [
+    "Combat",
+    "Force"
+  ],
+  "learned_specials": [
+    {
+      "field": "Force",
+      "HSF": true,
+      "name": "Force Bolt",
+      "level": 1,
+      "mana_cost": 2,
+      "times_per_day": null,
+      "cast_time": "NAC",
+      "range": "10 ft",
+      "description": "1d6 damage; 2 ft knockback. Magic projectile, NAC. SS then ACC."
+    },
+    {
+      "field": "Force",
+      "HSF": true,
+      "name": "Force Shield",
+      "level": 2,
+      "mana_cost": 4,
+      "times_per_day": null,
+      "cast_time": "1 Act",
+      "range": "Touch",
+      "description": "20 damage shield after NAL; absorbs hits. Attacker knocked back 2 ft on hit. Non-stackable."
+    }
+  ],
+  "arena_rules": {
+    "wave_state_persists": true,
+    "no_automatic_between_wave_resource_recovery": true,
+    "between_wave_downtime": "Safe, unlimited until player continues; no camping/sleeping or passive time-based HPC, Mana or Ability restoration.",
+    "active_recovery": "Only rules-legal potions, Specials, skills such as Meditation, items, etc.",
+    "running_three_investments": "Automatic successful Running (existing Arena behavior).",
+    "special_recognition": "Check automatically for eligible visible Specials; success popup \"Casting <Special Name>\", otherwise \"Casting Special\".",
+    "magic_item_identification": "Can be used between waves according to skill requirements.",
+    "preferred_tactics": "Right-hand sword damage; left-hand wand for Force defenses, knockback, disruption, control."
+  },
+  "audit_notes": [
+    "This is faithful structured transcription of the previously generated Vaelis packet, NOT a fresh independent verification of all Prime mechanics.",
+    "Previous PDF contained some overlapping entries in the derived-attribute section; values above reflect intended final overlay and should be source-verified prior to game import.",
+    "The character creation used assumed dice and FP choices recorded in the earlier packet.",
+    "Religion is intentionally unselected; no religious Specials.",
+    "The print sheet included both natural Mage Item Identify and 3 invested Magic Item Identify; preserve separately until the intended relationship is reviewed.",
+    "No Combat Specials were recorded as learned, despite Combat HSF belonging to the character."
+  ]
+}

@@ -87,6 +87,26 @@ The unchanged `44 x 23`-foot battlefield supports the two-to-three enemy roster 
 
 The source lists Climb and fear of creatures bigger than Medium. The current flat Arena supplies no climbable surface, and the current Medium Guard is not bigger than Medium. Task 32A therefore adds no climbing or fear behavior; later use requires a source-driven environment/target trigger rather than a fabricated generic effect.
 
+## Task 33A: implemented Wave 4 Mini Gargoyle Swarmers
+
+Wave 4 is independently selectable for development play. Its one authoritative seeded d4 draw, draw index, result and resolved count create one to four independent `mini_gargoyle_swarmer` actors. Each actor has its own source-backed HPC, Initiative, position/elevation, action state, daily Fury use and defeat state. Every registered Gargoyle must reach zero HPC before the wave records victory; the encounter then stops without fabricating Wave 5.
+
+Each AT-1 attack Act owns three ordered independent attack instances: slashing claw, slashing claw and piercing bite. The two claws use `1d6 + eligible SB`; the bite uses `1d8 + eligible SB`. All three retain the declared target/location but independently revalidate three-dimensional reach and obstruction, roll ACC, resolve defenses and apply exact damage/critical processing. The owner-approved Small classification selects Prime's directional Small-versus-Medium hit-location modifiers against the current Guard.
+
+Flight extends authoritative position with integer micro-foot elevation. Takeoff and landing are continuous movement funded by the same MR 16 ledger as airborne travel and cost zero ordinary Acts. Three-dimensional movement cost is Euclidean, so a simultaneous three-foot horizontal/four-foot vertical displacement costs five feet. Hovering changes no position or resource, and turning has no separate charge. The authored test Arena stores a ten-foot altitude cap and eight-foot wall height, allowing legal overflight only after the Gargoyle's authoritative base elevation clears the wall. Ground movement, flight movement, final melee reach, line of sight, actor occupancy, events and snapshots all use simulation state rather than visuals.
+
+Fury is committed once to one eligible natural-attack action, consumes one daily use and one NAC-cap slot, and applies exact x2 damage to each qualifying strike in that action. It does not add attacks, extend reach, alter AT or bypass defenses. A subsequent ordinary Act contains no Fury multiplier. RESET reconstructs the original daily allowance and seeded roster; continuous-wave restoration does not invent another use.
+
+Presentation uses gray-blue `M` placeholders, independent HPC/facing markers and an actor-owned altitude label. `▲ 6 ft` and fractional equivalents are read from authoritative elevation and disappear when the actor is grounded, defeated or removed. Wave 4's nighttime premise and printed 100-foot Dark Sight are recorded, but generalized darkness, detection and hidden-information rules remain deferred rather than approximated. Wave 5 remains configured and blocked.
+
+## Task 33B: Wave 4 swarm behavior and legal dive attacks
+
+Wave 4 now drives its existing actors through deterministic, creature-specific tactical states: takeoff, high staging, diving, striking, withdrawing and blocked recovery. Stable roster-index lanes surround the current target, one active diver normally leaves the other actors staged, and an unavailable preferred contact point falls back through the other lanes. The attack remains one AT-1 action containing claw/claw/bite; movement during that action spends the existing MR 16 budget and updates its endpoint against the target's current authoritative position without restarting the action.
+
+The legal contact point is the exact one-foot 3D boundary: 0.8 feet horizontally plus 0.6 feet vertically. Integer squared-distance collision prevents float precision from falsely treating that point as occupied. Final effect still independently validates actual 3D reach and LOS before each strike rolls ACC. After completion the actor withdraws with ordinary MR and later re-engages. Injury changes only the staging radius from four to five feet; it grants no combat modifier and never disables pursuit.
+
+Airborne actors with at least one actor diameter of vertical separation are excluded from ground-plane occupancy queries, removing the reproduced overhead movement lock. Three-dimensional flight collision itself remains unchanged and continues to prevent same-altitude overlap and wall intersection. Authoritative movement events, Fury, damage, replay, state snapshots and synchronization are retained in full.
+
 ## Task 31D: fractional-position pursuit correction
 
 Task 31D profiling isolated the Wave-1 slowdown to repeated failed path searches, not the simulation clock, event history, snapshots, replay, wave state machine, or two-fist scheduling. Common Goblins have only one-foot reach. When their continuously moving target occupied a fractional-foot position, no whole-foot navigation node could be both collision-legal and within that reach. Each pursuing Goblin therefore exhausted the 10,000-node search bound again on each rendered frame.

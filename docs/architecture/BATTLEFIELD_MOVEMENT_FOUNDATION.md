@@ -44,6 +44,22 @@ Prime V3 page 36 identifies prone movement/position as impaired but delegates th
 
 No cover modifiers, terrain costs, projectile behavior, advanced tactics, flanking, dynamic pathfinding intelligence, Specials, NACs or network transport are added.
 
+## Task 33A authoritative flight extension
+
+Wave 4 adds an elevation coordinate without replacing the two-dimensional battlefield. Canonical X, Y and Z values remain integer micro-feet. The Task 16 map now authors a ten-foot maximum altitude and an eight-foot height for its center wall; both are serialized battlefield facts and are not universal Prime values. Grounded movement keeps the existing deterministic pathfinder. Airborne displacement uses swept three-dimensional collision samples, the actor's existing half-foot horizontal footprint, actor occupancy and the exact Euclidean distance as its MR cost.
+
+Takeoff and landing are continuous spatial movement funded by ordinary MR and cost zero ordinary Acts; they neither teleport nor add cooldowns. While fully airborne, a Gargoyle may approach horizontally, rise to clear authored geometry, hover at no cost, and descend only through legal MR-funded movement. Attack reach and line of sight use three-dimensional endpoints at declaration/final resolution. Merely overlapping a target in X/Y cannot satisfy one-foot natural reach while separated vertically.
+
+Elevation represents clearance of the actor's base above the floor. A wall intersection remains illegal while that base is below the obstacle top; overflight becomes legal only after it clears the eight-foot wall. This avoids inventing a new creature-body volume while preserving the existing source-independent horizontal footprint. Future maps may author different heights and altitude caps through battlefield data.
+
+## Task 33B elevation-aware occupancy and dive contact
+
+Wave 4 dive movement targets a legal one-foot contact point rather than the target's occupied center. The authored contact vector is 0.8 feet horizontally and 0.6 feet vertically, so its exact three-dimensional length is one foot. Spatial actor separation now compares integer squared micro-foot deltas; the previous floating conversion rounded this boundary inward and falsely rejected every endpoint as `occupied_by_actor`. Swept flight movement, MR spending, obstacle collision and strict final range/LOS are otherwise unchanged.
+
+Ground movement builds a planar occupancy view at the mover's authoritative elevation. Another actor is ignored only when vertical separation is at least the existing one-foot collision diameter. This permits a grounded actor to move beneath a legally separated airborne Gargoyle while continuing to block same-plane overlap. Full three-dimensional flight still includes every living actor and cannot pass through another actor or the eight-foot wall.
+
+Mini Gargoyle movement goals are recomputed against the current target during the existing approach-capable attack without canceling or restarting the action. Stable roster lanes provide distinct endpoints, occupied preferred points fall back to another lane, and a completed attack transitions to an MR-funded withdrawal. A target that moves away can still cause the existing no-refund final-legality failure; the presentation or tactical driver does not relax reach.
+
 ## Manual fixture check
 
 1. Run `scenes/test_arena.tscn` and press **START**.

@@ -544,6 +544,7 @@ func _on_encounter_selector_pressed() -> void:
 		Fixture.ENCOUNTER_WAVE_ONE_GOBLINS,
 		Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES,
 		Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES,
+		Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES,
 	]
 	var current_index := cycle.find(_encounter_fixture_id)
 	var next_fixture: StringName = cycle[posmod(current_index + 1, cycle.size())]
@@ -614,7 +615,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
-	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES].has(encounter_fixture_id):
 		return {"success": false, "reason": "unsupported_encounter_fixture"}
 	_encounter_fixture_id = encounter_fixture_id
 	_player.reset_for_encounter(_initial_player_position_feet)
@@ -647,6 +648,8 @@ func _prepare_encounter_fixture() -> Dictionary:
 		setup = _session.initialize_wave_two_spadoodles(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES:
 		setup = _session.initialize_wave_three_skelly_hades(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
+	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES:
+		setup = _session.initialize_wave_four_gargoyles(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	else:
 		setup = _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	if not setup.get("success", false):
@@ -663,7 +666,7 @@ func _prepare_encounter_fixture() -> Dictionary:
 				else (
 					"Wave 2 Common Spadoodles ready. The seeded Arena 1d3 count is authoritative."
 					if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES
-					else ("Wave 3 ready: authoritative 1d2 Common Skelly plus one Hades Combat Follower." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else "Verified Prime V3 Guard fixture ready.")
+					else ("Wave 3 ready: authoritative 1d2 Common Skelly plus one Hades Combat Follower." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("Wave 4 night encounter ready: authoritative 1d4 Mini Gargoyle Swarmers." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else "Verified Prime V3 Guard fixture ready."))
 				)
 		)
 	)
@@ -881,6 +884,10 @@ func _refresh_non_player_actor_positions() -> void:
 					_compact_wave_actor_label(StringName(actor_id)),
 					_format_hpc(goblin_state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id))),
 				]
+			var altitude_label := goblin_visual.get_node_or_null("AltitudeLabel") as Label
+			if altitude_label != null:
+				altitude_label.visible = goblin_visual.visible and goblin_state.elevation_microfeet > 0
+				altitude_label.text = format_altitude_indicator(goblin_state.elevation_microfeet)
 
 
 func _rebuild_encounter_visuals() -> void:
@@ -888,7 +895,7 @@ func _rebuild_encounter_visuals() -> void:
 		if is_instance_valid(visual):
 			(visual as Node).queue_free()
 	_goblin_visuals.clear()
-	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(_encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES].has(_encounter_fixture_id):
 		_opponent.visible = true
 		return
 	_opponent.visible = false
@@ -900,11 +907,12 @@ func _rebuild_encounter_visuals() -> void:
 		var is_spadoodle := String(actor_id).begins_with("wave_2_common_spadoodle_")
 		var is_skelly := String(actor_id).begins_with("wave_3_common_skelly_")
 		var is_hades_follower := String(actor_id).begins_with("wave_3_hades_combat_follower_")
-		visual.name = ("HadesFollower_%s" if is_hades_follower else ("CommonSkelly_%s" if is_skelly else ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s"))) % actor_id
+		var is_gargoyle := String(actor_id).begins_with("wave_4_mini_gargoyle_swarmer_")
+		visual.name = ("MiniGargoyle_%s" if is_gargoyle else ("HadesFollower_%s" if is_hades_follower else ("CommonSkelly_%s" if is_skelly else ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s")))) % actor_id
 		visual.position = _microfeet_to_pixels(state.position_microfeet)
 		var body := Polygon2D.new()
 		body.polygon = PackedVector2Array([Vector2(-13, -13), Vector2(13, -13), Vector2(13, 13), Vector2(-13, 13)])
-		body.color = Color("#552A72" if is_hades_follower else ("#D8D1B8" if is_skelly else ("#9B7A3C" if is_spadoodle else "#32864A")))
+		body.color = Color("#5B687D" if is_gargoyle else ("#552A72" if is_hades_follower else ("#D8D1B8" if is_skelly else ("#9B7A3C" if is_spadoodle else "#32864A"))))
 		visual.add_child(body)
 		var glyph := Label.new()
 		glyph.name = "Glyph"
@@ -915,7 +923,7 @@ func _rebuild_encounter_visuals() -> void:
 		glyph.add_theme_font_size_override("font_size", 18)
 		glyph.add_theme_color_override("font_color", Color("#191919" if is_skelly else "#FFFFFF"))
 		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		glyph.text = "H" if is_hades_follower else ("K" if is_skelly else ("S" if is_spadoodle else "G"))
+		glyph.text = "M" if is_gargoyle else ("H" if is_hades_follower else ("K" if is_skelly else ("S" if is_spadoodle else "G")))
 		visual.add_child(glyph)
 		var facing_marker := Polygon2D.new()
 		facing_marker.name = "FacingMarker"
@@ -933,6 +941,19 @@ func _rebuild_encounter_visuals() -> void:
 			_format_hpc(state.current_hpc, _session.get_actor_max_hpm(StringName(actor_id))),
 		]
 		visual.add_child(label)
+		if is_gargoyle:
+			var altitude_label := Label.new()
+			altitude_label.name = "AltitudeLabel"
+			altitude_label.position = Vector2(18, -31)
+			altitude_label.size = Vector2(72, 22)
+			altitude_label.add_theme_font_size_override("font_size", 12)
+			altitude_label.add_theme_color_override("font_color", Color("#D8F4FF"))
+			altitude_label.add_theme_color_override("font_outline_color", Color("#101820"))
+			altitude_label.add_theme_constant_override("outline_size", 3)
+			altitude_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			altitude_label.visible = state.elevation_microfeet > 0
+			altitude_label.text = format_altitude_indicator(state.elevation_microfeet)
+			visual.add_child(altitude_label)
 		visual.scale = Vector2.ONE * (_player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
 		get_parent().add_child(visual)
 		_goblin_visuals[actor_id] = visual
@@ -1035,7 +1056,7 @@ func _update_presentation() -> void:
 	if _encounter_selector != null:
 		_encounter_selector.text = (
 			"WAVE 1" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
-				else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("WAVE 3" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M")))
+				else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("WAVE 3" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("WAVE 4" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M"))))
 		)
 		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	var seed_editable := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
@@ -1108,6 +1129,8 @@ static func compact_actor_name(actor_id: StringName) -> String:
 		return "SKELLY %d" % int(raw.trim_prefix("wave_3_common_skelly_"))
 	if raw.begins_with("wave_3_hades_combat_follower_"):
 		return "HADES FOLLOWER"
+	if raw.begins_with("wave_4_mini_gargoyle_swarmer_"):
+		return "GARGOYLE %d" % int(raw.trim_prefix("wave_4_mini_gargoyle_swarmer_"))
 	var display := raw.replace("_", " ").to_upper()
 	return display if display.length() <= 20 else display.substr(0, 17) + "..."
 
@@ -1122,7 +1145,15 @@ static func _compact_wave_actor_label(actor_id: StringName) -> String:
 		return name.replace("SKELLY ", "K")
 	if name == "HADES FOLLOWER":
 		return "H"
+	if name.begins_with("GARGOYLE "):
+		return name.replace("GARGOYLE ", "M")
 	return name
+
+
+static func format_altitude_indicator(elevation_microfeet: int) -> String:
+	var feet := float(elevation_microfeet) / 1_000_000.0
+	var value := str(int(feet)) if is_equal_approx(feet, roundf(feet)) else ("%.2f" % feet).trim_suffix("0").trim_suffix(".")
+	return "▲ %s ft" % value
 
 
 static func facing_rotation_degrees(facing_millidegrees: int) -> float:

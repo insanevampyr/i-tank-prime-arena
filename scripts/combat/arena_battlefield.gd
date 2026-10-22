@@ -9,6 +9,7 @@ const DIRECT_PATH_BOUNDARY_EPSILON_MICROFEET := 2_048
 var bounds_microfeet: Rect2i
 var actor_radius_microfeet: int
 var navigation_authoritative: bool
+var maximum_altitude_microfeet: int
 var _obstacles: Array[Dictionary] = []
 var _hazards: Array[Dictionary] = []
 var _gatherable_material_regions: Array[Dictionary] = []
@@ -21,19 +22,22 @@ func _init(
 	p_actor_radius_microfeet: int = DEFAULT_ACTOR_RADIUS_MICROFEET,
 	p_navigation_authoritative: bool = false,
 	p_hazards: Array[Dictionary] = [],
-	p_gatherable_material_regions: Array[Dictionary] = []
+	p_gatherable_material_regions: Array[Dictionary] = [],
+	p_maximum_altitude_microfeet: int = 0
 ) -> void:
 	assert(p_bounds_microfeet.size.x > 0 and p_bounds_microfeet.size.y > 0, "Battlefield bounds must be positive.")
 	assert(p_actor_radius_microfeet >= 0, "Actor collision radius cannot be negative.")
 	bounds_microfeet = p_bounds_microfeet
 	actor_radius_microfeet = p_actor_radius_microfeet
 	navigation_authoritative = p_navigation_authoritative
+	maximum_altitude_microfeet = p_maximum_altitude_microfeet
 	for obstacle: Dictionary in p_obstacles:
 		assert(obstacle.has("id") and obstacle.has("rect_microfeet"), "Every battlefield obstacle needs a stable ID and rectangle.")
 		_obstacles.append({
 			"id": String(obstacle["id"]),
 			"rect_microfeet": obstacle["rect_microfeet"],
 			"hazard_tier": int(obstacle.get("hazard_tier", 0)),
+			"height_microfeet": int(obstacle.get("height_microfeet", 0)),
 		})
 	_obstacles.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left["id"]) < String(right["id"]))
 	for hazard: Dictionary in p_hazards:
@@ -68,6 +72,7 @@ static func create_task16_test_arena() -> ArenaBattlefield:
 				"id": "center_wall",
 				"rect_microfeet": Rect2i(29_000_000, 8_000_000, 2_000_000, 12_000_000),
 				"hazard_tier": 0,
+				"height_microfeet": 8_000_000,
 			},
 		],
 		DEFAULT_ACTOR_RADIUS_MICROFEET,
@@ -85,7 +90,8 @@ static func create_task16_test_arena() -> ArenaBattlefield:
 				"rect_microfeet": Rect2i(2_000_000, 2_000_000, 44_000_000, 23_000_000),
 				"material_id": "dirt",
 			},
-		]
+		],
+		10_000_000
 	)
 
 
@@ -112,6 +118,7 @@ func to_dictionary() -> Dictionary:
 			"id": obstacle["id"],
 			"rect_microfeet": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
 			"hazard_tier": obstacle["hazard_tier"],
+			"height_microfeet": obstacle["height_microfeet"],
 		})
 	var serialized_hazards: Array[Dictionary] = []
 	for hazard: Dictionary in _hazards:
@@ -133,6 +140,7 @@ func to_dictionary() -> Dictionary:
 		"bounds_microfeet": [bounds_microfeet.position.x, bounds_microfeet.position.y, bounds_microfeet.size.x, bounds_microfeet.size.y],
 		"actor_radius_microfeet": actor_radius_microfeet,
 		"navigation_authoritative": navigation_authoritative,
+		"maximum_altitude_microfeet": maximum_altitude_microfeet,
 		"obstacles": serialized_obstacles,
 		"hazards": serialized_hazards,
 		"gatherable_material_regions": serialized_material_regions,
@@ -158,6 +166,83 @@ func is_position_legal(actor_id: StringName, position_microfeet: Vector2i, occup
 		if offset.length_squared() < minimum_separation * minimum_separation:
 			return {"legal": false, "reason": "occupied_by_actor", "actor_id": String(occupied_actor_key)}
 	return {"legal": true, "reason": "legal"}
+
+
+func is_spatial_position_legal(actor_id: StringName, position_microfeet: Vector3i, occupancy: Dictionary) -> Dictionary:
+	if position_microfeet.z < 0 or position_microfeet.z > maximum_altitude_microfeet:
+		return {"legal": false, "reason": "outside_altitude_bounds"}
+	var horizontal := Vector2i(position_microfeet.x, position_microfeet.y)
+	var minimum := bounds_microfeet.position + Vector2i(actor_radius_microfeet, actor_radius_microfeet)
+	var maximum := bounds_microfeet.end - Vector2i(actor_radius_microfeet, actor_radius_microfeet)
+	if horizontal.x < minimum.x or horizontal.y < minimum.y or horizontal.x > maximum.x or horizontal.y > maximum.y:
+		return {"legal": false, "reason": "outside_battlefield_bounds"}
+	for obstacle: Dictionary in _obstacles:
+		if position_microfeet.z < int(obstacle.get("height_microfeet", 0)) \
+		and _position_overlaps_rect(horizontal, obstacle["rect_microfeet"], actor_radius_microfeet):
+			return {"legal": false, "reason": "blocked_by_obstacle", "obstacle_id": obstacle["id"]}
+	var minimum_separation := actor_radius_microfeet * 2
+	for occupied_actor_key: Variant in occupancy.keys():
+		if StringName(occupied_actor_key) == actor_id:
+			continue
+		var occupied_value: Variant = occupancy[occupied_actor_key]
+		var occupied := Vector3i(occupied_value.x, occupied_value.y, occupied_value.z if typeof(occupied_value) == TYPE_VECTOR3I else 0)
+		var delta := occupied - position_microfeet
+		# Keep the exact one-foot contact boundary deterministic. Converting
+		# microfeet to a floating Vector3 can round a legal 3-4-5 separation
+		# below the collision diameter and reject every legal dive endpoint.
+		var distance_squared := delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
+		if distance_squared < minimum_separation * minimum_separation:
+			return {"legal": false, "reason": "occupied_by_actor", "actor_id": String(occupied_actor_key)}
+	return {"legal": true, "reason": "legal"}
+
+
+func resolve_spatial_motion(actor_id: StringName, start: Vector3i, desired: Vector3i, occupancy: Dictionary) -> Dictionary:
+	if not is_spatial_position_legal(actor_id, start, occupancy).get("legal", false):
+		return {"success": false, "reason": "illegal_spatial_start", "position_microfeet": start, "movement_cost_microfeet": 0, "blocked": true}
+	var delta := desired - start
+	var distance := roundi(Vector3(delta).length())
+	if distance == 0:
+		return {"success": true, "reason": "legal", "position_microfeet": start, "movement_cost_microfeet": 0, "blocked": false}
+	var sample_step := 50_000
+	var steps := maxi(1, ceili(float(distance) / float(sample_step)))
+	var resolved := start
+	for index in range(1, steps + 1):
+		var ratio := float(index) / float(steps)
+		var candidate := Vector3i(
+			roundi(lerpf(float(start.x), float(desired.x), ratio)),
+			roundi(lerpf(float(start.y), float(desired.y), ratio)),
+			roundi(lerpf(float(start.z), float(desired.z), ratio))
+		)
+		if not is_spatial_position_legal(actor_id, candidate, occupancy).get("legal", false):
+			break
+		resolved = candidate
+	var movement_cost := roundi(Vector3(resolved - start).length())
+	return {
+		"success": true,
+		"reason": "legal" if resolved == desired else "collision_limited",
+		"position_microfeet": resolved,
+		"movement_cost_microfeet": movement_cost,
+		"blocked": resolved != desired,
+	}
+
+
+func has_spatial_line_of_sight(start: Vector3i, finish: Vector3i) -> bool:
+	var delta := finish - start
+	var distance := roundi(Vector3(delta).length())
+	if distance == 0:
+		return true
+	var steps := maxi(1, ceili(float(distance) / 50_000.0))
+	for index in range(1, steps):
+		var ratio := float(index) / float(steps)
+		var point := Vector3i(
+			roundi(lerpf(float(start.x), float(finish.x), ratio)),
+			roundi(lerpf(float(start.y), float(finish.y), ratio)),
+			roundi(lerpf(float(start.z), float(finish.z), ratio))
+		)
+		for obstacle: Dictionary in _obstacles:
+			if point.z < int(obstacle.get("height_microfeet", 0)) and (obstacle["rect_microfeet"] as Rect2i).has_point(Vector2i(point.x, point.y)):
+				return false
+	return true
 
 
 func resolve_motion(

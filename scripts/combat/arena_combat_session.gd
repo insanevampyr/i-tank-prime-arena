@@ -10,6 +10,7 @@ const CommonGoblinFixture = preload("res://scripts/creatures/common_goblin_fixtu
 const CommonSpadoodleFixture = preload("res://scripts/creatures/common_spadoodle_fixture.gd")
 const CommonSkellyFixture = preload("res://scripts/creatures/common_skelly_fixture.gd")
 const HadesCombatFollowerFixture = preload("res://scripts/creatures/hades_combat_follower_fixture.gd")
+const MiniGargoyleSwarmerFixture = preload("res://scripts/creatures/mini_gargoyle_swarmer_fixture.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -21,6 +22,18 @@ const ENCOUNTER_DOUBLE_DEFEAT := "double_defeat"
 const OPPONENT_BEHAVIOR_LABEL := "task15_deterministic_test_opponent"
 const OPPONENT_MOVEMENT_TICK_US := 100_000
 const OPPONENT_REPATH_DISTANCE_MICROFEET := ArenaBattlefield.NAVIGATION_STEP_MICROFEET
+const GARGOYLE_STAGING_ALTITUDE_MICROFEET := 9_000_000
+const GARGOYLE_STAGING_RADIUS_MICROFEET := 4_000_000
+const GARGOYLE_INJURED_STAGING_RADIUS_MICROFEET := 5_000_000
+const GARGOYLE_ATTACK_HORIZONTAL_MICROFEET := 800_000
+const GARGOYLE_ATTACK_ALTITUDE_MICROFEET := 600_000
+const GARGOYLE_GOAL_TOLERANCE_MICROFEET := 100_000
+const GARGOYLE_STATE_TAKING_OFF := "taking_off"
+const GARGOYLE_STATE_STAGING := "staging"
+const GARGOYLE_STATE_DIVING := "diving"
+const GARGOYLE_STATE_STRIKING := "striking"
+const GARGOYLE_STATE_WITHDRAWING := "withdrawing"
+const GARGOYLE_STATE_BLOCKED := "blocked_recovery"
 
 var simulation: CombatSimulation
 
@@ -65,6 +78,8 @@ var _spadoodle_actor_ids := PackedStringArray()
 var _is_wave_three_skelly_hades_encounter: bool = false
 var _skelly_actor_ids := PackedStringArray()
 var _hades_follower_actor_ids := PackedStringArray()
+var _is_wave_four_gargoyle_encounter: bool = false
+var _gargoyle_actor_ids := PackedStringArray()
 var _goblin_paths: Dictionary = {}
 var _goblin_path_targets: Dictionary = {}
 var _goblin_path_target_actor_ids: Dictionary = {}
@@ -80,6 +95,10 @@ var _goblin_movement_spent: Dictionary = {}
 var _goblin_last_movement_us: int = 0
 var _hades_last_tactical_signature: Dictionary = {}
 var _hades_support_target_ids: Dictionary = {}
+var _gargoyle_tactical_states: Dictionary = {}
+var _gargoyle_lane_offsets: Dictionary = {}
+var _gargoyle_failed_approach_counts: Dictionary = {}
+var _gargoyle_last_tactical_signatures: Dictionary = {}
 
 
 func _init(
@@ -158,6 +177,7 @@ func initialize_wave_one_goblins(
 	_is_wave_one_goblin_encounter = true
 	_is_wave_two_spadoodle_encounter = false
 	_is_wave_three_skelly_hades_encounter = false
+	_is_wave_four_gargoyle_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_goblin_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -289,6 +309,7 @@ func initialize_wave_two_spadoodles(
 	_is_wave_one_goblin_encounter = false
 	_is_wave_two_spadoodle_encounter = true
 	_is_wave_three_skelly_hades_encounter = false
+	_is_wave_four_gargoyle_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_spadoodle_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -400,6 +421,7 @@ func initialize_wave_three_skelly_hades(
 	_is_wave_one_goblin_encounter = false
 	_is_wave_two_spadoodle_encounter = false
 	_is_wave_three_skelly_hades_encounter = true
+	_is_wave_four_gargoyle_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_enemy_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -469,6 +491,7 @@ func initialize_wave_three_skelly_hades(
 		_skelly_actor_ids.append(String(skelly_id))
 
 	_hades_follower_actor_ids = PackedStringArray()
+	_gargoyle_actor_ids = PackedStringArray()
 	var hades_id := _hades_follower_actor_id()
 	var hades_actor := HadesCombatFollowerFixture.make_actor(hades_id, "Uncommon Hades Combat Follower")
 	var hades_attack := HadesCombatFollowerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
@@ -534,6 +557,102 @@ func initialize_wave_three_skelly_hades(
 		"hades_follower_actor_ids": Array(_hades_follower_actor_ids),
 		"resolved_skelly_count": skelly_count,
 		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES),
+	}
+
+
+func initialize_wave_four_gargoyles(
+	player_position_microfeet: Vector2i,
+	first_gargoyle_position_microfeet: Vector2i,
+	start_active: bool = true
+) -> Dictionary:
+	if _initialized:
+		return _failure("encounter_already_initialized")
+	_is_wave_one_goblin_encounter = false
+	_is_wave_two_spadoodle_encounter = false
+	_is_wave_three_skelly_hades_encounter = false
+	_is_wave_four_gargoyle_encounter = true
+	_initial_player_position_microfeet = player_position_microfeet
+	_initial_opponent_position_microfeet = first_gargoyle_position_microfeet
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var wave_initialization := _arena_wave_state_machine.initialize_at_wave(&"wave_4", _roll_wave_quantity)
+	if not wave_initialization.get("success", false):
+		return _failure(String(wave_initialization.get("reason", "wave_initialization_failed")))
+	var gargoyle_count := _arena_wave_state_machine.get_resolved_enemy_count()
+	var gargoyle_positions := _make_wave_four_gargoyle_positions(first_gargoyle_position_microfeet, gargoyle_count)
+	if gargoyle_positions.size() != gargoyle_count:
+		return _failure("gargoyle_spawn_positions_unavailable")
+	var occupancy := {String(Fixture.PLAYER_ID): player_position_microfeet}
+	if not _battlefield.is_position_legal(Fixture.PLAYER_ID, player_position_microfeet, occupancy).get("legal", false):
+		return _failure("player_spawn_position_illegal")
+	for index in range(gargoyle_positions.size()):
+		var actor_id := _gargoyle_actor_id(index)
+		occupancy[String(actor_id)] = gargoyle_positions[index]
+		if not _battlefield.is_position_legal(actor_id, gargoyle_positions[index], occupancy).get("legal", false):
+			return _failure("gargoyle_spawn_position_illegal")
+
+	var player_attack := Fixture.make_attack_definition()
+	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
+	var player_validation := Fixture.validate_combatant_fixture(player_actor, Fixture.make_defense_profile(Fixture.PLAYER_ID), Fixture.make_damage_protection_profile(Fixture.PLAYER_ID), player_attack)
+	if not player_validation.get("success", false):
+		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
+	var player_registration := _register_wave_combatant(player_actor, Fixture.make_defense_profile(Fixture.PLAYER_ID), Fixture.make_damage_protection_profile(Fixture.PLAYER_ID), player_attack)
+	if not player_registration.get("success", false):
+		return player_registration
+	_attack_definition = player_attack
+	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
+
+	_gargoyle_actor_ids = PackedStringArray()
+	for index in range(gargoyle_count):
+		var gargoyle_id := _gargoyle_actor_id(index)
+		var gargoyle_actor := MiniGargoyleSwarmerFixture.make_actor(gargoyle_id, "Uncommon Mini Gargoyle Swarmer %d" % (index + 1))
+		var gargoyle_attack := MiniGargoyleSwarmerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+		var gargoyle_validation := MiniGargoyleSwarmerFixture.validate_actor(gargoyle_actor, gargoyle_attack)
+		if not gargoyle_validation.get("success", false):
+			return _failure(String(gargoyle_validation.get("reason", "gargoyle_fixture_invalid")))
+		var registration := _register_wave_combatant(gargoyle_actor, MiniGargoyleSwarmerFixture.make_defense_profile(gargoyle_id), MiniGargoyleSwarmerFixture.make_damage_protection_profile(gargoyle_id), gargoyle_attack)
+		if not registration.get("success", false):
+			return registration
+		_attack_definitions_by_actor[String(gargoyle_id)] = gargoyle_attack
+		_gargoyle_actor_ids.append(String(gargoyle_id))
+
+	var player_position_result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, player_position_microfeet, 0)
+	if not player_position_result.get("success", false):
+		return player_position_result
+	for index in range(_gargoyle_actor_ids.size()):
+		var position_result := simulation.apply_authoritative_spatial_position(StringName(_gargoyle_actor_ids[index]), gargoyle_positions[index], 0, 180_000 + index * 90_000)
+		if not position_result.get("success", false):
+			return position_result
+	var opening_result := simulation.begin_combat()
+	if not opening_result.get("success", false):
+		return opening_result
+	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+	simulation.set_special_touch_resolver(_resolve_special_touch)
+	simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
+	_publish_wave_transition(wave_initialization)
+	set_wave_creature_integration_available(MiniGargoyleSwarmerFixture.CREATURE_ID, true)
+	var activation := activate_current_wave(_gargoyle_actor_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = StringName(_gargoyle_actor_ids[0])
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialized = true
+	_encounter_active = start_active
+	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
+	_opponent_behavior_status = "wave_four_night_idle" if _opponent_behavior_enabled else "disabled"
+	_initialize_wave_enemy_navigation_state()
+	_resolved_event_history_generation += 1
+	_last_error = ""
+	if _opponent_behavior_enabled and _encounter_active:
+		_run_opponent_behavior()
+	return {
+		"success": true,
+		"opening_order": opening_result.get("opening_order", []),
+		"gargoyle_actor_ids": Array(_gargoyle_actor_ids),
+		"resolved_gargoyle_count": gargoyle_count,
+		"environment": {"time_of_day": "night", "maximum_altitude_microfeet": _battlefield.maximum_altitude_microfeet, "wall_height_microfeet": 8_000_000},
+		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES),
 	}
 
 
@@ -617,6 +736,10 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_goblin_movement_round_indices.clear()
 	_goblin_movement_spent.clear()
 	_goblin_last_movement_us = 0
+	_gargoyle_tactical_states.clear()
+	_gargoyle_lane_offsets.clear()
+	_gargoyle_failed_approach_counts.clear()
+	_gargoyle_last_tactical_signatures.clear()
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
 	if _is_wave_one_goblin_encounter:
@@ -625,6 +748,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 		return initialize_wave_two_spadoodles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	if _is_wave_three_skelly_hades_encounter:
 		return initialize_wave_three_skelly_hades(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	if _is_wave_four_gargoyle_encounter:
+		return initialize_wave_four_gargoyles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
 
@@ -775,7 +900,7 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 		Fixture.PLAYER_ID,
 		player_state.position_microfeet,
 		position_microfeet,
-		_actor_occupancy()
+		_actor_planar_occupancy_at_elevation(Fixture.PLAYER_ID, player_state.elevation_microfeet)
 	)
 	if not resolved.get("success", false):
 		return _movement_rejected(String(resolved.get("reason", "movement_geometry_rejected")), player_state.position_microfeet)
@@ -804,7 +929,12 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 			roundi(float(delta.x) * float(remaining) / float(movement_cost)),
 			roundi(float(delta.y) * float(remaining) / float(movement_cost))
 		)
-		resolved = _battlefield.resolve_motion(Fixture.PLAYER_ID, start, destination, _actor_occupancy())
+		resolved = _battlefield.resolve_motion(
+			Fixture.PLAYER_ID,
+			start,
+			destination,
+			_actor_planar_occupancy_at_elevation(Fixture.PLAYER_ID, player_state.elevation_microfeet)
+		)
 		destination = resolved["position_microfeet"]
 		movement_cost = int(resolved["movement_cost_microfeet"])
 	player_state.movement_round_index = simulation.clock.get_round_index()
@@ -926,14 +1056,15 @@ func _get_actor_attack_geometry(attacker_id: StringName, target_id: StringName) 
 	if attacker_state == null or target_state == null:
 		return {"success": false, "reason": "attack_geometry_unavailable"}
 	var offset := target_state.position_microfeet - attacker_state.position_microfeet
+	var elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
 	var maximum_range := int(attack_definition.maximum_range_microfeet)
-	var in_range := offset.length_squared() <= maximum_range * maximum_range
-	var line_of_sight := not attack_definition.requires_line_of_sight \
-		or _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
+	var distance_squared := offset.length_squared() + elevation_offset * elevation_offset
+	var in_range := distance_squared <= maximum_range * maximum_range
+	var line_of_sight: bool = not attack_definition.requires_line_of_sight or _resolve_attack_final_line_of_sight(attacker_id, target_id) == true
 	return {
 		"success": in_range and line_of_sight,
 		"reason": "legal" if in_range and line_of_sight else ("target_out_of_range" if not in_range else "line_of_sight_blocked"),
-		"distance_microfeet": roundi(Vector2(offset).length()),
+		"distance_microfeet": roundi(Vector3(offset.x, offset.y, elevation_offset).length()),
 		"maximum_range_microfeet": maximum_range,
 		"in_range": in_range,
 		"line_of_sight": line_of_sight,
@@ -964,7 +1095,10 @@ func advance_by(delta_us: int) -> void:
 		simulation.advance_to(step_timestamp_us)
 		if step_timestamp_us == movement_tick_us:
 			if _is_playable_wave_encounter():
-				_advance_goblin_movement(step_timestamp_us - _goblin_last_movement_us)
+				if _is_wave_four_gargoyle_encounter:
+					_advance_gargoyle_flight(step_timestamp_us - _goblin_last_movement_us)
+				else:
+					_advance_goblin_movement(step_timestamp_us - _goblin_last_movement_us)
 				_goblin_last_movement_us = step_timestamp_us
 			else:
 				_advance_opponent_movement(step_timestamp_us - _opponent_last_movement_us)
@@ -1035,6 +1169,8 @@ func get_encounter_display_name() -> String:
 		return "WAVE 2: %d COMMON SPADOODLES" % _spadoodle_actor_ids.size()
 	if _is_wave_three_skelly_hades_encounter:
 		return "WAVE 3: %d COMMON SKELLY + 1 HADES FOLLOWER" % _skelly_actor_ids.size()
+	if _is_wave_four_gargoyle_encounter:
+		return "WAVE 4 NIGHT: %d MINI GARGOYLE SWARMERS" % _gargoyle_actor_ids.size()
 	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
 
 
@@ -1199,6 +1335,9 @@ func get_state_snapshot() -> Dictionary:
 	snapshot["player_movement_round_index"] = _player_movement_round_index
 	snapshot["player_movement_spent_microfeet"] = _player_movement_spent_microfeet
 	snapshot["arena_wave_state"] = get_arena_wave_state()
+	snapshot["gargoyle_tactical_states"] = _sorted_dictionary_copy(_gargoyle_tactical_states)
+	snapshot["gargoyle_lane_offsets"] = _sorted_dictionary_copy(_gargoyle_lane_offsets)
+	snapshot["gargoyle_failed_approach_counts"] = _sorted_dictionary_copy(_gargoyle_failed_approach_counts)
 	return snapshot
 
 
@@ -1229,16 +1368,24 @@ func _request_actor_attack(attacker_id: StringName, target_id: StringName, input
 	if attack_definition == null:
 		return _failure("attack_definition_unavailable")
 	var request_id := _next_request_id("%s_%s_attack" % [String(attacker_id), input_source])
+	var nac_context := {}
+	if _is_wave_four_gargoyle_encounter and _gargoyle_actor_ids.has(String(attacker_id)):
+		var actor_state := simulation.get_actor_state(attacker_id)
+		if actor_state != null and int(actor_state.ability_daily_remaining.get(String(MiniGargoyleSwarmerFixture.FURY_ABILITY_ID), 0)) > 0:
+			nac_context = {
+				"ability_id": String(MiniGargoyleSwarmerFixture.FURY_ABILITY_ID),
+				"damage_multiplier": {"numerator": 2, "denominator": 1, "kind": "fury", "source_ref": "Uncommon Mini Gargoyle Swarmers.doc Fury; Task 33A owner-approved one-Act contract"},
+			}
 	var result := simulation.start_physical_attack(
 		attacker_id,
 		target_id,
 		attack_definition,
 		request_id,
 		target_location,
-		_battlefield.has_line_of_sight(
-			simulation.get_actor_state(attacker_id).position_microfeet,
-			simulation.get_actor_state(target_id).position_microfeet
-		)
+		_resolve_attack_final_line_of_sight(attacker_id, target_id),
+		PackedStringArray(),
+		false,
+		nac_context
 	)
 	if not result.get("success", false):
 		return result
@@ -1262,6 +1409,11 @@ func _resolve_attack_final_line_of_sight(attacker_id: StringName, target_id: Str
 	var target_state := simulation.get_actor_state(target_id)
 	if attacker_state == null or target_state == null:
 		return null
+	if attacker_state.elevation_microfeet != 0 or target_state.elevation_microfeet != 0:
+		return _battlefield.has_spatial_line_of_sight(
+			Vector3i(attacker_state.position_microfeet.x, attacker_state.position_microfeet.y, attacker_state.elevation_microfeet),
+			Vector3i(target_state.position_microfeet.x, target_state.position_microfeet.y, target_state.elevation_microfeet)
+		)
 	return _battlefield.has_line_of_sight(attacker_state.position_microfeet, target_state.position_microfeet)
 
 
@@ -1406,6 +1558,9 @@ func _run_goblin_wave_behavior() -> void:
 			statuses.append("%s:%s" % [actor_id, "standing" if stand_result.get("success", false) else "blocked_stand"])
 			continue
 		if not goblin_state.current_action_instance_id.is_empty() or _is_actor_attack_in_flight(goblin_id):
+			if _is_wave_four_gargoyle_encounter and _gargoyle_actor_ids.has(actor_id):
+				statuses.append("%s:%s" % [actor_id, _update_active_gargoyle_tactical_state(goblin_id, Fixture.PLAYER_ID)])
+				continue
 			if not _is_actor_attack_in_flight(goblin_id) and _actor_current_action_allows_movement(goblin_id):
 				var rage_path := _ensure_current_goblin_path(goblin_id)
 				statuses.append("%s:%s" % [actor_id, "acting_while_approaching" if rage_path.get("success", false) else "action_in_progress"])
@@ -1420,23 +1575,197 @@ func _run_goblin_wave_behavior() -> void:
 			if tactical_result.get("suppress_attack", false):
 				statuses.append("%s:%s" % [actor_id, String(tactical_result.get("status", "support_approach"))])
 				continue
+		if _is_wave_four_gargoyle_encounter and _gargoyle_actor_ids.has(actor_id):
+			var tactical_result := _run_gargoyle_tactical_selection(goblin_id, Fixture.PLAYER_ID)
+			statuses.append("%s:%s" % [actor_id, String(tactical_result.get("status", "tactical_idle"))])
+			continue
 		var legality := _get_actor_attack_legality(goblin_id, Fixture.PLAYER_ID, true)
 		if not legality.get("success", false):
 			statuses.append("%s:blocked_%s" % [actor_id, String(legality.get("reason", "attack_illegal"))])
 			continue
 		if not bool(legality.get("currently_in_range", false)) or not bool(legality.get("currently_unobstructed", false)):
+			if _is_wave_four_gargoyle_encounter and goblin_state.elevation_microfeet > 0:
+				statuses.append("%s:approaching_in_flight" % actor_id)
+				continue
 			var path_result := _ensure_current_goblin_path(goblin_id)
 			statuses.append("%s:%s" % [actor_id, "approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))])
 			continue
 		var attack_result := _request_actor_attack(
 			goblin_id,
 			Fixture.PLAYER_ID,
-			("wave_3_scripted" if _is_wave_three_skelly_hades_encounter else ("wave_2_scripted" if _is_wave_two_spadoodle_encounter else "wave_1_scripted"))
+			("wave_4_scripted" if _is_wave_four_gargoyle_encounter else ("wave_3_scripted" if _is_wave_three_skelly_hades_encounter else ("wave_2_scripted" if _is_wave_two_spadoodle_encounter else "wave_1_scripted")))
 		)
 		statuses.append("%s:%s" % [actor_id, "attacking" if attack_result.get("success", false) else "blocked_%s" % String(attack_result.get("reason", "attack_rejected"))])
 	statuses.sort()
-	var wave_prefix := "wave_three " if _is_wave_three_skelly_hades_encounter else ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave ")
+	var wave_prefix := "wave_four " if _is_wave_four_gargoyle_encounter else ("wave_three " if _is_wave_three_skelly_hades_encounter else ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave "))
 	_opponent_behavior_status = wave_prefix + ", ".join(PackedStringArray(statuses))
+
+
+func _run_gargoyle_tactical_selection(actor_id: StringName, target_id: StringName) -> Dictionary:
+	var actor_state := simulation.get_actor_state(actor_id)
+	var target_state := simulation.get_actor_state(target_id)
+	if actor_state == null or target_state == null:
+		return {"action_started": false, "status": "blocked_missing_actor_state"}
+	var key := String(actor_id)
+	var tactical_state := String(_gargoyle_tactical_states.get(key, GARGOYLE_STATE_STAGING))
+	if tactical_state == GARGOYLE_STATE_DIVING or tactical_state == GARGOYLE_STATE_STRIKING:
+		_set_gargoyle_tactical_state(
+			actor_id,
+			target_id,
+			GARGOYLE_STATE_WITHDRAWING,
+			"injured_cautious_withdrawal" if _is_gargoyle_injured(actor_id) else "attack_act_completed"
+		)
+		tactical_state = GARGOYLE_STATE_WITHDRAWING
+	if actor_state.elevation_microfeet == 0:
+		if tactical_state != GARGOYLE_STATE_TAKING_OFF:
+			_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_TAKING_OFF, "grounded_takeoff")
+		return {
+			"action_started": false,
+			"status": "taking_off",
+		}
+	if tactical_state == GARGOYLE_STATE_TAKING_OFF:
+		if actor_state.elevation_microfeet < mini(GARGOYLE_STAGING_ALTITUDE_MICROFEET, _battlefield.maximum_altitude_microfeet):
+			return {"action_started": false, "status": "taking_off"}
+		_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_STAGING, "takeoff_completed")
+		tactical_state = GARGOYLE_STATE_STAGING
+	if tactical_state == GARGOYLE_STATE_BLOCKED:
+		_rotate_gargoyle_lane(actor_id)
+		_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_STAGING, "alternate_lane_selected")
+		tactical_state = GARGOYLE_STATE_STAGING
+	if tactical_state == GARGOYLE_STATE_WITHDRAWING:
+		var withdrawal_goal := _gargoyle_staging_goal(actor_id, target_id)
+		if _gargoyle_goal_reached(actor_state, withdrawal_goal):
+			_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_STAGING, "staging_altitude_recovered")
+			tactical_state = GARGOYLE_STATE_STAGING
+		else:
+			return {"action_started": false, "status": GARGOYLE_STATE_WITHDRAWING}
+	var staging_goal := _gargoyle_staging_goal(actor_id, target_id)
+	if not _gargoyle_goal_reached(actor_state, staging_goal):
+		return {"action_started": false, "status": GARGOYLE_STATE_STAGING}
+	if _another_gargoyle_is_diving(actor_id):
+		return {"action_started": false, "status": "staging_for_coordinated_opening"}
+	var legality := _get_actor_attack_legality(actor_id, target_id, true)
+	if not legality.get("success", false):
+		return {"action_started": false, "status": "attack_blocked_%s" % String(legality.get("reason", "illegal"))}
+	var attack_result := _request_actor_attack(actor_id, target_id, "wave_4_dive")
+	if not attack_result.get("success", false):
+		return {"action_started": false, "status": "attack_blocked_%s" % String(attack_result.get("reason", "rejected"))}
+	_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_DIVING, "approach_capable_attack_declared")
+	return {"action_started": true, "status": "diving_attack_in_progress"}
+
+
+func _update_active_gargoyle_tactical_state(actor_id: StringName, target_id: StringName) -> String:
+	if _is_actor_attack_in_flight(actor_id):
+		if _get_actor_attack_geometry(actor_id, target_id).get("success", false):
+			_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_STRIKING, "effect_position_reached")
+			return "striking"
+		_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_DIVING, "approaching_effect_position")
+		return "diving_attack_in_progress"
+	return "action_in_progress"
+
+
+func _set_gargoyle_tactical_state(actor_id: StringName, target_id: StringName, state: String, reason: String) -> void:
+	var key := String(actor_id)
+	var previous := String(_gargoyle_tactical_states.get(key, ""))
+	_gargoyle_tactical_states[key] = state
+	if previous == state:
+		return
+	var signature := "%s|%s" % [state, reason]
+	_gargoyle_last_tactical_signatures[key] = signature
+	simulation.record_tactical_decision(actor_id, target_id, {
+		"profile": "mini_gargoyle_swarmer",
+		"previous_state": previous,
+		"selected_action": state,
+		"reason": reason,
+		"lane_index": _gargoyle_lane_index(actor_id),
+	})
+
+
+func _rotate_gargoyle_lane(actor_id: StringName) -> void:
+	var key := String(actor_id)
+	_gargoyle_lane_offsets[key] = (int(_gargoyle_lane_offsets.get(key, 0)) + 1) % 4
+
+
+func _gargoyle_lane_index(actor_id: StringName) -> int:
+	var roster_index := _gargoyle_actor_ids.find(String(actor_id))
+	return posmod(maxi(0, roster_index) + int(_gargoyle_lane_offsets.get(String(actor_id), 0)), 4)
+
+
+func _gargoyle_lane_direction(actor_id: StringName) -> Vector2i:
+	return [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP][_gargoyle_lane_index(actor_id)]
+
+
+func _gargoyle_staging_goal(actor_id: StringName, target_id: StringName) -> Vector3i:
+	var target_state := simulation.get_actor_state(target_id)
+	if target_state == null:
+		return Vector3i.ZERO
+	var direction := _gargoyle_lane_direction(actor_id)
+	var staging_radius := GARGOYLE_INJURED_STAGING_RADIUS_MICROFEET if _is_gargoyle_injured(actor_id) else GARGOYLE_STAGING_RADIUS_MICROFEET
+	return Vector3i(
+		target_state.position_microfeet.x + direction.x * staging_radius,
+		target_state.position_microfeet.y + direction.y * staging_radius,
+		mini(GARGOYLE_STAGING_ALTITUDE_MICROFEET, _battlefield.maximum_altitude_microfeet)
+	)
+
+
+func _is_gargoyle_injured(actor_id: StringName) -> bool:
+	var actor_state := simulation.get_actor_state(actor_id)
+	var definition := simulation.get_actor_definition(actor_id)
+	if actor_state == null or definition == null or actor_state.current_hpc == null:
+		return false
+	var hpm: Variant = definition.get_combat_stat("hpm")
+	return hpm != null and int(actor_state.current_hpc) * 2 <= int(hpm)
+
+
+func _gargoyle_attack_goal(actor_id: StringName, target_id: StringName) -> Dictionary:
+	var target_state := simulation.get_actor_state(target_id)
+	if target_state == null:
+		return {"success": false, "reason": "missing_target_state"}
+	var occupancy := _actor_spatial_occupancy()
+	for lane_offset in range(4):
+		var lane := posmod(_gargoyle_lane_index(actor_id) + lane_offset, 4)
+		var direction: Vector2i = [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP][lane]
+		var candidate := Vector3i(
+			target_state.position_microfeet.x + direction.x * GARGOYLE_ATTACK_HORIZONTAL_MICROFEET,
+			target_state.position_microfeet.y + direction.y * GARGOYLE_ATTACK_HORIZONTAL_MICROFEET,
+			target_state.elevation_microfeet + GARGOYLE_ATTACK_ALTITUDE_MICROFEET
+		)
+		if not _battlefield.is_spatial_position_legal(actor_id, candidate, occupancy).get("legal", false):
+			continue
+		var target_position := Vector3i(target_state.position_microfeet.x, target_state.position_microfeet.y, target_state.elevation_microfeet)
+		if not _battlefield.has_spatial_line_of_sight(candidate, target_position):
+			continue
+		return {"success": true, "position_microfeet": candidate, "lane_index": lane}
+	return {"success": false, "reason": "no_legal_attack_space"}
+
+
+func _gargoyle_goal_reached(actor_state: CombatActorState, goal: Vector3i) -> bool:
+	var current := Vector3i(actor_state.position_microfeet.x, actor_state.position_microfeet.y, actor_state.elevation_microfeet)
+	return Vector3(current - goal).length_squared() <= float(GARGOYLE_GOAL_TOLERANCE_MICROFEET * GARGOYLE_GOAL_TOLERANCE_MICROFEET)
+
+
+func _another_gargoyle_is_diving(actor_id: StringName) -> bool:
+	for other_id: String in _gargoyle_actor_ids:
+		if other_id == String(actor_id):
+			continue
+		var other_state := simulation.get_actor_state(StringName(other_id))
+		if other_state == null or (other_state.current_hpc != null and int(other_state.current_hpc) <= 0):
+			continue
+		var tactical_state := String(_gargoyle_tactical_states.get(other_id, ""))
+		if tactical_state == GARGOYLE_STATE_DIVING or tactical_state == GARGOYLE_STATE_STRIKING:
+			return true
+	return false
+
+
+func _gargoyle_landing_goal(gargoyle_position: Vector2i, target_position: Vector2i) -> Vector2i:
+	var away := Vector2(gargoyle_position - target_position)
+	if away.is_zero_approx():
+		away = Vector2.RIGHT
+	away = away.normalized()
+	return target_position + Vector2i(
+		roundi(away.x * float(MICROFEET_PER_FOOT)),
+		roundi(away.y * float(MICROFEET_PER_FOOT))
+	)
 
 
 func _get_wave_enemy_navigation_goal(actor_id: StringName) -> Dictionary:
@@ -1707,6 +2036,112 @@ func _advance_goblin_movement(delta_us: int) -> void:
 	_interrupt_invalid_special_contacts()
 
 
+func _advance_gargoyle_flight(delta_us: int) -> void:
+	if delta_us <= 0 or not _encounter_active or not _opponent_behavior_enabled:
+		return
+	var target_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if target_state == null or target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		return
+	for actor_id: String in _gargoyle_actor_ids:
+		var gargoyle_id := StringName(actor_id)
+		var state := simulation.get_actor_state(gargoyle_id)
+		if state == null or state.current_hpc == null or int(state.current_hpc) <= 0:
+			continue
+		if state.conditions.has("prone") or state.critical_stagger_until_us > simulation.clock.get_elapsed_us():
+			continue
+		var tactical_state := String(_gargoyle_tactical_states.get(actor_id, GARGOYLE_STATE_STAGING))
+		var attack_in_flight := _is_actor_attack_in_flight(gargoyle_id)
+		if attack_in_flight and _get_actor_attack_geometry(gargoyle_id, Fixture.PLAYER_ID).get("success", false):
+			_set_gargoyle_tactical_state(gargoyle_id, Fixture.PLAYER_ID, GARGOYLE_STATE_STRIKING, "effect_position_reached")
+			continue
+		if state.elevation_microfeet == 0 and tactical_state != GARGOYLE_STATE_TAKING_OFF:
+			continue
+		_refresh_goblin_movement_ledger(gargoyle_id)
+		var movement_rate := int(_actor_definition_snapshot(gargoyle_id).get("combat_stats", {}).get("mr", 0))
+		var allowance := movement_rate * MICROFEET_PER_FOOT
+		var spent := int(_goblin_movement_spent.get(actor_id, 0))
+		var remaining := maxi(0, allowance - spent)
+		@warning_ignore("integer_division")
+		var tick_budget := int((movement_rate * MICROFEET_PER_FOOT * delta_us) / CombatClock.ROUND_DURATION_US)
+		var budget := mini(tick_budget, remaining)
+		if budget <= 0:
+			continue
+		var start := Vector3i(state.position_microfeet.x, state.position_microfeet.y, state.elevation_microfeet)
+		var goal := Vector3i(state.position_microfeet.x, state.position_microfeet.y, state.elevation_microfeet)
+		if tactical_state == GARGOYLE_STATE_TAKING_OFF:
+			goal.z = mini(GARGOYLE_STAGING_ALTITUDE_MICROFEET, _battlefield.maximum_altitude_microfeet)
+		elif attack_in_flight:
+			var attack_goal := _gargoyle_attack_goal(gargoyle_id, Fixture.PLAYER_ID)
+			if not attack_goal.get("success", false):
+				_record_gargoyle_approach_failure(gargoyle_id, Fixture.PLAYER_ID, String(attack_goal.get("reason", "no_legal_attack_space")))
+				continue
+			goal = attack_goal["position_microfeet"]
+		else:
+			goal = _gargoyle_staging_goal(gargoyle_id, Fixture.PLAYER_ID)
+		var delta := goal - start
+		var distance := roundi(Vector3(delta).length())
+		if distance <= 0:
+			continue
+		var desired := goal
+		if distance > budget:
+			desired = start + Vector3i(
+				roundi(float(delta.x) * float(budget) / float(distance)),
+				roundi(float(delta.y) * float(budget) / float(distance)),
+				roundi(float(delta.z) * float(budget) / float(distance))
+			)
+		var resolved := _battlefield.resolve_spatial_motion(gargoyle_id, start, desired, _actor_spatial_occupancy())
+		if not resolved.get("success", false) or int(resolved.get("movement_cost_microfeet", 0)) <= 0:
+			if desired != start:
+				var static_occupancy := {String(gargoyle_id): start}
+				var static_resolution := _battlefield.resolve_spatial_motion(gargoyle_id, start, desired, static_occupancy)
+				var dynamic_congestion: bool = int(static_resolution.get("movement_cost_microfeet", 0)) > 0
+				_record_gargoyle_approach_failure(
+					gargoyle_id,
+					Fixture.PLAYER_ID,
+					"actor_congestion" if dynamic_congestion else String(resolved.get("reason", "collision_limited")),
+					not dynamic_congestion
+				)
+			continue
+		var destination: Vector3i = resolved["position_microfeet"]
+		state.movement_round_index = simulation.clock.get_round_index()
+		state.remaining_mr_microfeet = remaining
+		var facing := facing_millidegrees_for_displacement(Vector2i(destination.x - start.x, destination.y - start.y), state.facing_millidegrees)
+		var movement_result := simulation.apply_authoritative_spatial_position(
+			gargoyle_id, Vector2i(destination.x, destination.y), destination.z, facing, int(resolved["movement_cost_microfeet"])
+		)
+		if movement_result.get("success", false):
+			_goblin_movement_spent[actor_id] = spent + int(resolved["movement_cost_microfeet"])
+			if bool(resolved.get("blocked", false)) and destination != desired:
+				var static_occupancy := {String(gargoyle_id): start}
+				var static_resolution := _battlefield.resolve_spatial_motion(gargoyle_id, start, desired, static_occupancy)
+				var dynamic_congestion: bool = static_resolution.get("position_microfeet", start) == desired
+				_record_gargoyle_approach_failure(
+					gargoyle_id,
+					Fixture.PLAYER_ID,
+					"actor_congestion" if dynamic_congestion else String(resolved.get("reason", "collision_limited")),
+					not dynamic_congestion
+				)
+
+
+func _record_gargoyle_approach_failure(actor_id: StringName, target_id: StringName, reason: String, rotate_lane: bool = true) -> void:
+	var key := String(actor_id)
+	var failure_signature := "%s|%s|%s" % [reason, str(simulation.get_actor_state(actor_id).position_microfeet), str(_gargoyle_lane_index(actor_id))]
+	if String(_gargoyle_last_tactical_signatures.get("failure:%s" % key, "")) == failure_signature:
+		return
+	_gargoyle_last_tactical_signatures["failure:%s" % key] = failure_signature
+	_gargoyle_failed_approach_counts[key] = int(_gargoyle_failed_approach_counts.get(key, 0)) + 1
+	if rotate_lane:
+		_rotate_gargoyle_lane(actor_id)
+		_set_gargoyle_tactical_state(actor_id, target_id, GARGOYLE_STATE_BLOCKED, "approach_failed_%s" % reason)
+	else:
+		simulation.record_tactical_decision(actor_id, target_id, {
+			"profile": "mini_gargoyle_swarmer",
+			"selected_action": "hold_for_actor_clearance",
+			"reason": reason,
+			"lane_index": _gargoyle_lane_index(actor_id),
+		})
+
+
 func _interrupt_invalid_special_contacts() -> void:
 	var interruption_scheduled := false
 	for actor_id: String in _wave_enemy_actor_ids():
@@ -1765,7 +2200,7 @@ func _update_encounter_outcome() -> void:
 		if wave_victory.get("success", false) and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_VICTORY_DETECTED:
 			_encounter_state = ENCOUNTER_PLAYER_VICTORY
 			_encounter_active = false
-			var wave_label := "wave_3" if _is_wave_three_skelly_hades_encounter else ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1")
+			var wave_label := "wave_4" if _is_wave_four_gargoyle_encounter else ("wave_3" if _is_wave_three_skelly_hades_encounter else ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1"))
 			_opponent_behavior_status = "%s_victory_detected" % wave_label
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
@@ -1913,6 +2348,42 @@ func _actor_occupancy() -> Dictionary:
 	return occupancy
 
 
+func _actor_spatial_occupancy() -> Dictionary:
+	var occupancy := {}
+	for actor_snapshot: Dictionary in simulation.get_state_snapshot().get("actors", []):
+		var actor_id := StringName(actor_snapshot.get("state", {}).get("actor_id", ""))
+		var state := simulation.get_actor_state(actor_id)
+		if state == null or (state.current_hpc != null and int(state.current_hpc) <= 0):
+			continue
+		occupancy[String(actor_id)] = Vector3i(state.position_microfeet.x, state.position_microfeet.y, state.elevation_microfeet)
+	return occupancy
+
+
+func _actor_planar_occupancy_at_elevation(mover_id: StringName, elevation_microfeet: int) -> Dictionary:
+	var occupancy := {}
+	var minimum_separation := _battlefield.actor_radius_microfeet * 2
+	for actor_snapshot: Dictionary in simulation.get_state_snapshot().get("actors", []):
+		var actor_id := StringName(actor_snapshot.get("state", {}).get("actor_id", ""))
+		if actor_id == mover_id:
+			continue
+		var state := simulation.get_actor_state(actor_id)
+		if state == null or (state.current_hpc != null and int(state.current_hpc) <= 0):
+			continue
+		if absi(state.elevation_microfeet - elevation_microfeet) >= minimum_separation:
+			continue
+		occupancy[String(actor_id)] = state.position_microfeet
+	return occupancy
+
+
+func _sorted_dictionary_copy(source: Dictionary) -> Dictionary:
+	var result := {}
+	var keys: Array = source.keys()
+	keys.sort()
+	for key: Variant in keys:
+		result[key] = source[key]
+	return result
+
+
 func _movement_rejected(reason: String, position: Vector2i = Vector2i.ZERO) -> Dictionary:
 	_last_error = reason
 	return {
@@ -1981,6 +2452,20 @@ func _make_wave_two_spadoodle_positions(first_position: Vector2i, count: int) ->
 	return positions
 
 
+func _gargoyle_actor_id(index: int) -> StringName:
+	return StringName("wave_4_mini_gargoyle_swarmer_%02d" % (index + 1))
+
+
+func _make_wave_four_gargoyle_positions(first_position: Vector2i, count: int) -> Array[Vector2i]:
+	var offsets := [Vector2i.ZERO, Vector2i(0, 2_000_000), Vector2i(2_000_000, 0), Vector2i(2_000_000, 2_000_000)]
+	var positions: Array[Vector2i] = []
+	for index in range(count):
+		if index >= offsets.size():
+			return []
+		positions.append(first_position + offsets[index])
+	return positions
+
+
 func _skelly_actor_id(index: int) -> StringName:
 	return StringName("wave_3_common_skelly_%02d" % (index + 1))
 
@@ -1999,10 +2484,12 @@ func _make_wave_three_positions(first_position: Vector2i, skelly_count: int) -> 
 
 
 func _is_playable_wave_encounter() -> bool:
-	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter or _is_wave_three_skelly_hades_encounter
+	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter or _is_wave_three_skelly_hades_encounter or _is_wave_four_gargoyle_encounter
 
 
 func _wave_enemy_actor_ids() -> PackedStringArray:
+	if _is_wave_four_gargoyle_encounter:
+		return _gargoyle_actor_ids
 	if _is_wave_three_skelly_hades_encounter:
 		var combined := _skelly_actor_ids.duplicate()
 		combined.append_array(_hades_follower_actor_ids)
@@ -2224,6 +2711,10 @@ func _initialize_wave_enemy_navigation_state() -> void:
 	_goblin_movement_spent.clear()
 	_hades_last_tactical_signature.clear()
 	_hades_support_target_ids.clear()
+	_gargoyle_tactical_states.clear()
+	_gargoyle_lane_offsets.clear()
+	_gargoyle_failed_approach_counts.clear()
+	_gargoyle_last_tactical_signatures.clear()
 	_goblin_last_movement_us = simulation.clock.get_elapsed_us()
 	for actor_id: String in _wave_enemy_actor_ids():
 		_goblin_movement_models[actor_id] = _make_goblin_movement_model(StringName(actor_id), simulation.get_actor_state(StringName(actor_id)).position_microfeet)
@@ -2232,6 +2723,10 @@ func _initialize_wave_enemy_navigation_state() -> void:
 		_goblin_path_rebuild_counts[actor_id] = 0
 		_goblin_failed_path_cache_hits[actor_id] = 0
 		_goblin_static_collision_counts[actor_id] = 0
+		if _is_wave_four_gargoyle_encounter:
+			_gargoyle_tactical_states[actor_id] = GARGOYLE_STATE_STAGING
+			_gargoyle_lane_offsets[actor_id] = 0
+			_gargoyle_failed_approach_counts[actor_id] = 0
 
 
 func _next_opponent_movement_tick_us(current_us: int) -> int:

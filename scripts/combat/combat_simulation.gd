@@ -781,7 +781,8 @@ func start_physical_attack(
 	target_location: StringName = &"torso",
 	authoritative_line_of_sight: Variant = null,
 	dependency_action_ids: PackedStringArray = PackedStringArray(),
-	is_back_attack: bool = false
+	is_back_attack: bool = false,
+	nac_attack_context: Dictionary = {}
 ) -> Dictionary:
 	if not _combat_started:
 		return _failure("opening_initiative_unresolved")
@@ -805,6 +806,9 @@ func start_physical_attack(
 		return _failure("attacker_not_eligible")
 	if target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
 		return _failure("target_not_eligible")
+	var nac_validation := _validate_nac_attack_context(attacker_state, nac_attack_context)
+	if not nac_validation.get("success", false):
+		return nac_validation
 	if not attacker_state.equipment_refs.has(String(definition.weapon_ref)):
 		return _failure("weapon_not_equipped")
 	if attacker_state.hand_occupancy_authoritative \
@@ -836,7 +840,8 @@ func start_physical_attack(
 		if definition.requires_line_of_sight and authoritative_line_of_sight != true:
 			return _failure("line_of_sight_unverified")
 		var declaration_offset := target_state.position_microfeet - attacker_state.position_microfeet
-		var declaration_distance_squared := declaration_offset.x * declaration_offset.x + declaration_offset.y * declaration_offset.y
+		var elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
+		var declaration_distance_squared := declaration_offset.x * declaration_offset.x + declaration_offset.y * declaration_offset.y + elevation_offset * elevation_offset
 		var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
 		var maximum_range := int(definition.maximum_range_microfeet)
 		if declaration_distance_squared < minimum_range * minimum_range or declaration_distance_squared > maximum_range * maximum_range:
@@ -857,7 +862,8 @@ func start_physical_attack(
 		_attack_definitions[definition_key] = definition
 	var action_instance_id: String = action_result["action_instance_id"]
 	var declared_offset := target_state.position_microfeet - attacker_state.position_microfeet
-	var distance_squared := declared_offset.x * declared_offset.x + declared_offset.y * declared_offset.y
+	var declared_elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
+	var distance_squared := declared_offset.x * declared_offset.x + declared_offset.y * declared_offset.y + declared_elevation_offset * declared_elevation_offset
 	var attack_instance_ids: Array[String] = []
 	for strike_index in range(1, definition.strikes_per_act + 1):
 		var attack_instance_id := _make_attack_instance_id(_next_attack_sequence)
@@ -873,7 +879,17 @@ func start_physical_attack(
 		)
 		attack.declared_attacker_position_microfeet = attacker_state.position_microfeet
 		attack.declared_target_position_microfeet = target_state.position_microfeet
+		attack.declared_attacker_elevation_microfeet = attacker_state.elevation_microfeet
+		attack.declared_target_elevation_microfeet = target_state.elevation_microfeet
 		attack.declaration_line_of_sight_verified = authoritative_line_of_sight
+		var strike_profile := definition.get_strike_profile(strike_index)
+		if not strike_profile.is_empty():
+			attack.strike_label = String(strike_profile["label"])
+			attack.damage_dice_count_override = int(strike_profile["dice_count"])
+			attack.damage_die_sides_override = int(strike_profile["die_sides"])
+			attack.damage_types = PackedStringArray(strike_profile.get("damage_types", Array(definition.damage_types)))
+		if not nac_attack_context.is_empty():
+			attack.consequence_damage_multipliers.append((nac_attack_context["damage_multiplier"] as Dictionary).duplicate(true))
 		if called_shot_matches:
 			attack.automatic_accuracy_reason = "called_shot"
 		_attacks[attack_instance_id] = attack
@@ -890,9 +906,13 @@ func start_physical_attack(
 				"delivery_class": String(definition.delivery_class), "damage_types": Array(definition.damage_types),
 				"physical_soak_eligible": definition.physical_soak_eligible, "is_back_attack": is_back_attack,
 				"strike_index": strike_index, "strikes_per_act": definition.strikes_per_act,
+				"strike_label": attack.strike_label,
+				"nac_ability_id": String(nac_attack_context.get("ability_id", "")),
 			}
 		)
 	_attack_by_action_id[action_instance_id] = attack_instance_ids
+	if not nac_attack_context.is_empty():
+		_commit_nac_attack_context(attacker_state, attacker_id, target_id, action_instance_id, attack_instance_ids, nac_attack_context)
 	if not pending_called_shot.is_empty():
 		attacker_state.pending_called_shot.clear()
 		attacker_state.revision += 1
@@ -1259,8 +1279,10 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 	)
 	resolution.flat_bonus = definition.flat_bonus
 	resolution.strength_bonus = preparation["strength_bonus"]
-	for _die_index in range(definition.dice_count):
-		var die_result := roll_int(1, definition.die_sides)
+	var damage_dice_count := int(preparation["damage_dice_count"])
+	var damage_die_sides := int(preparation["damage_die_sides"])
+	for _die_index in range(damage_dice_count):
+		var die_result := roll_int(1, damage_die_sides)
 		resolution.weapon_rolls.append(die_result)
 		resolution.rng_draw_indices.append(random.get_draw_count())
 		resolution.weapon_dice_total += die_result
@@ -1554,6 +1576,51 @@ func apply_authoritative_position(
 		"",
 		PackedStringArray(),
 		{} if movement_cost_microfeet == 0 else {"mr_microfeet": movement_cost_microfeet}
+	)
+	return _success()
+
+
+func apply_authoritative_spatial_position(
+	actor_id: StringName,
+	position: Vector2i,
+	elevation_microfeet: int,
+	facing_millidegrees: int,
+	movement_cost_microfeet: int = 0
+) -> Dictionary:
+	var actor_key := String(actor_id)
+	if not _actor_states.has(actor_key):
+		return _failure("unknown_actor")
+	if elevation_microfeet < 0 or movement_cost_microfeet < 0:
+		return _failure("invalid_spatial_movement")
+	_refresh_actor_movement_budgets()
+	var actor_state: CombatActorState = _actor_states[actor_key]
+	_refresh_actor_timed_conditions(actor_state)
+	if _is_actor_critically_staggered(actor_state):
+		return _failure("movement_blocked_by_critical_stagger")
+	if not actor_state.current_action_instance_id.is_empty():
+		var action: CombatActionInstance = _actions[actor_state.current_action_instance_id]
+		var definition: CombatActionDefinition = _action_definitions[String(action.action_definition_id)]
+		if not definition.allows_movement:
+			return _failure("movement_restricted_by_action")
+	if movement_cost_microfeet > 0 and not actor_state.spend_movement(movement_cost_microfeet):
+		return _failure("insufficient_remaining_mr")
+	var previous_position := actor_state.position_microfeet
+	var previous_elevation := actor_state.elevation_microfeet
+	actor_state.set_spatial_position(position, elevation_microfeet, facing_millidegrees)
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"actor_position_changed", _get_actor_initiative(actor_key), actor_id, &"",
+		{
+			"position_microfeet": [position.x, position.y],
+			"elevation_microfeet": elevation_microfeet,
+			"previous_position_microfeet": [previous_position.x, previous_position.y],
+			"previous_elevation_microfeet": previous_elevation,
+			"facing_millidegrees": facing_millidegrees,
+			"movement_cost_microfeet": movement_cost_microfeet,
+			"remaining_mr_microfeet": actor_state.remaining_mr_microfeet,
+			"flight_movement": true,
+			"action_continues": not actor_state.current_action_instance_id.is_empty(),
+		}, "", PackedStringArray(), {} if movement_cost_microfeet == 0 else {"mr_microfeet": movement_cost_microfeet}
 	)
 	return _success()
 
@@ -2416,8 +2483,11 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 		return _failure("target_not_eligible_at_resolution")
 	attack.final_attacker_position_microfeet = attacker_state.position_microfeet
 	attack.final_target_position_microfeet = target_state.position_microfeet
+	attack.final_attacker_elevation_microfeet = attacker_state.elevation_microfeet
+	attack.final_target_elevation_microfeet = target_state.elevation_microfeet
 	var offset := target_state.position_microfeet - attacker_state.position_microfeet
-	var distance_squared := offset.x * offset.x + offset.y * offset.y
+	var elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
+	var distance_squared := offset.x * offset.x + offset.y * offset.y + elevation_offset * elevation_offset
 	attack.final_distance_squared_microfeet = distance_squared
 	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
 	var maximum_range := int(definition.maximum_range_microfeet)
@@ -2433,7 +2503,9 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 	if _attack_final_line_of_sight_resolver.is_valid():
 		line_of_sight = _attack_final_line_of_sight_resolver.call(attack.attacker_id, attack.target_id)
 	elif attacker_state.position_microfeet == attack.declared_attacker_position_microfeet \
-		and target_state.position_microfeet == attack.declared_target_position_microfeet:
+		and target_state.position_microfeet == attack.declared_target_position_microfeet \
+		and attacker_state.elevation_microfeet == attack.declared_attacker_elevation_microfeet \
+		and target_state.elevation_microfeet == attack.declared_target_elevation_microfeet:
 		# A static fixture can reuse its declaration fact only when neither
 		# endpoint moved. Moved endpoints fail closed without geometry.
 		line_of_sight = attack.declaration_line_of_sight_verified
@@ -2885,6 +2957,8 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 
 	return _success({
 		"damage_definition": damage_definition,
+		"damage_dice_count": damage_definition.dice_count if attack.damage_dice_count_override == null else int(attack.damage_dice_count_override),
+		"damage_die_sides": damage_definition.die_sides if attack.damage_die_sides_override == null else int(attack.damage_die_sides_override),
 		"strength_bonus": strength_bonus,
 		"nal": int(nal_value),
 		"armor_equipment_ref": armor_result["equipment_ref"],
@@ -3305,7 +3379,8 @@ func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_line_of_sight_unverified")
 		return
 	var offset := target_state.position_microfeet - reactor_state.position_microfeet
-	var distance_squared := offset.x * offset.x + offset.y * offset.y
+	var elevation_offset := target_state.elevation_microfeet - reactor_state.elevation_microfeet
+	var distance_squared := offset.x * offset.x + offset.y * offset.y + elevation_offset * elevation_offset
 	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
 	if not definition.has_resolved_range() or distance_squared < minimum_range * minimum_range or distance_squared > int(definition.maximum_range_microfeet) * int(definition.maximum_range_microfeet):
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_target_out_of_range")
@@ -3670,6 +3745,63 @@ func _is_special_touch_legal(actor_id: StringName, target_id: StringName, fallba
 	if _special_touch_resolver.is_valid():
 		return bool(_special_touch_resolver.call(actor_id, target_id))
 	return fallback_fact
+
+
+func _validate_nac_attack_context(actor_state: CombatActorState, context: Dictionary) -> Dictionary:
+	if context.is_empty():
+		return _success()
+	var ability_id := String(context.get("ability_id", ""))
+	var multiplier: Variant = context.get("damage_multiplier")
+	if ability_id.is_empty() or typeof(multiplier) != TYPE_DICTIONARY:
+		return _failure("invalid_nac_attack_context")
+	var value: Dictionary = multiplier
+	if int(value.get("numerator", 0)) <= 0 or int(value.get("denominator", 0)) <= 0:
+		return _failure("invalid_nac_damage_multiplier")
+	if not actor_state.ability_daily_remaining.has(ability_id):
+		return _failure("nac_allowance_unregistered")
+	if int(actor_state.ability_daily_remaining[ability_id]) <= 0:
+		return _failure("nac_daily_use_exhausted")
+	var round_index := clock.get_round_index()
+	var uses_this_round := actor_state.nac_uses_this_round if actor_state.nac_round_index == round_index else 0
+	if uses_this_round >= 5:
+		return _failure("nac_round_cap_reached")
+	return _success()
+
+
+func _commit_nac_attack_context(
+	actor_state: CombatActorState,
+	actor_id: StringName,
+	target_id: StringName,
+	action_instance_id: String,
+	attack_instance_ids: Array[String],
+	context: Dictionary
+) -> void:
+	var ability_id := String(context["ability_id"])
+	var round_index := clock.get_round_index()
+	if actor_state.nac_round_index != round_index:
+		actor_state.nac_round_index = round_index
+		actor_state.nac_uses_this_round = 0
+	var before := int(actor_state.ability_daily_remaining[ability_id])
+	actor_state.ability_daily_remaining[ability_id] = before - 1
+	actor_state.nac_uses_this_round += 1
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"nac_attack_enhancement_committed", _get_actor_initiative(String(actor_id)), actor_id, target_id,
+		{
+			"ability_id": ability_id,
+			"action_instance_id": action_instance_id,
+			"attack_instance_ids": attack_instance_ids.duplicate(),
+			"daily_before": before,
+			"daily_after": before - 1,
+			"nac_round_index": round_index,
+			"nac_uses_this_round": actor_state.nac_uses_this_round,
+			"nac_round_cap": 5,
+			"damage_multiplier": (context["damage_multiplier"] as Dictionary).duplicate(true),
+			"ap_spent": 0,
+			"ordinary_acts_spent": 0,
+		}, "", PackedStringArray(), {ability_id: 1}
+	)
 
 
 func _validate_ability_activation(
