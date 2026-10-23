@@ -43,6 +43,8 @@ const Task32DHadesSpecialsTests = preload("res://tests/test_task_32d_hades_speci
 const Task32EAbilitySystemTests = preload("res://tests/test_task_32e_ability_system.gd")
 const WaveFourMiniGargoyleTests = preload("res://tests/test_wave_four_mini_gargoyles.gd")
 const WaveFourSwarmerTacticsTests = preload("res://tests/test_wave_four_swarmer_tactics.gd")
+const PlayableCharacterSelectionTests = preload("res://tests/test_playable_character_selection.gd")
+const VaelisForceMagicTests = preload("res://tests/test_vaelis_force_magic.gd")
 
 
 func _initialize() -> void:
@@ -51,6 +53,8 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 34B Vaelis Force magic and NACs", "instance": VaelisForceMagicTests.new()},
+		{"name": "Task 34 playable character selection", "instance": PlayableCharacterSelectionTests.new()},
 		{"name": "Task 33B Wave 4 swarmer tactics", "instance": WaveFourSwarmerTacticsTests.new()},
 		{"name": "Task 33A Wave 4 Mini Gargoyle Swarmers", "instance": WaveFourMiniGargoyleTests.new()},
 		{"name": "Task 32E Ability resources and ally targeting", "instance": Task32EAbilitySystemTests.new()},

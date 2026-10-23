@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CombatLoadoutDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_loadout_definition_resource.gd" id="1_loadout"]
+
+[resource]
+script = ExtResource("1_loadout")
+definition_id = &"vaelis_thorn_short_sword_wand"
+display_name = "Vaelis Thorn Short Sword and Short Wand"
+primary_weapon_ref = &"prime_v3_short_sword"
+secondary_weapon_ref = &"prime_v3_short_wand"
+shield_ref = &""
+armor_refs = PackedStringArray()
+source_refs = PackedStringArray("assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json", "PRIME-V3 pp. 124, 130")

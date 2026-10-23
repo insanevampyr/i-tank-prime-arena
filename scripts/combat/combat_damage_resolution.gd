@@ -26,6 +26,8 @@ var natural_armor_level: int = 0
 var type_response: Dictionary = {}
 var minimum_one_applied: bool = false
 var final_damage: int = 0
+var protective_points_absorbed: int = 0
+var protective_points_remaining: int = 0
 var hpc_before: int = 0
 var hpc_after: int = 0
 var event_id: String = ""
@@ -73,6 +75,8 @@ func to_dictionary() -> Dictionary:
 		"type_response": type_response.duplicate(true),
 		"minimum_one_applied": minimum_one_applied,
 		"final_damage": final_damage,
+		"protective_points_absorbed": protective_points_absorbed,
+		"protective_points_remaining": protective_points_remaining,
 		"hpc_before": hpc_before,
 		"hpc_after": hpc_after,
 		"event_id": event_id,

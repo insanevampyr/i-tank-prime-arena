@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_short_wand"
+display_name = "Short Wand"
+damage_dice_count = 1
+damage_die_sides = 4
+fixed_damage_bonus = 0
+strength_bonus_eligible = true
+damage_types = PackedStringArray("bashing")
+reach_microfeet = 1000000
+strength_requirement = 2
+one_hand_strength_requirement = -1
+base_hands_required = 1
+block_target = 0
+required_acts = 1
+strikes_per_act = 1
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = true
+source_refs = PackedStringArray("PRIME-V3 p. 130, Short Wand; casting hand remains usable")

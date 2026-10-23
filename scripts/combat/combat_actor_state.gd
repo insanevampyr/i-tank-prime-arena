@@ -31,6 +31,9 @@ var action_timing_cursor_us: int = 0
 var next_action_interval_index: int = 0
 var nac_round_index: int = -1
 var nac_uses_this_round: int = 0
+var automatic_nac_uses_this_round: int = 0
+var persistent_damage_shields: Dictionary = {}
+var nac_automation_settings: Dictionary = {}
 var revision: int = 0
 
 
@@ -84,6 +87,9 @@ func to_dictionary() -> Dictionary:
 		"next_action_interval_index": next_action_interval_index,
 		"nac_round_index": nac_round_index,
 		"nac_uses_this_round": nac_uses_this_round,
+		"automatic_nac_uses_this_round": automatic_nac_uses_this_round,
+		"persistent_damage_shields": persistent_damage_shields.duplicate(true),
+		"nac_automation_settings": nac_automation_settings.duplicate(true),
 		"revision": revision,
 	}
 

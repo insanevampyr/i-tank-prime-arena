@@ -68,6 +68,13 @@ var automatic_accuracy_reason: String = ""
 var strike_label: String = ""
 var damage_dice_count_override: Variant = null
 var damage_die_sides_override: Variant = null
+var minimum_range_microfeet_override: Variant = null
+var maximum_range_microfeet_override: Variant = null
+var flat_bonus_override: Variant = null
+var strength_bonus_eligible_override: Variant = null
+var is_special_attack: bool = false
+var special_id: StringName = &""
+var special_knockback_microfeet: int = 0
 
 
 func _init(
@@ -174,4 +181,11 @@ func to_dictionary() -> Dictionary:
 		"strike_label": strike_label,
 		"damage_dice_count_override": damage_dice_count_override,
 		"damage_die_sides_override": damage_die_sides_override,
+		"minimum_range_microfeet_override": minimum_range_microfeet_override,
+		"maximum_range_microfeet_override": maximum_range_microfeet_override,
+		"flat_bonus_override": flat_bonus_override,
+		"strength_bonus_eligible_override": strength_bonus_eligible_override,
+		"is_special_attack": is_special_attack,
+		"special_id": String(special_id),
+		"special_knockback_microfeet": special_knockback_microfeet,
 	}

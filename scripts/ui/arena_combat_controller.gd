@@ -9,6 +9,7 @@ const ReadinessModel = preload("res://scripts/ui/combat_readiness_model.gd")
 const EncounterTranscript = preload("res://scripts/ui/arena_encounter_transcript.gd")
 const LogExporter = preload("res://scripts/ui/arena_log_exporter.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
+const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
 
 const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
@@ -16,6 +17,7 @@ const TARGET_PICK_RADIUS_PIXELS := 40.0
 const BASE_WORLD_PIXELS_PER_FOOT := 24.0
 const FACING_MARKER_COLOR := Color(1.0, 0.38, 0.82, 1.0)
 const ACTOR_HPC_LABEL_TOP := -72.0
+const ACTOR_HPC_LABEL_BOTTOM := ACTOR_HPC_LABEL_TOP + 24.0
 const ACTOR_HPC_LABEL_TEXT_ALPHA := 0.78
 const PLAYER_HPC_LABEL_SIZE := Vector2(136.0, 24.0)
 const OPPONENT_HPC_LABEL_SIZE := Vector2(190.0, 24.0)
@@ -37,6 +39,7 @@ const ACTOR_HPC_LABEL_OUTLINE_COLOR := Color(0.015, 0.025, 0.04, 0.68)
 @export var target_indicator_path: NodePath
 @export var encounter_button_path: NodePath
 @export var encounter_selector_path: NodePath
+@export var character_selector_path: NodePath
 @export var seed_label_path: NodePath
 @export var seed_input_path: NodePath
 @export var seed_apply_button_path: NodePath
@@ -75,10 +78,18 @@ var _last_opponent_behavior_status := ""
 var _application_has_focus := true
 var _keyboard_attack_keys_held: Dictionary = {}
 var _mouse_attack_held := false
+var _mouse_special_held := false
+var _assigned_special_id: StringName = VaelisForce.FORCE_BOLT_ID
+var _nac_settings_panel: PanelContainer
+var _nac_profile_option: OptionButton
+var _nac_auto_toggle: CheckButton
+var _nac_reserve_input: SpinBox
+var _nac_budget_input: SpinBox
 var _last_attack_readiness: Dictionary = {}
 var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
 var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
+var _player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 var _goblin_visuals: Dictionary = {}
 var _player_facing_marker: Polygon2D
 var _opponent_facing_marker: Polygon2D
@@ -95,6 +106,7 @@ var _world_presentation_size := Vector2.ZERO
 @onready var _target_indicator: Line2D = get_node_or_null(target_indicator_path)
 @onready var _encounter_button: Button = get_node_or_null(encounter_button_path)
 @onready var _encounter_selector: Button = get_node_or_null(encounter_selector_path)
+@onready var _character_selector: Button = get_node_or_null(character_selector_path)
 @onready var _seed_label: Label = get_node_or_null(seed_label_path)
 @onready var _seed_input: LineEdit = get_node_or_null(seed_input_path)
 @onready var _seed_apply_button: Button = get_node_or_null(seed_apply_button_path)
@@ -127,6 +139,8 @@ func _ready() -> void:
 		_encounter_button.pressed.connect(_on_encounter_button_pressed)
 	if _encounter_selector != null and not _encounter_selector.pressed.is_connected(_on_encounter_selector_pressed):
 		_encounter_selector.pressed.connect(_on_encounter_selector_pressed)
+	if _character_selector != null and not _character_selector.pressed.is_connected(_on_character_selector_pressed):
+		_character_selector.pressed.connect(_on_character_selector_pressed)
 	if _seed_input != null:
 		_seed_input.text = str(combat_seed)
 		if not _seed_input.text_submitted.is_connected(_on_seed_text_submitted):
@@ -143,6 +157,7 @@ func _ready() -> void:
 		_copy_log_button.pressed.connect(_on_copy_log_button_pressed)
 	if _save_log_button != null and not _save_log_button.pressed.is_connected(_on_save_log_button_pressed):
 		_save_log_button.pressed.connect(_on_save_log_button_pressed)
+	_create_nac_settings_panel()
 	_process_new_events()
 	_update_combat_movement_lock()
 	_update_presentation()
@@ -178,6 +193,7 @@ func _notification(what: int) -> void:
 			_update_presentation()
 	elif what == NOTIFICATION_WM_MOUSE_EXIT:
 		_mouse_attack_held = false
+		_mouse_special_held = false
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		_application_has_focus = true
 		if is_node_ready():
@@ -189,8 +205,12 @@ func _input(event: InputEvent) -> void:
 		_keyboard_attack_keys_held.erase(event.physical_keycode)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		_mouse_attack_held = false
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		_mouse_special_held = false
 	elif event is InputEventMouseMotion and _mouse_attack_held and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
 		_mouse_attack_held = false
+	elif event is InputEventMouseMotion and _mouse_special_held and (event.button_mask & MOUSE_BUTTON_MASK_RIGHT) == 0:
+		_mouse_special_held = false
 	if _session == null or not _session.is_encounter_active():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
@@ -225,8 +245,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.physical_keycode == KEY_F4:
 			set_transcript_visible(not is_transcript_visible())
 			get_viewport().set_input_as_handled()
+		elif event.physical_keycode == KEY_Q:
+			_request_force_shield()
+			get_viewport().set_input_as_handled()
+		elif event.physical_keycode == KEY_E:
+			_cancel_force_shield()
+			get_viewport().set_input_as_handled()
+		elif event.physical_keycode == KEY_F:
+			_assigned_special_id = VaelisForce.FORCE_BOLT_ID
+			_last_ui_message = "Assigned right-click Special: Force Bolt."
+			get_viewport().set_input_as_handled()
+		elif event.physical_keycode == KEY_N:
+			_toggle_nac_settings_panel()
+			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		_handle_left_mouse_attack_press(event.position)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		_handle_right_mouse_special_press(event.position)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventScreenTouch and event.pressed and not event.canceled:
 		_select_target_at(event.position, false)
@@ -245,6 +281,13 @@ func set_mouse_attack_for_testing(screen_position: Vector2, pressed: bool) -> Di
 		_mouse_attack_held = false
 		return {"success": true}
 	return _handle_left_mouse_attack_press(screen_position)
+
+
+func set_mouse_special_for_testing(screen_position: Vector2, pressed: bool) -> Dictionary:
+	if not pressed:
+		_mouse_special_held = false
+		return {"success": true}
+	return _handle_right_mouse_special_press(screen_position)
 
 
 func set_world_presentation_pixels_per_foot(pixels_per_foot: float, presentation_size: Vector2 = Vector2.ZERO) -> void:
@@ -275,6 +318,14 @@ func press_encounter_control_for_testing() -> void:
 
 func select_encounter_fixture_for_testing(encounter_fixture_id: StringName) -> Dictionary:
 	return _select_encounter_fixture(encounter_fixture_id)
+
+
+func select_player_character_for_testing(player_character_id: StringName) -> Dictionary:
+	return _select_player_character(player_character_id)
+
+
+func get_player_character_id_for_testing() -> StringName:
+	return _player_character_id
 
 
 func set_seed_text_for_testing(seed_text: String) -> Dictionary:
@@ -333,6 +384,31 @@ func get_attack_hold_state_for_testing() -> Dictionary:
 		"mouse": _mouse_attack_held,
 		"touch": _touch_controls != null and _touch_controls.is_attack_held(),
 	}
+
+
+func get_special_control_state_for_testing() -> Dictionary:
+	return {
+		"assigned_special_id": String(_assigned_special_id),
+		"right_mouse_held": _mouse_special_held,
+		"settings_visible": _nac_settings_panel != null and _nac_settings_panel.visible,
+		"settings": {} if _session == null else _session.get_player_nac_automation(),
+	}
+
+
+func get_player_resource_hud_state_for_testing() -> Dictionary:
+	if _session == null:
+		return {}
+	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		return {}
+	var result := _get_player_resource_presentation(player_state)
+	result["combat_status_text"] = "" if _combat_status == null else _combat_status.text
+	result["shield_visual_active"] = _player != null and _player.is_force_shield_visual_active_for_testing()
+	return result
+
+
+func request_special_for_testing(special_id: StringName) -> Dictionary:
+	return _request_special(special_id, "test")
 
 
 func advance_combat_for_testing(delta_us: int) -> void:
@@ -418,6 +494,121 @@ func _on_save_log_button_pressed() -> void:
 		_set_transcript_feedback("Saved full log to %s" % String(result.get("path", result.get("filename", "encounter log"))))
 
 
+func _request_special(special_id: StringName, input_source: String) -> Dictionary:
+	var result := _session.request_player_special(special_id)
+	if result.get("success", false):
+		_last_ui_message = (
+			"Force Bolt activated (%s)." % input_source
+			if special_id == VaelisForce.FORCE_BOLT_ID
+			else "Force Shield casting (one Act)."
+		)
+	else:
+		_last_ui_message = "Special unavailable: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	_update_presentation()
+	return result
+
+
+func _request_force_shield() -> Dictionary:
+	return _request_special(VaelisForce.FORCE_SHIELD_ID, "keyboard")
+
+
+func _cancel_force_shield() -> Dictionary:
+	var result := _session.cancel_player_force_shield()
+	_last_ui_message = "Force Shield canceled." if result.get("success", false) else "Cancel unavailable: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	_update_presentation()
+	return result
+
+
+func _handle_right_mouse_special_press(screen_position: Vector2) -> Dictionary:
+	if _attack_input_is_blocked_by_ui():
+		_mouse_special_held = false
+		return {"success": false, "reason": "ui_input_blocked"}
+	var selection_result := _select_target_at(screen_position, false)
+	var selection: Dictionary = selection_result.get("selection", {})
+	if not selection.get("success", false) or String(selection.get("target_id", "")).is_empty():
+		_mouse_special_held = false
+		return {"success": false, "reason": "no_target_selected"}
+	var result := _request_special(_assigned_special_id, "mouse")
+	_mouse_special_held = result.get("success", false)
+	return result
+
+
+func _create_nac_settings_panel() -> void:
+	if _nac_settings_panel != null:
+		return
+	var ui := get_node_or_null("../HUD/UI") as Control
+	if ui == null:
+		return
+	_nac_settings_panel = PanelContainer.new()
+	_nac_settings_panel.name = "NacSettingsPanel"
+	_nac_settings_panel.visible = false
+	_nac_settings_panel.anchor_left = 1.0
+	_nac_settings_panel.anchor_right = 1.0
+	_nac_settings_panel.offset_left = -270.0
+	_nac_settings_panel.offset_top = 78.0
+	_nac_settings_panel.offset_right = -20.0
+	_nac_settings_panel.offset_bottom = 263.0
+	_nac_settings_panel.custom_minimum_size = Vector2(250, 185)
+	_nac_settings_panel.z_index = 40
+	var column := VBoxContainer.new()
+	var title := Label.new()
+	title.text = "NAC SETTINGS (N)"
+	column.add_child(title)
+	_nac_profile_option = OptionButton.new()
+	for profile_name: String in ["Balanced", "Defensive", "Aggressive", "Guardian"]:
+		_nac_profile_option.add_item(profile_name)
+	column.add_child(_nac_profile_option)
+	_nac_auto_toggle = CheckButton.new()
+	_nac_auto_toggle.text = "Automatic Force Bolt"
+	column.add_child(_nac_auto_toggle)
+	_nac_reserve_input = SpinBox.new()
+	_nac_reserve_input.prefix = "Mana reserve "
+	_nac_reserve_input.min_value = 0
+	_nac_reserve_input.max_value = 20
+	column.add_child(_nac_reserve_input)
+	_nac_budget_input = SpinBox.new()
+	_nac_budget_input.prefix = "Auto NAC / round "
+	_nac_budget_input.min_value = 0
+	_nac_budget_input.max_value = 5
+	_nac_budget_input.value = 5
+	column.add_child(_nac_budget_input)
+	var apply_button := Button.new()
+	apply_button.text = "APPLY"
+	apply_button.pressed.connect(_apply_nac_settings_from_ui)
+	column.add_child(apply_button)
+	_nac_settings_panel.add_child(column)
+	ui.add_child(_nac_settings_panel)
+
+
+func _toggle_nac_settings_panel() -> void:
+	if _nac_settings_panel == null or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		_last_ui_message = "NAC settings are available for Vaelis."
+		return
+	_nac_settings_panel.visible = not _nac_settings_panel.visible
+	if _nac_settings_panel.visible:
+		var settings := _session.get_player_nac_automation()
+		_nac_profile_option.select(maxi(0, ["Balanced", "Defensive", "Aggressive", "Guardian"].find(String(settings.get("profile", "Balanced")))))
+		_nac_auto_toggle.button_pressed = bool(settings.get("automatic_enabled", false))
+		_nac_reserve_input.value = int(settings.get("minimum_mana_reserve", 0))
+		_nac_budget_input.value = int(settings.get("automatic_nac_budget", 5))
+
+
+func _apply_nac_settings_from_ui() -> void:
+	if _nac_profile_option == null:
+		return
+	var result := _session.configure_player_nac_automation({
+		"profile": _nac_profile_option.get_item_text(_nac_profile_option.selected),
+		"automatic_enabled": _nac_auto_toggle.button_pressed,
+		"minimum_mana_reserve": int(_nac_reserve_input.value),
+		"automatic_nac_budget": int(_nac_budget_input.value),
+		"emergency_defense_enabled": true,
+		"offensive_triggers_enabled": true,
+		"ally_protection_enabled": false,
+		"priority": PackedStringArray(["force_bolt"]),
+	})
+	_last_ui_message = "NAC settings applied." if result.get("success", false) else "NAC settings rejected: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+
+
 func _request_attack(input_source: String) -> Dictionary:
 	if _session.is_actor_prone(Fixture.PLAYER_ID):
 		var stand_result := _session.request_player_stand(input_source)
@@ -451,6 +642,7 @@ func _advance_session_with_attack_hold(delta_us: int) -> void:
 		return
 	var target_timestamp_us := _session.simulation.clock.get_elapsed_us() + delta_us
 	_try_request_held_attack()
+	_try_request_held_special()
 	var iterations := 0
 	while _session.simulation.clock.get_elapsed_us() < target_timestamp_us:
 		iterations += 1
@@ -471,6 +663,7 @@ func _advance_session_with_attack_hold(delta_us: int) -> void:
 		if _session.simulation.clock.get_elapsed_us() <= now_us:
 			break
 		_try_request_held_attack()
+		_try_request_held_special()
 	if not _session.is_encounter_active():
 		_clear_attack_hold_intent()
 
@@ -507,6 +700,13 @@ func _active_attack_hold_source() -> String:
 	return ""
 
 
+func _try_request_held_special() -> void:
+	if not _mouse_special_held or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS \
+	or _session == null or not _session.is_encounter_active() or _attack_input_is_blocked_by_ui():
+		return
+	_request_special(_assigned_special_id, "mouse_hold")
+
+
 func _attack_input_is_blocked_by_ui() -> bool:
 	if not _application_has_focus or is_transcript_visible():
 		return true
@@ -517,6 +717,7 @@ func _attack_input_is_blocked_by_ui() -> bool:
 func _clear_attack_hold_intent() -> void:
 	_keyboard_attack_keys_held.clear()
 	_mouse_attack_held = false
+	_mouse_special_held = false
 	if _touch_controls != null:
 		_touch_controls.clear_attack_input()
 
@@ -549,6 +750,28 @@ func _on_encounter_selector_pressed() -> void:
 	var current_index := cycle.find(_encounter_fixture_id)
 	var next_fixture: StringName = cycle[posmod(current_index + 1, cycle.size())]
 	_select_encounter_fixture(next_fixture)
+
+
+func _on_character_selector_pressed() -> void:
+	var next_character := Fixture.PLAYER_CHARACTER_VAELIS if _player_character_id == Fixture.PLAYER_CHARACTER_GUARD else Fixture.PLAYER_CHARACTER_GUARD
+	_select_player_character(next_character)
+
+
+func _select_player_character(player_character_id: StringName) -> Dictionary:
+	_clear_attack_hold_intent()
+	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
+		return {"success": false, "reason": "character_selection_requires_ready_state"}
+	if not [Fixture.PLAYER_CHARACTER_GUARD, Fixture.PLAYER_CHARACTER_VAELIS].has(player_character_id):
+		return {"success": false, "reason": "unsupported_player_character"}
+	var previous_character := _player_character_id
+	_player_character_id = player_character_id
+	var result := _select_encounter_fixture(_encounter_fixture_id)
+	if not result.get("success", false):
+		_player_character_id = previous_character
+		return result
+	_last_ui_message = "%s selected. Press START." % Fixture.get_player_character_display_name(_player_character_id)
+	_update_presentation()
+	return {"success": true, "player_character_id": String(_player_character_id)}
 
 
 func _on_seed_apply_pressed() -> void:
@@ -638,7 +861,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 
 
 func _prepare_encounter_fixture() -> Dictionary:
-	_session = ArenaCombatSession.new(combat_seed, null, _encounter_fixture_id)
+	_session = ArenaCombatSession.new(combat_seed, null, _encounter_fixture_id, _player_character_id)
 	_session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	_session.set_opponent_behavior_enabled(true)
 	var setup: Dictionary
@@ -670,7 +893,7 @@ func _prepare_encounter_fixture() -> Dictionary:
 				)
 		)
 	)
-	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture"))
+	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_player_actor(_player_character_id, Fixture.PLAYER_ID))
 	if not running_validation.get("success", false):
 		_last_ui_message = "Running fixture blocked: %s" % _friendly_reason(String(running_validation.get("reason", "unresolved running profile")))
 		return running_validation
@@ -1004,7 +1227,12 @@ func _update_presentation() -> void:
 			_last_ui_message = "DOUBLE DEFEAT: both fixtures reached zero HPC. Press RESET."
 	if _player_hpc_label != null:
 		_player_hpc_label.visible = player_state.current_hpc != null and int(player_state.current_hpc) > 0
-		_player_hpc_label.text = "%s%s" % [_format_hpc(player_state.current_hpc, _session.get_actor_max_hpm(Fixture.PLAYER_ID)), _condition_suffix(player_state)]
+	var resource_presentation := _get_player_resource_presentation(player_state)
+	if _player_hpc_label != null:
+		var resource_line_count := maxi(1, int(resource_presentation.get("line_count", 1)))
+		_player_hpc_label.size = Vector2(PLAYER_HPC_LABEL_SIZE.x, PLAYER_HPC_LABEL_SIZE.y * resource_line_count)
+		_player_hpc_label.text = "%s%s" % [String(resource_presentation.get("overhead_text", "HPC --/--")), _condition_suffix(player_state)]
+	_player.set_force_shield_visual_active(bool(resource_presentation.get("shield_active", false)))
 	if _opponent_hpc_label != null:
 		var opponent_label := "SYNTHETIC SMALL*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "GUARD"
 		_opponent_hpc_label.visible = _opponent.visible and opponent_state != null and opponent_state.current_hpc != null and int(opponent_state.current_hpc) > 0
@@ -1038,14 +1266,23 @@ func _update_presentation() -> void:
 			_last_ui_message = blocked_line
 			_append_log(blocked_line)
 	if _combat_status != null:
+		var force_controls := ""
+		if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS:
+			force_controls = " | RMB %s | Q SHIELD / E CANCEL / N NAC" % [
+				String(_assigned_special_id).replace("_", " ").to_upper(),
+			]
 		_combat_status.text = (
-			"%s | %s\nTARGET: %s | AXE: %s\nRANGE: %s\n%s"
+			"%s | %s | %s\nPLAYER: %s\nTARGET: %s | %s: %s\nRANGE: %s%s\n%s"
 			% [
 				_session.get_encounter_state().replace("_", " ").to_upper(),
 				_session.get_encounter_display_name(),
+				_session.get_player_character_display_name(),
+				String(resource_presentation.get("text", "HPC --/--")),
 				compact_actor_name(selected_target_id),
+				_session.get_player_primary_weapon_display_name(),
 				readiness,
 				distance_text,
+				force_controls,
 				_compact_status_message(_last_ui_message),
 			]
 		)
@@ -1059,6 +1296,11 @@ func _update_presentation() -> void:
 				else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("WAVE 3" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("WAVE 4" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M"))))
 		)
 		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
+	if _character_selector != null:
+		_character_selector.text = "CHAR: %s" % ("VAELIS" if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS else "GUARD")
+		_character_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
+	if _nac_settings_panel != null and _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		_nac_settings_panel.visible = false
 	var seed_editable := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
 	if _seed_label != null:
 		_seed_label.text = "SEED %d" % _authoritative_seed()
@@ -1111,6 +1353,43 @@ func _update_presentation() -> void:
 
 func _format_hpc(current_hpc: Variant, maximum_hpm: Variant) -> String:
 	return "HPC %s/%s" % ["--" if current_hpc == null else current_hpc, "--" if maximum_hpm == null else maximum_hpm]
+
+
+func _get_player_resource_presentation(player_state: CombatActorState) -> Dictionary:
+	var parts := PackedStringArray([_format_hpc(player_state.current_hpc, _session.get_actor_max_hpm(Fixture.PLAYER_ID))])
+	var definition := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	var maxima: Dictionary = {} if definition == null else definition.resource_maxima
+	var result := {
+		"hpc": player_state.current_hpc,
+		"hpm": _session.get_actor_max_hpm(Fixture.PLAYER_ID),
+		"mana": null,
+		"mana_maximum": null,
+		"ap": null,
+		"ap_maximum": null,
+		"shield_active": false,
+		"shield_capacity": null,
+		"shield_maximum": null,
+	}
+	for resource_name: String in ["mana", "ap"]:
+		if not player_state.resources.has(resource_name):
+			continue
+		var current: int = int(player_state.resources[resource_name])
+		var maximum: Variant = maxima.get(resource_name)
+		parts.append("%s %d/%s" % [resource_name.to_upper(), current, "--" if maximum == null else str(maximum)])
+		result[resource_name] = current
+		result["%s_maximum" % resource_name] = maximum
+	var shield: Dictionary = player_state.persistent_damage_shields.get(String(VaelisForce.FORCE_SHIELD_ID), {})
+	if not shield.is_empty():
+		var capacity := int(shield.get("capacity", 0))
+		var maximum_capacity: Variant = shield.get("maximum_capacity")
+		parts.append("SHIELD %d/%s" % [capacity, "--" if maximum_capacity == null else str(maximum_capacity)])
+		result["shield_active"] = true
+		result["shield_capacity"] = capacity
+		result["shield_maximum"] = maximum_capacity
+	result["text"] = " | ".join(parts)
+	result["overhead_text"] = "\n".join(parts)
+	result["line_count"] = parts.size()
+	return result
 
 
 static func compact_actor_name(actor_id: StringName) -> String:
@@ -1349,7 +1628,7 @@ func _anchor_actor_health_label(actor_visual: Node2D, label: Label) -> void:
 	# Labels remain centered at one fixed actor-relative location. A small screen
 	# clamp is the only exception, preventing edge clipping without searching for
 	# another battlefield position or detaching the label from its owner.
-	label.position = Vector2(-label.size.x * 0.5, ACTOR_HPC_LABEL_TOP)
+	label.position = Vector2(-label.size.x * 0.5, ACTOR_HPC_LABEL_BOTTOM - label.size.y)
 	var screen_rect := Rect2(Vector2.ZERO, _world_presentation_size) if not _world_presentation_size.is_zero_approx() else get_viewport().get_visible_rect()
 	var scaled_size := label.size * label.get_global_transform().get_scale().abs()
 	var desired_global := label.global_position

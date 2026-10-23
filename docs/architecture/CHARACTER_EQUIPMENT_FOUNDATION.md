@@ -59,7 +59,7 @@ Weapon definitions now state whether their printed base use occupies one or two 
 
 Shield definitions separately record mounting type and weapon-hand occupancy. The Wood and Metal Buckler retain Prime's `2 Hands Free` chart fact and the approved Arena clarification models them as arm-mounted bucklers consuming zero weapon hands. A hand-held shield consumes one weapon hand. No production ordinary-shield resource was added; tests use an explicitly non-production hand-held shield fixture to verify the generic validator.
 
-`CombatDefinitionCatalog` validates the complete authoritative equipment reference set against the actor's actual STR before actor registration. It rejects missing definitions, unmet STR, multiple primary weapons, multiple shields, repeated armor slots and weapon-plus-shield hand totals above the two-hand capacity. Great Sword and Long Staff can now create their existing attack definitions because the former occupancy gate is implemented. Their damage, reach, Block and critical properties are unchanged.
+`CombatDefinitionCatalog` validates the complete authoritative equipment reference set against the actor's actual STR before actor registration. It rejects missing definitions, unmet STR, more than two verified held weapons, multiple shields, repeated armor slots and weapon-plus-shield hand totals above the two-hand capacity. A secondary held weapon is equipment state only unless a separately verified attack-selection rule exposes it; it never grants a second strike by itself. Great Sword and Long Staff can create their existing attack definitions because the occupancy gate is implemented. Their damage, reach, Block and critical properties are unchanged.
 
 The Guard remains STR 16 with a two-handed Battle Axe. Its arm-mounted Metal Buckler consumes zero weapon hands, so the approved Battle Axe + Metal Buckler + Plate torso test loadout remains legal without inventing a STR 24 exception. Dynamic equipping, dual-wield combat and ordinary-shield production definitions remain outside this task.
 
@@ -84,3 +84,13 @@ The left brown/orange rectangle is `non_damaging_test_hazard_zone`. It is walkab
 ## Safe extension procedure
 
 Add a new resource with a unique stable ID and exact source references, then register it in a catalog. Do not add a loadout until every referenced definition exists and its verified requirements can be validated. Missing values remain explicit verification issues; unsupported mechanics remain not-yet-implemented gates. Never substitute a generic slot, proficiency, penalty or attribute formula.
+
+## Task 34 playable-character selection
+
+The reusable catalog now includes `Vaelis Thorn` as a separate Medium level-one female Elf Fighter/Force Mage definition. Her supplied attributes are retained, while the combat values used at runtime were checked against the Prime V3 Mana Attribute Chart: HPM/HPC 9, AT 1, MR 10, INIT 2, ACC 9, DT 3, DP 6, NAL 1, Physical Soak 3 and SB 2. The recorded level-one HPM roll and the chosen 3/6 DEX allocation remain supplied character data rather than values derivable uniquely from the rulebook.
+
+Vaelis equips a verified STR-6, two-foot Short Sword (`1d6 + 1 + SB`, Slashing/Piercing) in the right hand and a verified STR-2, one-foot Short Wand (`1d4 + SB`, Bashing, casting hand remains usable) in the left. One ordinary attack action attempts both independently legal strikes in a stable Sword-then-Wand sequence. Each strike carries its own weapon, range, damage, ACC, defense and critical metadata while sharing one AT-1 Act. No weapon Block, shield, armor or armor penalty is inferred.
+
+Task 34B adds source-bounded Force actions without changing the general equipment catalog: Force Bolt is a zero-Act NAC using the shared five-per-round cap, while Force Shield remains a one-Act Special at Vaelis's current level. Mana, persistent shield capacity and actor-local NAC automation settings are mutable combat state, not permanent character-definition data.
+
+The READY-state character selector defaults to the Uncommon Guard. Switching rebuilds the selected encounter with the same seed without consuming combat RNG. START locks the choice; RESET reconstructs the same selected profile, mutable resources and equipment. Guard data and enemy definitions are never mutated or shared with Vaelis.

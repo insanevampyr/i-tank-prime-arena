@@ -1,0 +1,40 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"vaelis_thorn"
+display_name = "Vaelis Thorn"
+actor_kind = &"arena_verified_player_character"
+size_category = &"medium"
+race_name = "Elf"
+class_names = PackedStringArray("Fighter", "Force Mage")
+level = 1
+attributes = {
+"app": 14, "dex": 9, "end": 6, "int": 5, "luk": 0, "man": 0,
+"spd": 11, "str": 9, "wis": 10, "wit": 3
+}
+combat_stats = {
+"acc": 9, "at": 1, "dp": 6, "dt": 3, "hpm": 9, "init": 2,
+"mr": 10, "nal": 1, "physical_soak": 3, "rb": 0, "sb": 2,
+"running_skill_investment": 3, "running_scm": 0, "ss": 9
+}
+resource_maxima = {"blood": 10, "mana": 20}
+defensive_capabilities = {
+"dodge": true, "physical_soak": true, "shield_block": false, "weapon_block": false
+}
+running_profile = {
+"roll_bonus": 0, "running_skill_investment": 3, "skill_check_modifier": 0
+}
+source_refs = PackedStringArray("assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json", "assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.md", "PRIME-V3 pp. 17, 19-20, 43, 47-50, 53, 67, 69, 95-98, 105-106, 124, 130, 162, 174, 177")
+field_sources = {
+"attributes": "Supplied Vaelis record; creation rolls/FP allocation retained as owner-supplied data",
+"combat_stats": "PRIME-V3 p. 53 Mana Attribute Chart applied to supplied attributes; DEX split 3 DT / 6 DP supplied",
+"equipment": "PRIME-V3 pp. 124 and 130; supplied Vaelis right-hand Short Sword and left-hand Short Wand",
+"hpm": "Supplied Vaelis record; Elf base 4 plus recorded level-one HD/HPB result",
+"magic": "PRIME-V3 p. 250 Force Bolt and Force Shield; retained but unavailable in Task 34",
+"running_profile": "PRIME-V3 pp. 67, 69, 105-106; supplied three investments qualify as automatic",
+"size_category": "Supplied height 5 ft 7 in; PRIME-V3 pp. 95-98 Medium range"
+}
+unresolved_fields = PackedStringArray()

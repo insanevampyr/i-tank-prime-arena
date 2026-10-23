@@ -11,6 +11,7 @@ const CommonSpadoodleFixture = preload("res://scripts/creatures/common_spadoodle
 const CommonSkellyFixture = preload("res://scripts/creatures/common_skelly_fixture.gd")
 const HadesCombatFollowerFixture = preload("res://scripts/creatures/hades_combat_follower_fixture.gd")
 const MiniGargoyleSwarmerFixture = preload("res://scripts/creatures/mini_gargoyle_swarmer_fixture.gd")
+const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -51,6 +52,7 @@ var _arena_bounds_microfeet := Rect2i(-100_000_000, -100_000_000, 200_000_000, 2
 var _battlefield: ArenaBattlefield = ArenaBattlefield.create_open(_arena_bounds_microfeet)
 var _seed_value: int
 var _encounter_fixture_id: StringName
+var _player_character_id: StringName
 var _uses_external_simulation: bool = false
 var _initialized: bool = false
 var _encounter_active: bool = true
@@ -104,10 +106,12 @@ var _gargoyle_last_tactical_signatures: Dictionary = {}
 func _init(
 	seed_value: int = DEFAULT_SEED,
 	existing_simulation: CombatSimulation = null,
-	encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
+	encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS,
+	player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 ) -> void:
 	_seed_value = seed_value
 	_encounter_fixture_id = encounter_fixture_id
+	_player_character_id = player_character_id
 	_uses_external_simulation = existing_simulation != null
 	simulation = existing_simulation if existing_simulation != null else CombatSimulation.new(seed_value)
 
@@ -129,7 +133,7 @@ func initialize(
 	var opponent_position_check := _battlefield.is_position_legal(Fixture.OPPONENT_ID, opponent_position_microfeet, initial_occupancy)
 	if not opponent_position_check["legal"]:
 		return _failure("opponent_%s" % opponent_position_check["reason"])
-	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet, _encounter_fixture_id)
+	var result := Fixture.configure_simulation(simulation, player_position_microfeet, opponent_position_microfeet, _encounter_fixture_id, _player_character_id)
 	if result.get("success", false):
 		simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
 		simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
@@ -138,7 +142,7 @@ func initialize(
 		_attack_definition = result["attack_definition"]
 		_attack_definitions_by_actor = {
 			String(Fixture.PLAYER_ID): _attack_definition,
-			String(Fixture.OPPONENT_ID): _attack_definition,
+			String(Fixture.OPPONENT_ID): result.get("opponent_attack_definition", Fixture.make_attack_definition()),
 		}
 		_active_attack_ids_by_actor.clear()
 		_selected_target_id = Fixture.OPPONENT_ID
@@ -159,6 +163,8 @@ func initialize(
 		_player_movement_round_index = simulation.clock.get_round_index()
 		_player_movement_spent_microfeet = 0
 		_resolved_event_history_generation += 1
+		if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS:
+			simulation.configure_nac_automation(Fixture.PLAYER_ID, VaelisForce.default_nac_automation_settings())
 		_last_error = ""
 	else:
 		_initialized = false
@@ -197,26 +203,9 @@ func initialize_wave_one_goblins(
 		if not _battlefield.is_position_legal(actor_id, goblin_positions[index], occupancy).get("legal", false):
 			return _failure("goblin_spawn_position_illegal")
 
-	var player_attack := Fixture.make_attack_definition()
-	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
-	var player_validation := Fixture.validate_combatant_fixture(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
-	if not player_validation.get("success", false):
-		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
-	var player_registration := _register_wave_combatant(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
+	var player_registration := _register_selected_player()
 	if not player_registration.get("success", false):
 		return player_registration
-	_attack_definition = player_attack
-	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
 
 	_goblin_actor_ids = PackedStringArray()
 	for index in range(goblin_count):
@@ -329,26 +318,9 @@ func initialize_wave_two_spadoodles(
 		if not _battlefield.is_position_legal(actor_id, spadoodle_positions[index], occupancy).get("legal", false):
 			return _failure("spadoodle_spawn_position_illegal")
 
-	var player_attack := Fixture.make_attack_definition()
-	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
-	var player_validation := Fixture.validate_combatant_fixture(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
-	if not player_validation.get("success", false):
-		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
-	var player_registration := _register_wave_combatant(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
+	var player_registration := _register_selected_player()
 	if not player_registration.get("success", false):
 		return player_registration
-	_attack_definition = player_attack
-	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
 
 	_spadoodle_actor_ids = PackedStringArray()
 	for index in range(spadoodle_count):
@@ -450,26 +422,9 @@ func initialize_wave_three_skelly_hades(
 		if not _battlefield.is_position_legal(spawn_actor_id, spawn_positions[index], occupancy).get("legal", false):
 			return _failure("wave_three_spawn_position_illegal")
 
-	var player_attack := Fixture.make_attack_definition()
-	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
-	var player_validation := Fixture.validate_combatant_fixture(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
-	if not player_validation.get("success", false):
-		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
-	var player_registration := _register_wave_combatant(
-		player_actor,
-		Fixture.make_defense_profile(Fixture.PLAYER_ID),
-		Fixture.make_damage_protection_profile(Fixture.PLAYER_ID),
-		player_attack
-	)
+	var player_registration := _register_selected_player()
 	if not player_registration.get("success", false):
 		return player_registration
-	_attack_definition = player_attack
-	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
 
 	_skelly_actor_ids = PackedStringArray()
 	for index in range(skelly_count):
@@ -590,16 +545,9 @@ func initialize_wave_four_gargoyles(
 		if not _battlefield.is_position_legal(actor_id, gargoyle_positions[index], occupancy).get("legal", false):
 			return _failure("gargoyle_spawn_position_illegal")
 
-	var player_attack := Fixture.make_attack_definition()
-	var player_actor := Fixture.make_guard_actor(Fixture.PLAYER_ID, "Player Guard Fixture")
-	var player_validation := Fixture.validate_combatant_fixture(player_actor, Fixture.make_defense_profile(Fixture.PLAYER_ID), Fixture.make_damage_protection_profile(Fixture.PLAYER_ID), player_attack)
-	if not player_validation.get("success", false):
-		return _failure(String(player_validation.get("reason", "player_fixture_invalid")))
-	var player_registration := _register_wave_combatant(player_actor, Fixture.make_defense_profile(Fixture.PLAYER_ID), Fixture.make_damage_protection_profile(Fixture.PLAYER_ID), player_attack)
+	var player_registration := _register_selected_player()
 	if not player_registration.get("success", false):
 		return player_registration
-	_attack_definition = player_attack
-	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = player_attack
 
 	_gargoyle_actor_ids = PackedStringArray()
 	for index in range(gargoyle_count):
@@ -670,6 +618,32 @@ func _register_wave_combatant(
 	]:
 		if not registration.get("success", false):
 			return registration
+	return {"success": true}
+
+
+func _register_selected_player() -> Dictionary:
+	var actor := Fixture.make_player_actor(_player_character_id, Fixture.PLAYER_ID)
+	var attack := Fixture.make_player_attack_definition(_player_character_id)
+	var defense := Fixture.make_player_defense_profile(_player_character_id, Fixture.PLAYER_ID)
+	var protection := Fixture.make_player_damage_protection_profile(_player_character_id, Fixture.PLAYER_ID)
+	var validation := Fixture.validate_player_combatant(_player_character_id, actor, defense, protection, attack)
+	if not validation.get("success", false):
+		return _failure(String(validation.get("reason", "player_fixture_invalid")))
+	var registration := _register_wave_combatant(actor, defense, protection, attack)
+	if not registration.get("success", false):
+		return registration
+	if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS:
+		var hand_result := simulation.configure_actor_hand_occupancy(Fixture.PLAYER_ID, {
+			"left": String(Fixture.VAELIS_WAND_REF),
+			"right": String(Fixture.VAELIS_WEAPON_REF),
+		})
+		if not hand_result.get("success", false):
+			return _failure(String(hand_result.get("reason", "vaelis_hand_configuration_failed")))
+		var automation_result := simulation.configure_nac_automation(Fixture.PLAYER_ID, VaelisForce.default_nac_automation_settings())
+		if not automation_result.get("success", false):
+			return _failure(String(automation_result.get("reason", "vaelis_nac_configuration_failed")))
+	_attack_definition = attack
+	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = attack
 	return {"success": true}
 
 
@@ -1162,6 +1136,77 @@ func get_encounter_fixture_id() -> StringName:
 	return _encounter_fixture_id
 
 
+func get_player_character_id() -> StringName:
+	return _player_character_id
+
+
+func get_player_character_display_name() -> String:
+	return Fixture.get_player_character_display_name(_player_character_id)
+
+
+func get_player_primary_weapon_display_name() -> String:
+	return Fixture.get_player_primary_weapon_display_name(_player_character_id)
+
+
+func get_player_loadout_id() -> StringName:
+	return Fixture.get_player_loadout_id(_player_character_id)
+
+
+func get_player_equipment_refs() -> PackedStringArray:
+	var player_state := get_actor_state(Fixture.PLAYER_ID)
+	return PackedStringArray() if player_state == null else player_state.equipment_refs.duplicate()
+
+
+func request_player_special(
+	special_id: StringName,
+	target_id: StringName = &"",
+	automatic_activation: bool = false,
+	perceived_danger: bool = false
+) -> Dictionary:
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		return {"success": false, "reason": "player_special_not_available", "resource_spent": 0}
+	if not _encounter_active or _encounter_state != ENCOUNTER_RUNNING:
+		return {"success": false, "reason": "encounter_not_running", "resource_spent": 0}
+	if special_id == VaelisForce.FORCE_BOLT_ID:
+		var resolved_target := _selected_target_id if target_id == &"" else target_id
+		if resolved_target == &"":
+			return {"success": false, "reason": "no_target_selected", "resource_spent": 0}
+		var result := simulation.start_nac_projectile_special(
+			Fixture.PLAYER_ID, resolved_target,
+			VaelisForce.make_force_bolt_attack_definition(Fixture.VAELIS_WAND_REF),
+			_next_request_id("force_bolt"), VaelisForce.FORCE_BOLT_ID,
+			VaelisForce.FORCE_BOLT_MANA_COST, _selected_target_location,
+			_resolve_attack_final_line_of_sight(Fixture.PLAYER_ID, resolved_target),
+			automatic_activation, perceived_danger
+		)
+		if result.get("success", false) and result.has("attack_instance_id"):
+			_resolve_ready_attack_pipeline()
+		return result
+	if special_id == VaelisForce.FORCE_SHIELD_ID:
+		var shield_target := Fixture.PLAYER_ID if target_id == &"" else target_id
+		return simulation.start_verified_special_action(
+			Fixture.PLAYER_ID, shield_target, VaelisForce.make_force_shield_action_definition(),
+			_next_request_id("force_shield"), &"", shield_target == Fixture.PLAYER_ID
+		)
+	return {"success": false, "reason": "player_special_not_available", "resource_spent": 0}
+
+
+func cancel_player_force_shield() -> Dictionary:
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		return _failure("player_special_not_available")
+	return simulation.cancel_persistent_damage_shield(Fixture.PLAYER_ID, VaelisForce.FORCE_SHIELD_ID, _next_request_id("force_shield_cancel"))
+
+
+func configure_player_nac_automation(settings: Dictionary) -> Dictionary:
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		return _failure("player_special_not_available")
+	return simulation.configure_nac_automation(Fixture.PLAYER_ID, settings)
+
+
+func get_player_nac_automation() -> Dictionary:
+	return simulation.get_nac_automation(Fixture.PLAYER_ID)
+
+
 func get_encounter_display_name() -> String:
 	if _is_wave_one_goblin_encounter:
 		return "WAVE 1: %d COMMON GOBLINS" % _goblin_actor_ids.size()
@@ -1395,7 +1440,20 @@ func _request_actor_attack(attacker_id: StringName, target_id: StringName, input
 	elif attacker_id == Fixture.OPPONENT_ID:
 		_active_opponent_attack_id = attack_id
 	_active_attack_ids_by_actor[String(attacker_id)] = attack_id
+	if target_id == Fixture.PLAYER_ID and attacker_id != Fixture.PLAYER_ID:
+		_try_automatic_force_bolt_against(attacker_id)
 	return result
+
+
+func _try_automatic_force_bolt_against(threat_actor_id: StringName) -> void:
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+		return
+	var settings := simulation.get_nac_automation(Fixture.PLAYER_ID)
+	if not bool(settings.get("automatic_enabled", false)) or not bool(settings.get("offensive_triggers_enabled", true)):
+		return
+	# A concrete hostile physical declaration against Vaelis is authoritative
+	# perceived danger. Mere distance/proximity never reaches this boundary.
+	request_player_special(VaelisForce.FORCE_BOLT_ID, threat_actor_id, true, true)
 
 
 func _get_attack_definition_for_actor(actor_id: StringName) -> CombatAttackDefinition:
@@ -1425,6 +1483,12 @@ func _resolve_special_touch(actor_id: StringName, target_id: StringName) -> bool
 		var target_is_enemy := _wave_enemy_actor_ids().has(String(target_id))
 		if actor_is_enemy != target_is_enemy:
 			return false
+	elif (actor_id == Fixture.PLAYER_ID and target_id == Fixture.OPPONENT_ID) \
+	or (actor_id == Fixture.OPPONENT_ID and target_id == Fixture.PLAYER_ID):
+		# The bounded duel fixtures contain opposing combatants, not an ally.
+		# Fail closed rather than treating mere touch range as permission to
+		# apply a self-or-ally Special to an enemy.
+		return false
 	var actor_state := simulation.get_actor_state(actor_id)
 	var target_state := simulation.get_actor_state(target_id)
 	if actor_state == null or target_state == null:
@@ -2262,22 +2326,31 @@ func _resolve_ready_attack_pipeline() -> void:
 		for attack_snapshot: Dictionary in attack_snapshots:
 			var attack_id := String(attack_snapshot["attack_instance_id"])
 			var status := String(attack_snapshot["status"])
+			var attack := simulation.get_attack(attack_id)
 			if status == CombatAttackInstance.STATUS_PENDING_DEFENSE:
 				var defense_result := simulation.resolve_pending_defense_automatically(
 					attack_id,
 					_next_request_id("defense"),
-					_make_dodge_environment(simulation.get_attack(attack_id))
+					_make_dodge_environment(attack)
 				)
 				if not defense_result.get("success", false):
 					_last_error = String(defense_result.get("reason", "defense_resolution_failed"))
 				else:
 					changed = true
+					if attack != null and attack.strikes_per_act > 1:
+						break
 			elif status == CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED:
-				var damage_result := simulation.resolve_physical_damage(attack_id, _next_request_id("damage"))
+				var damage_result := (
+					simulation.resolve_nac_projectile_damage(attack_id, _next_request_id("special_damage"))
+					if attack != null and attack.is_special_attack
+					else simulation.resolve_physical_damage(attack_id, _next_request_id("damage"))
+				)
 				if not damage_result.get("success", false):
 					_last_error = String(damage_result.get("reason", "damage_resolution_failed"))
 				else:
 					changed = true
+					if attack != null and attack.strikes_per_act > 1:
+						break
 
 
 func _make_dodge_environment(attack: CombatAttackInstance) -> CombatDodgeEnvironment:
@@ -2295,7 +2368,11 @@ func _make_dodge_environment(attack: CombatAttackInstance) -> CombatDodgeEnviron
 		@warning_ignore("integer_division")
 		maximum_dodge_feet = defender_mr / 8
 	var attack_definition := _get_attack_definition_for_actor(attack.attacker_id)
-	var maximum_attack_range := 0 if attack_definition == null else int(attack_definition.maximum_range_microfeet)
+	var maximum_attack_range := (
+		VaelisForce.FORCE_BOLT_RANGE_MICROFEET
+		if attack.is_special_attack and attack.special_id == VaelisForce.FORCE_BOLT_ID
+		else (0 if attack_definition == null else int(attack_definition.maximum_range_microfeet))
+	)
 	var candidate_facts := _battlefield.build_dodge_candidate_facts(
 		attack.target_id,
 		defender_state.position_microfeet,

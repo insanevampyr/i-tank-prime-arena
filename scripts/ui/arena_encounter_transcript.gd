@@ -2,19 +2,21 @@ class_name ArenaEncounterTranscript
 extends RefCounted
 
 const SCHEMA_VERSION := 1
-const FIXTURE_ID := "prime_v3_guard_battle_axe_vertical_slice"
 
 
 static func build_text(session: ArenaCombatSession, seed_value: int, build_version: String) -> String:
 	if session == null:
 		return ""
 	var events := session.get_resolved_events()
+	var equipment_refs := Array(session.get_player_equipment_refs())
 	var lines := PackedStringArray([
 		"ITank Prime: Arena - Authoritative Encounter Transcript",
-		"Build: %s" % build_version,
+		"Project version: %s" % build_version,
 		"Godot: %s" % Engine.get_version_info().get("string", "unknown"),
 		"Seed: %d" % seed_value,
-		"Fixture: %s (%s)" % [FIXTURE_ID, String(session.get_encounter_fixture_id())],
+		"Fixture: %s" % String(session.get_encounter_fixture_id()),
+		"Player: %s (%s)" % [session.get_player_character_display_name(), String(session.get_player_character_id())],
+		"Loadout: %s equipment=%s" % [String(session.get_player_loadout_id()), JSON.stringify(equipment_refs)],
 		"Transcript schema: %d" % SCHEMA_VERSION,
 		"Simulation schema: %s" % session.simulation.get_state_snapshot().get("schema_version", "unknown"),
 		"Retention: complete current encounter; RESET starts a new transcript",

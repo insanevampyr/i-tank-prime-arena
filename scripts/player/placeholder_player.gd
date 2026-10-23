@@ -8,6 +8,8 @@ const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd
 
 const HALF_SIZE: float = 16.0
 const INTENTIONAL_STOP_GRACE_US: int = 100_000
+const FORCE_SHIELD_COLOR := Color(0.35, 0.9, 1.0, 0.82)
+const FORCE_SHIELD_GLOW_COLOR := Color(0.35, 0.9, 1.0, 0.24)
 
 # Test-profile values only; these do not define Aren or Garrick.
 @export var test_base_mr: int = 11
@@ -30,6 +32,7 @@ var _stationary_intent_us: int = 0
 var _run_was_held: bool = false
 var _combat_movement_locked: bool = false
 var _authoritative_movement_resolver: Callable
+var _force_shield_visual_active: bool = false
 
 @onready var _movement_debug_label: Label = get_node_or_null(movement_debug_label_path)
 @onready var _touch_controls: Node = get_node_or_null(touch_controls_path)
@@ -39,6 +42,14 @@ func _ready() -> void:
 	assert(pixels_per_foot > 0.0, "Visual pixels-per-foot scale must be positive.")
 	_reset_movement_model(position / pixels_per_foot)
 	_update_debug_label()
+	queue_redraw()
+
+
+func _draw() -> void:
+	if not _force_shield_visual_active:
+		return
+	draw_arc(Vector2.ZERO, 23.0, 0.0, TAU, 48, FORCE_SHIELD_GLOW_COLOR, 5.0, true)
+	draw_arc(Vector2.ZERO, 22.0, 0.0, TAU, 48, FORCE_SHIELD_COLOR, 2.0, true)
 
 
 func reset_for_encounter(position_feet: Vector2) -> void:
@@ -149,6 +160,17 @@ func set_authoritative_movement_resolver(resolver: Callable) -> void:
 	_authoritative_movement_resolver = resolver
 
 
+func set_force_shield_visual_active(active: bool) -> void:
+	if _force_shield_visual_active == active:
+		return
+	_force_shield_visual_active = active
+	queue_redraw()
+
+
+func is_force_shield_visual_active_for_testing() -> bool:
+	return _force_shield_visual_active
+
+
 func get_movement_state_for_testing() -> Dictionary:
 	return {} if _movement == null else _movement.to_dictionary()
 
@@ -166,6 +188,8 @@ func configure_authoritative_actor_profile(actor_definition: CombatActorDefiniti
 	test_effective_spd = int(actor_definition.attributes["spd"])
 	test_effective_end = int(actor_definition.attributes["end"])
 	test_roll_bonus = int(actor_definition.get_combat_stat("rb"))
+	test_running_skill_investment = int(actor_definition.combat_stats.get("running_skill_investment", Fixture.PLAYER_RUNNING_SKILL_INVESTMENT))
+	test_skill_check_modifier = int(actor_definition.combat_stats.get("running_scm", Fixture.PLAYER_RUNNING_SCM))
 	if _movement != null:
 		_reset_movement_model(_movement.position_feet)
 	return validate_running_profile(actor_definition)
@@ -179,8 +203,8 @@ func validate_running_profile(actor_definition: CombatActorDefinition) -> Dictio
 		"effective_spd": actor_definition.attributes.get("spd"),
 		"effective_end": actor_definition.attributes.get("end"),
 		"roll_bonus": actor_definition.get_combat_stat("rb"),
-		"running_skill_investment": Fixture.PLAYER_RUNNING_SKILL_INVESTMENT,
-		"skill_check_modifier": Fixture.PLAYER_RUNNING_SCM,
+		"running_skill_investment": actor_definition.combat_stats.get("running_skill_investment", Fixture.PLAYER_RUNNING_SKILL_INVESTMENT),
+		"skill_check_modifier": actor_definition.combat_stats.get("running_scm", Fixture.PLAYER_RUNNING_SCM),
 	}
 	var actual := {
 		"base_mr": test_base_mr,

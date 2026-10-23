@@ -29,6 +29,10 @@ const HADES_COMBAT_FOLLOWER_LOADOUT_PATH := "res://data/loadouts/prime_v3_hades_
 const MINI_GARGOYLE_CHARACTER_PATH := "res://data/characters/prime_v3_uncommon_mini_gargoyle_swarmer.tres"
 const MINI_GARGOYLE_NATURAL_ATTACKS_PATH := "res://data/equipment/weapons/prime_v3_mini_gargoyle_natural_attacks.tres"
 const MINI_GARGOYLE_LOADOUT_PATH := "res://data/loadouts/prime_v3_mini_gargoyle_natural_attacks.tres"
+const VAELIS_CHARACTER_PATH := "res://data/characters/vaelis_thorn.tres"
+const SHORT_SWORD_PATH := "res://data/equipment/weapons/prime_v3_short_sword.tres"
+const SHORT_WAND_PATH := "res://data/equipment/weapons/prime_v3_short_wand.tres"
+const VAELIS_LOADOUT_PATH := "res://data/loadouts/vaelis_thorn_short_sword_wand.tres"
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -66,6 +70,10 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_character(load(MINI_GARGOYLE_CHARACTER_PATH) as CombatCharacterDefinitionResource)
 	catalog.register_weapon(load(MINI_GARGOYLE_NATURAL_ATTACKS_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_loadout(load(MINI_GARGOYLE_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
+	catalog.register_character(load(VAELIS_CHARACTER_PATH) as CombatCharacterDefinitionResource)
+	catalog.register_weapon(load(SHORT_SWORD_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_weapon(load(SHORT_WAND_PATH) as CombatWeaponDefinitionResource)
+	catalog.register_loadout(load(VAELIS_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 
 
@@ -223,15 +231,16 @@ func _validate_strength_requirement(issues: Array[Dictionary], strength_value: V
 
 
 func _validate_equipment_refs(issues: Array[Dictionary], strength_value: Variant, equipment_refs: PackedStringArray) -> void:
-	var weapon: CombatWeaponDefinitionResource = null
+	var equipped_weapons: Array[CombatWeaponDefinitionResource] = []
 	var shield: CombatShieldDefinitionResource = null
 	var occupied_armor_slots: Dictionary = {}
 	for equipment_ref: String in equipment_refs:
 		if weapons.has(equipment_ref):
-			if weapon != null:
-				issues.append(_issue("invalid", "multiple_primary_weapons_not_supported", {"equipment_ref": equipment_ref}))
+			if equipped_weapons.size() >= 2:
+				issues.append(_issue("invalid", "too_many_weapons_not_supported", {"equipment_ref": equipment_ref}))
 				continue
-			weapon = weapons[equipment_ref]
+			var weapon: CombatWeaponDefinitionResource = weapons[equipment_ref]
+			equipped_weapons.append(weapon)
 			issues.append_array(weapon.validate_definition())
 			_validate_strength_requirement(issues, strength_value, weapon.strength_requirement, weapon.definition_id)
 		elif shields.has(equipment_ref):
@@ -255,18 +264,21 @@ func _validate_equipment_refs(issues: Array[Dictionary], strength_value: Variant
 				occupied_armor_slots[armor_slot] = equipment_ref
 		else:
 			issues.append(_issue("invalid", "missing_equipment_definition", {"equipment_ref": equipment_ref}))
-	if weapon == null:
+	if equipped_weapons.is_empty():
 		issues.append(_issue("invalid", "missing_primary_weapon_equipment"))
 		return
 	if strength_value == null or typeof(strength_value) != TYPE_INT:
 		return
-	var weapon_hands := weapon.effective_hands_required(int(strength_value))
-	if weapon_hands == CombatWeaponDefinitionResource.INVALID_HAND_REQUIREMENT:
-		return
+	var weapon_hands := 0
+	for weapon: CombatWeaponDefinitionResource in equipped_weapons:
+		var required_hands := weapon.effective_hands_required(int(strength_value))
+		if required_hands == CombatWeaponDefinitionResource.INVALID_HAND_REQUIREMENT:
+			return
+		weapon_hands += required_hands
 	var shield_hands := 0 if shield == null else shield.hand_occupancy
 	if weapon_hands + shield_hands > WEAPON_HAND_CAPACITY:
 		issues.append(_issue("invalid", "equipment_hand_occupancy_conflict", {
-			"weapon_ref": String(weapon.definition_id),
+			"weapon_refs": equipped_weapons.map(func(item: CombatWeaponDefinitionResource) -> String: return String(item.definition_id)),
 			"weapon_hands": weapon_hands,
 			"shield_ref": "" if shield == null else String(shield.definition_id),
 			"shield_hands": shield_hands,

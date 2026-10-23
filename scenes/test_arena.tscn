@@ -53,6 +53,7 @@ combat_log_path = NodePath("HUD/UI/CombatLog")
 developer_debug_path = NodePath("HUD/UI/DeveloperDebugOverlay")
 encounter_button_path = NodePath("HUD/UI/EncounterButton")
 encounter_selector_path = NodePath("HUD/UI/EncounterSelector")
+character_selector_path = NodePath("HUD/UI/CharacterSelector")
 debug_button_path = NodePath("HUD/UI/DebugButton")
 attack_readiness_path = NodePath("HUD/UI/AttackReadiness")
 run_readiness_path = NodePath("HUD/UI/RunReadiness")
@@ -136,6 +137,17 @@ mouse_default_cursor_shape = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 14
 text = "APPLY"
+
+[node name="CharacterSelector" type="Button" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 370.0
+offset_top = 94.0
+offset_right = 570.0
+offset_bottom = 126.0
+mouse_default_cursor_shape = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "CHAR: GUARD"
 
 [node name="MovementDebug" type="Label" parent="HUD/UI"]
 layout_mode = 0
@@ -452,6 +464,7 @@ developer_debug_path = NodePath("../HUD/UI/DeveloperDebugOverlay")
 target_indicator_path = NodePath("../TargetIndicator")
 encounter_button_path = NodePath("../HUD/UI/EncounterButton")
 encounter_selector_path = NodePath("../HUD/UI/EncounterSelector")
+character_selector_path = NodePath("../HUD/UI/CharacterSelector")
 seed_label_path = NodePath("../HUD/UI/SeedLabel")
 seed_input_path = NodePath("../HUD/UI/SeedInput")
 seed_apply_button_path = NodePath("../HUD/UI/SeedApplyButton")

@@ -700,7 +700,7 @@ func start_verified_special_action(
 		return _failure("verified_special_unresolved")
 	var special_definition: Dictionary = special
 	var kind := String(special_definition.get("kind", ""))
-	if not ["called_shot", "healing", "timed_stat_effect"].has(kind):
+	if not ["called_shot", "healing", "timed_stat_effect", "persistent_damage_shield"].has(kind):
 		return _failure("verified_special_kind_unresolved")
 	var actor_state := get_actor_state(actor_id)
 	var target_state := get_actor_state(target_id)
@@ -726,6 +726,12 @@ func start_verified_special_action(
 			return _failure("timed_stat_effect_unresolved")
 		if target_state.timed_stat_effects.has(String(effect.get("effect_id", ""))):
 			return _failure("timed_stat_effect_already_active")
+	if kind == "persistent_damage_shield":
+		var shield_id := String(special_definition.get("shield_id", ""))
+		if shield_id.is_empty() or int(special_definition.get("capacity", 0)) <= 0:
+			return _failure("persistent_damage_shield_unresolved")
+		if target_state.persistent_damage_shields.has(shield_id):
+			return _failure("persistent_damage_shield_already_active")
 	var required_material := String(special_definition.get("requires_material", ""))
 	if not required_material.is_empty():
 		var held_count := int(actor_state.held_materials.get(required_material, 0))
@@ -773,6 +779,149 @@ func start_verified_special_action(
 	return result
 
 
+func start_nac_projectile_special(
+	actor_id: StringName,
+	target_id: StringName,
+	definition: CombatAttackDefinition,
+	request_id: String,
+	special_id: StringName,
+	mana_cost: int,
+	target_location: StringName = &"torso",
+	authoritative_line_of_sight: Variant = null,
+	automatic_activation: bool = false,
+	perceived_danger: bool = false
+) -> Dictionary:
+	if not _combat_started:
+		return _failure("opening_initiative_unresolved")
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	if definition == null or definition.delivery_class != &"magic_projectile" \
+	or definition.strikes_per_act != 1 or String(special_id).is_empty() or mana_cost <= 0:
+		return _failure("nac_projectile_definition_invalid")
+	var actor_state := get_actor_state(actor_id)
+	var target_state := get_actor_state(target_id)
+	var actor_definition := get_actor_definition(actor_id)
+	var target_definition := get_actor_definition(target_id)
+	if actor_state == null or actor_definition == null:
+		return _failure("unknown_actor")
+	if target_state == null or target_definition == null:
+		return _failure("unknown_target")
+	if actor_id == target_id:
+		return _failure("self_target_not_allowed")
+	if int(actor_state.current_hpc) <= 0:
+		return _failure("attacker_not_eligible")
+	if int(target_state.current_hpc) <= 0:
+		return _failure("target_not_eligible")
+	if automatic_activation and not perceived_danger:
+		return _failure("automatic_nac_danger_not_perceived")
+	if actor_state.awareness != &"aware":
+		return _failure("attacker_unaware")
+	if not actor_state.equipment_refs.has(String(definition.weapon_ref)):
+		return _failure("casting_focus_not_equipped")
+	if actor_state.hand_occupancy_authoritative \
+	and not actor_state.hand_occupancy.values().has(String(definition.weapon_ref)):
+		return _failure("casting_focus_not_in_hand")
+	if int(actor_state.resources.get("mana", 0)) < mana_cost:
+		return _failure("insufficient_mana")
+	var round_index := clock.get_round_index()
+	var uses_this_round := actor_state.nac_uses_this_round if actor_state.nac_round_index == round_index else 0
+	if uses_this_round >= 5:
+		return _failure("nac_round_cap_reached")
+	if automatic_activation:
+		var settings: Dictionary = actor_state.nac_automation_settings
+		if not bool(settings.get("automatic_enabled", false)):
+			return _failure("automatic_nac_disabled")
+		if int(actor_state.resources.get("mana", 0)) - mana_cost < int(settings.get("minimum_mana_reserve", 0)):
+			return _failure("automatic_nac_mana_reserve")
+		var automatic_budget := mini(int(settings.get("automatic_nac_budget", 5)), 5)
+		var automatic_uses := actor_state.automatic_nac_uses_this_round if actor_state.nac_round_index == round_index else 0
+		if automatic_uses >= automatic_budget:
+			return _failure("automatic_nac_budget_reached")
+	var resolved_location := &"torso" if String(target_location).is_empty() else target_location
+	if not definition.allowed_target_locations.has(String(resolved_location)):
+		return _failure("illegal_target_location")
+	var location_context := _resolve_location_acc_context(definition, actor_definition, target_definition, resolved_location)
+	if not location_context.get("success", false):
+		return _failure(String(location_context.get("reason", "unresolved_location_acc_modifier")))
+	var offset := target_state.position_microfeet - actor_state.position_microfeet
+	var elevation_offset := target_state.elevation_microfeet - actor_state.elevation_microfeet
+	var distance_squared := offset.x * offset.x + offset.y * offset.y + elevation_offset * elevation_offset
+	var maximum_range := int(definition.maximum_range_microfeet)
+	if distance_squared > maximum_range * maximum_range:
+		return _failure("target_out_of_range")
+	if definition.requires_line_of_sight and authoritative_line_of_sight != true:
+		return _failure("line_of_sight_unverified")
+	var ss_value: Variant = actor_definition.get_combat_stat("ss")
+	if ss_value == null:
+		return _failure("special_skill_unresolved")
+	var definition_key := String(definition.attack_definition_id)
+	if _attack_definitions.has(definition_key) \
+	and (_attack_definitions[definition_key] as CombatAttackDefinition).to_dictionary() != definition.to_dictionary():
+		return _failure("conflicting_attack_definition")
+	_attack_definitions[definition_key] = definition
+	actor_state.resources["mana"] = int(actor_state.resources["mana"]) - mana_cost
+	if actor_state.nac_round_index != round_index:
+		actor_state.nac_round_index = round_index
+		actor_state.nac_uses_this_round = 0
+		actor_state.automatic_nac_uses_this_round = 0
+	actor_state.nac_uses_this_round += 1
+	if automatic_activation:
+		actor_state.automatic_nac_uses_this_round += 1
+	actor_state.revision += 1
+	_state_revision += 1
+	var committed := _record_resolved_event(clock.get_elapsed_us(), &"nac_special_committed", _get_actor_initiative(String(actor_id)), actor_id, target_id, {
+		"special_id": String(special_id),
+		"mana_cost": mana_cost,
+		"mana_after": int(actor_state.resources["mana"]),
+		"ordinary_acts_spent": 0,
+		"nac_round_index": round_index,
+		"nac_uses_this_round": actor_state.nac_uses_this_round,
+		"nac_round_cap": 5,
+		"automatic_activation": automatic_activation,
+		"request_id": request_id,
+	}, "", PackedStringArray(), {"mana": mana_cost})
+	var natural_ss := roll_int(1, 20)
+	var roll_bonus := _get_actor_roll_bonus(actor_definition)
+	var adjusted_ss := natural_ss - roll_bonus
+	var ss_success := adjusted_ss <= int(ss_value)
+	var ss_event := _record_resolved_event(clock.get_elapsed_us(), &"special_skill_resolved", _get_actor_initiative(String(actor_id)), actor_id, target_id, {
+		"special_id": String(special_id), "ss_target": int(ss_value), "natural_d20": natural_ss,
+		"roll_bonus": roll_bonus, "adjusted_roll": adjusted_ss, "success": ss_success,
+		"rng_draw_index": random.get_draw_count(),
+	}, committed.event_id)
+	_accepted_request_ids[request_id] = ss_event.event_id
+	if not ss_success:
+		return _success({"special_success": false, "reason": "special_skill_failed", "event_id": ss_event.event_id})
+	var attack_instance_id := _make_attack_instance_id(_next_attack_sequence)
+	_next_attack_sequence += 1
+	var attack := CombatAttackInstance.new(
+		attack_instance_id, definition, "", actor_id, target_id, resolved_location,
+		clock.get_elapsed_us(), int(actor_definition.get_combat_stat("acc")), int(location_context["location_acc_modifier"]),
+		roll_bonus, false, StringName(location_context.get("size_relationship", "")),
+		StringName(location_context.get("attacker_size_category", "")), StringName(location_context.get("target_size_category", "")),
+		int(location_context.get("tiny_target_dodge_bonus", 0))
+	)
+	attack.is_special_attack = true
+	attack.special_id = special_id
+	attack.special_knockback_microfeet = 2_000_000
+	attack.declared_attacker_position_microfeet = actor_state.position_microfeet
+	attack.declared_target_position_microfeet = target_state.position_microfeet
+	attack.declared_attacker_elevation_microfeet = actor_state.elevation_microfeet
+	attack.declared_target_elevation_microfeet = target_state.elevation_microfeet
+	attack.declaration_line_of_sight_verified = authoritative_line_of_sight
+	_attacks[attack_instance_id] = attack
+	_state_revision += 1
+	var declared := _record_resolved_event(clock.get_elapsed_us(), &"special_attack_declared", _get_actor_initiative(String(actor_id)), actor_id, target_id, {
+		"attack_instance_id": attack_instance_id, "special_id": String(special_id),
+		"target_location": String(resolved_location), "weapon_ref": String(attack.weapon_ref),
+		"ordinary_acts_spent": 0, "automatic_activation": automatic_activation,
+	}, ss_event.event_id)
+	_resolve_instant_special_accuracy(attack, definition, declared.event_id)
+	return _success({"special_success": true, "attack_instance_id": attack_instance_id, "event_id": attack.result_event_id})
+
+
 func start_physical_attack(
 	attacker_id: StringName,
 	target_id: StringName,
@@ -809,11 +958,14 @@ func start_physical_attack(
 	var nac_validation := _validate_nac_attack_context(attacker_state, nac_attack_context)
 	if not nac_validation.get("success", false):
 		return nac_validation
-	if not attacker_state.equipment_refs.has(String(definition.weapon_ref)):
-		return _failure("weapon_not_equipped")
-	if attacker_state.hand_occupancy_authoritative \
-	and not attacker_state.hand_occupancy.values().has(String(definition.weapon_ref)):
-		return _failure("weapon_not_in_hand")
+	for strike_index in range(1, definition.strikes_per_act + 1):
+		var strike_profile := definition.get_strike_profile(strike_index)
+		var strike_weapon_ref := String(strike_profile.get("weapon_ref", String(definition.weapon_ref)))
+		if not attacker_state.equipment_refs.has(strike_weapon_ref):
+			return _failure("weapon_not_equipped")
+		if attacker_state.hand_occupancy_authoritative \
+		and not attacker_state.hand_occupancy.values().has(strike_weapon_ref):
+			return _failure("weapon_not_in_hand")
 	var attacker_definition: CombatActorDefinition = _actor_definitions[attacker_key]
 	var base_acc_value: Variant = attacker_definition.get_combat_stat("acc")
 	if base_acc_value == null:
@@ -888,6 +1040,11 @@ func start_physical_attack(
 			attack.damage_dice_count_override = int(strike_profile["dice_count"])
 			attack.damage_die_sides_override = int(strike_profile["die_sides"])
 			attack.damage_types = PackedStringArray(strike_profile.get("damage_types", Array(definition.damage_types)))
+			attack.weapon_ref = StringName(strike_profile.get("weapon_ref", String(definition.weapon_ref)))
+			attack.minimum_range_microfeet_override = strike_profile.get("minimum_range_microfeet", definition.minimum_range_microfeet)
+			attack.maximum_range_microfeet_override = strike_profile.get("maximum_range_microfeet", definition.maximum_range_microfeet)
+			attack.flat_bonus_override = strike_profile.get("flat_bonus", null)
+			attack.strength_bonus_eligible_override = strike_profile.get("strength_bonus_eligible", null)
 		if not nac_attack_context.is_empty():
 			attack.consequence_damage_multipliers.append((nac_attack_context["damage_multiplier"] as Dictionary).duplicate(true))
 		if called_shot_matches:
@@ -898,12 +1055,12 @@ func start_physical_attack(
 			clock.get_elapsed_us(), &"physical_attack_declared", _get_actor_initiative(attacker_key), attacker_id, target_id,
 			{
 				"attack_instance_id": attack_instance_id, "action_instance_id": action_instance_id,
-				"attack_definition_id": definition_key, "weapon_ref": String(definition.weapon_ref),
+				"attack_definition_id": definition_key, "weapon_ref": String(attack.weapon_ref),
 				"target_location": String(resolved_location), "size_relationship": String(attack.size_relationship),
 				"attacker_size_category": String(attack.attacker_size_category), "target_size_category": String(attack.target_size_category),
 				"tiny_target_dodge_bonus": attack.tiny_target_dodge_bonus, "location_acc_modifier": attack.location_acc_modifier,
 				"acc_target": attack.acc_target, "distance_squared_microfeet": distance_squared, "request_id": request_id,
-				"delivery_class": String(definition.delivery_class), "damage_types": Array(definition.damage_types),
+				"delivery_class": String(attack.delivery_class), "damage_types": Array(attack.damage_types),
 				"physical_soak_eligible": definition.physical_soak_eligible, "is_back_attack": is_back_attack,
 				"strike_index": strike_index, "strikes_per_act": definition.strikes_per_act,
 				"strike_label": attack.strike_label,
@@ -990,6 +1147,8 @@ func resolve_pending_defense(
 		return _failure("defense_profile_unresolved")
 	var profile: CombatDefenseProfile = _defense_profiles[defender_key]
 	var defender_state: CombatActorState = _actor_states[defender_key]
+	if _committed_multistrike_target_is_incapacitated(attack, defender_state):
+		return _exhaust_defenses_for_incapacitated_target(attack, request_id)
 	var defender_definition: CombatActorDefinition = _actor_definitions[defender_key]
 	if _get_actor_roll_bonus(defender_definition) < 0:
 		return _failure("invalid_actor_roll_bonus")
@@ -1187,6 +1346,90 @@ func resolve_pending_defense_automatically(
 	return resolve_pending_defense(attack_instance_id, request_id, dodge_context)
 
 
+func _committed_multistrike_target_is_incapacitated(
+	attack: CombatAttackInstance,
+	defender_state: CombatActorState
+) -> bool:
+	return not attack.is_special_attack \
+		and not attack.action_instance_id.is_empty() \
+		and attack.strikes_per_act > 1 \
+		and attack.strike_index > 1 \
+		and defender_state.current_hpc != null \
+		and int(defender_state.current_hpc) <= 0 \
+		and _prior_committed_strike_established_incapacitation(attack)
+
+
+func _prior_committed_strike_established_incapacitation(attack: CombatAttackInstance) -> bool:
+	for prior_attack_id: String in _get_linked_attack_instance_ids(attack.action_instance_id):
+		var prior_attack: CombatAttackInstance = _attacks.get(prior_attack_id)
+		if prior_attack == null \
+		or prior_attack.target_id != attack.target_id \
+		or prior_attack.strike_index >= attack.strike_index \
+		or prior_attack.status != CombatAttackInstance.STATUS_DAMAGE_RESOLVED \
+		or prior_attack.damage_resolution_id.is_empty():
+			continue
+		var damage_resolution: CombatDamageResolution = _damage_resolutions.get(prior_attack.damage_resolution_id)
+		if damage_resolution != null \
+		and damage_resolution.hpc_before > 0 \
+		and damage_resolution.hpc_after <= 0:
+			return true
+	return false
+
+
+func _exhaust_defenses_for_incapacitated_target(
+	attack: CombatAttackInstance,
+	request_id: String
+) -> Dictionary:
+	var defender_key := String(attack.target_id)
+	var profile: CombatDefenseProfile = _defense_profiles[defender_key]
+	var defense_resolution_id := _make_defense_resolution_id(_next_defense_sequence)
+	_next_defense_sequence += 1
+	var resolution := CombatDefenseResolution.new(
+		defense_resolution_id,
+		attack.attack_instance_id,
+		attack.target_id,
+		profile,
+		clock.get_elapsed_us(),
+		request_id
+	)
+	resolution.status = CombatDefenseResolution.STATUS_EXHAUSTED
+	resolution.resolved_at_us = clock.get_elapsed_us()
+	resolution.revision += 1
+	_defense_resolutions[defense_resolution_id] = resolution
+	_defense_by_attack_id[attack.attack_instance_id] = defense_resolution_id
+	_accepted_defense_request_ids[request_id] = defense_resolution_id
+	attack.defense_resolution_id = defense_resolution_id
+	attack.status = CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED
+	attack.revision += 1
+	_state_revision += 1
+	var resolved := _record_resolved_event(
+		clock.get_elapsed_us(),
+		&"physical_defense_skipped_incapacitated",
+		_get_actor_initiative(defender_key),
+		attack.target_id,
+		attack.attacker_id,
+		{
+			"defense_resolution_id": defense_resolution_id,
+			"attack_instance_id": attack.attack_instance_id,
+			"action_instance_id": attack.action_instance_id,
+			"status": resolution.status,
+			"reason": "target_incapacitated_after_committed_prior_strike",
+			"attempt_count": 0,
+			"strike_index": attack.strike_index,
+			"strikes_per_act": attack.strikes_per_act,
+			"damage_applied": false,
+		},
+		attack.result_event_id
+	)
+	resolution.start_event_id = resolved.event_id
+	resolution.final_event_id = resolved.event_id
+	return _success({
+		"defense_resolution_id": defense_resolution_id,
+		"status": resolution.status,
+		"reason": "target_incapacitated_after_committed_prior_strike",
+	})
+
+
 func complete_pending_dodge_displacement(
 	attack_instance_id: String,
 	request_id: String,
@@ -1277,7 +1520,7 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		request_id,
 		clock.get_elapsed_us()
 	)
-	resolution.flat_bonus = definition.flat_bonus
+	resolution.flat_bonus = int(preparation["flat_bonus"])
 	resolution.strength_bonus = preparation["strength_bonus"]
 	var damage_dice_count := int(preparation["damage_dice_count"])
 	var damage_die_sides := int(preparation["damage_die_sides"])
@@ -1321,6 +1564,10 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		resolution.final_damage = 1
 	else:
 		resolution.final_damage = maxi(running_total, 0)
+	var shield_result := _absorb_with_persistent_damage_shield(target_state, resolution.final_damage)
+	resolution.protective_points_absorbed = int(shield_result.get("absorbed", 0))
+	resolution.protective_points_remaining = int(shield_result.get("remaining", 0))
+	resolution.final_damage = int(shield_result.get("unabsorbed", resolution.final_damage))
 	resolution.hpc_before = int(target_state.current_hpc)
 	resolution.hpc_after = resolution.hpc_before - resolution.final_damage
 	target_state.current_hpc = resolution.hpc_after
@@ -1350,6 +1597,8 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 			"multiplied_total": resolution.multiplied_total,
 			"armor_tal": resolution.armor_tal,
 			"natural_armor_level": resolution.natural_armor_level,
+			"protective_points_absorbed": resolution.protective_points_absorbed,
+			"protective_points_remaining": resolution.protective_points_remaining,
 			"final_damage": resolution.final_damage,
 			"hpc_before": resolution.hpc_before,
 			"hpc_after": resolution.hpc_after,
@@ -1360,11 +1609,150 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 		{"hpc": resolution.final_damage}
 	)
 	resolution.event_id = event.event_id
+	if resolution.protective_points_absorbed > 0:
+		_record_resolved_event(clock.get_elapsed_us(), &"persistent_damage_shield_absorbed", _get_actor_initiative(String(attack.target_id)), attack.target_id, attack.attacker_id, {
+			"attack_instance_id": attack_instance_id,
+			"shield_id": String(shield_result.get("shield_id", "")),
+			"absorbed": resolution.protective_points_absorbed,
+			"remaining": resolution.protective_points_remaining,
+			"depleted": bool(shield_result.get("depleted", false)),
+		}, event.event_id)
+		_apply_force_shield_attacker_knockback(attack, int(shield_result.get("knockback_microfeet", 0)), event.event_id)
 	if resolution.final_damage > 0:
 		_schedule_special_interruption_for_physical_hit(attack.target_id, attack.attacker_id, event.event_id)
 		_apply_successful_hit_knockback(attack, event.event_id)
 	_finalize_deferred_critical_consequences(attack)
 	return _success({"damage_resolution_id": resolution_id, "final_damage": resolution.final_damage})
+
+
+func _absorb_with_persistent_damage_shield(target_state: CombatActorState, incoming_damage: int) -> Dictionary:
+	if incoming_damage <= 0 or target_state.persistent_damage_shields.is_empty():
+		return {"absorbed": 0, "remaining": 0, "unabsorbed": incoming_damage, "depleted": false}
+	var shield_ids: Array = target_state.persistent_damage_shields.keys()
+	shield_ids.sort()
+	var shield_id := String(shield_ids[0])
+	var shield: Dictionary = target_state.persistent_damage_shields[shield_id]
+	var capacity := int(shield.get("capacity", 0))
+	var absorbed := mini(incoming_damage, capacity)
+	var remaining := capacity - absorbed
+	shield["capacity"] = remaining
+	if remaining <= 0:
+		target_state.persistent_damage_shields.erase(shield_id)
+	else:
+		target_state.persistent_damage_shields[shield_id] = shield
+	target_state.revision += 1
+	_state_revision += 1
+	return {
+		"shield_id": shield_id, "absorbed": absorbed, "remaining": remaining,
+		"unabsorbed": incoming_damage - absorbed, "depleted": remaining <= 0,
+		"knockback_microfeet": int(shield.get("physical_attacker_knockback_microfeet", 0)),
+	}
+
+
+func _apply_force_shield_attacker_knockback(attack: CombatAttackInstance, knockback_microfeet: int, parent_event_id: String) -> void:
+	if knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
+		return
+	var attacker_state := get_actor_state(attack.attacker_id)
+	if attacker_state == null:
+		return
+	var start := attacker_state.position_microfeet
+	var result: Variant = _rage_knockback_resolver.call(attack.target_id, attack.attacker_id, knockback_microfeet)
+	if typeof(result) != TYPE_DICTIONARY or not (result as Dictionary).get("success", false):
+		return
+	var destination: Vector2i = (result as Dictionary).get("position_microfeet", start)
+	if destination != start:
+		apply_authoritative_forced_position(attack.attacker_id, destination, int((result as Dictionary).get("facing_millidegrees", attacker_state.facing_millidegrees)), parent_event_id, "force_shield_knockback")
+	_record_resolved_event(clock.get_elapsed_us(), &"force_shield_knockback_resolved", _get_actor_initiative(String(attack.target_id)), attack.target_id, attack.attacker_id, {
+		"attack_instance_id": attack.attack_instance_id,
+		"requested_distance_microfeet": knockback_microfeet,
+		"start_microfeet": [start.x, start.y], "position_microfeet": [destination.x, destination.y],
+		"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
+	}, parent_event_id)
+
+
+func resolve_nac_projectile_damage(attack_instance_id: String, request_id: String) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_special_damage_request_ids.has(request_id):
+		return _failure("duplicate_special_damage_request")
+	var attack := get_attack(attack_instance_id)
+	if attack == null:
+		return _failure("unknown_attack")
+	if not attack.is_special_attack or attack.special_id != &"force_bolt":
+		return _failure("unsupported_nac_projectile")
+	if attack.status != CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED:
+		return _failure("attack_not_damage_eligible")
+	var target_state := get_actor_state(attack.target_id)
+	if target_state == null or target_state.current_hpc == null:
+		return _failure("target_hpc_unresolved")
+	var damage_roll := roll_int(1, 6)
+	var hpc_before := int(target_state.current_hpc)
+	target_state.current_hpc = hpc_before - damage_roll
+	target_state.revision += 1
+	attack.status = CombatAttackInstance.STATUS_DAMAGE_RESOLVED
+	attack.revision += 1
+	_accepted_special_damage_request_ids[request_id] = attack_instance_id
+	_state_revision += 1
+	var parent_event_id := attack.result_event_id
+	if not attack.defense_resolution_id.is_empty() and _defense_resolutions.has(attack.defense_resolution_id):
+		parent_event_id = (_defense_resolutions[attack.defense_resolution_id] as CombatDefenseResolution).final_event_id
+	var event := _record_resolved_event(clock.get_elapsed_us(), &"force_bolt_damage_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+		"attack_instance_id": attack_instance_id, "special_id": String(attack.special_id),
+		"damage_roll": damage_roll, "rng_draw_index": random.get_draw_count(),
+		"final_damage": damage_roll, "hpc_before": hpc_before,
+		"hpc_after": int(target_state.current_hpc), "damage_applied": true,
+	}, parent_event_id, PackedStringArray(), {"hpc": damage_roll})
+	_apply_special_projectile_knockback(attack, event.event_id)
+	_schedule_nac_physical_action_interruption(attack, event.event_id)
+	return _success({"final_damage": damage_roll, "event_id": event.event_id})
+
+
+func _apply_special_projectile_knockback(attack: CombatAttackInstance, parent_event_id: String) -> void:
+	if attack.special_knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
+		return
+	var target_state := get_actor_state(attack.target_id)
+	if target_state == null:
+		return
+	var start := target_state.position_microfeet
+	var result: Variant = _rage_knockback_resolver.call(attack.attacker_id, attack.target_id, attack.special_knockback_microfeet)
+	if typeof(result) != TYPE_DICTIONARY or not (result as Dictionary).get("success", false):
+		return
+	var destination: Vector2i = (result as Dictionary).get("position_microfeet", start)
+	if destination != start:
+		apply_authoritative_forced_position(attack.target_id, destination, int((result as Dictionary).get("facing_millidegrees", target_state.facing_millidegrees)), parent_event_id, "force_bolt_knockback")
+	_record_resolved_event(clock.get_elapsed_us(), &"force_bolt_knockback_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+		"attack_instance_id": attack.attack_instance_id,
+		"requested_distance_microfeet": attack.special_knockback_microfeet,
+		"start_microfeet": [start.x, start.y], "position_microfeet": [destination.x, destination.y],
+		"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
+	}, parent_event_id)
+
+
+func _schedule_nac_physical_action_interruption(attack: CombatAttackInstance, parent_event_id: String) -> void:
+	var target_state := get_actor_state(attack.target_id)
+	if target_state == null or target_state.current_action_instance_id.is_empty():
+		return
+	var action := get_action(target_state.current_action_instance_id)
+	if action == null or action.is_terminal():
+		return
+	var action_definition: CombatActionDefinition = _action_definitions.get(String(action.action_definition_id))
+	if action_definition == null or String(action_definition.extension_metadata.get("kind", "")) != "physical_attack":
+		return
+	var attacker_definition := get_actor_definition(attack.attacker_id)
+	var target_definition := get_actor_definition(attack.target_id)
+	if attacker_definition == null or target_definition == null:
+		return
+	var attacker_size_rank := _size_category_rank(attacker_definition.size_category)
+	var target_size_rank := _size_category_rank(target_definition.size_category)
+	if attacker_size_rank < 0 or target_size_rank < 0 or target_size_rank > attacker_size_rank:
+		return
+	var result := schedule_interruption(action.action_instance_id, clock.get_elapsed_us(), attack.attacker_id, "force_bolt_nac_interrupt", parent_event_id)
+	if result.get("success", false):
+		advance_to(clock.get_elapsed_us())
+
+
+func _size_category_rank(size_category: StringName) -> int:
+	return ["tiny", "small", "medium", "large", "extra_large", "gigantic", "enormous"].find(String(size_category))
 
 
 func _schedule_special_interruption_for_physical_hit(target_id: StringName, source_id: StringName, parent_event_id: String) -> void:
@@ -2086,6 +2474,8 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 	var completion_prerequisites_satisfied := true
 	if not special.is_empty():
 		completion_prerequisites_satisfied = _validate_verified_special_completion(action, completed.event_id)
+	if completion_prerequisites_satisfied and bool(special.get("requires_ss_check", false)):
+		completion_prerequisites_satisfied = _resolve_special_skill_check(action, special, completed.event_id)
 	if definition.extension_metadata.has("gather_material"):
 		completion_prerequisites_satisfied = _apply_gathered_material(actor_state, action, completed.event_id)
 	if definition.extension_metadata.has("equip_hand_item"):
@@ -2097,6 +2487,8 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		_apply_called_shot_preparation(actor_state, action, completed.event_id)
 	elif special_kind == "healing" and completion_prerequisites_satisfied:
 		_apply_verified_healing(action, special, completed.event_id)
+	elif special_kind == "persistent_damage_shield" and completion_prerequisites_satisfied:
+		_apply_persistent_damage_shield(action, special, completed.event_id)
 	if completion_prerequisites_satisfied and definition.extension_metadata.has("timed_stat_effect"):
 		var effect_target := actor_state
 		var target_actor_id := StringName(action.execution_context.get("target_actor_id", String(action.actor_id)))
@@ -2129,6 +2521,85 @@ func _validate_verified_special_completion(action: CombatActionInstance, parent_
 		}, parent_event_id
 	)
 	return false
+
+
+func _resolve_special_skill_check(action: CombatActionInstance, special: Dictionary, parent_event_id: String) -> bool:
+	var actor_definition := get_actor_definition(action.actor_id)
+	if actor_definition == null:
+		return false
+	var ss_value: Variant = actor_definition.get_combat_stat("ss")
+	if ss_value == null:
+		_record_resolved_event(clock.get_elapsed_us(), &"special_skill_check_failed_closed", action.initiative, action.actor_id, &"", {
+			"action_instance_id": action.action_instance_id,
+			"special_id": String(special.get("special_id", "")),
+			"reason": "special_skill_unresolved",
+		}, parent_event_id)
+		return false
+	var natural_roll := roll_int(1, 20)
+	var roll_bonus := _get_actor_roll_bonus(actor_definition)
+	var adjusted_roll := natural_roll - roll_bonus
+	var succeeded := adjusted_roll <= int(ss_value)
+	_record_resolved_event(clock.get_elapsed_us(), &"special_skill_resolved", action.initiative, action.actor_id, StringName(action.execution_context.get("target_actor_id", "")), {
+		"action_instance_id": action.action_instance_id,
+		"special_id": String(special.get("special_id", "")),
+		"ss_target": int(ss_value),
+		"natural_d20": natural_roll,
+		"roll_bonus": roll_bonus,
+		"adjusted_roll": adjusted_roll,
+		"success": succeeded,
+		"rng_draw_index": random.get_draw_count(),
+	}, parent_event_id)
+	return succeeded
+
+
+func _apply_persistent_damage_shield(action: CombatActionInstance, special: Dictionary, parent_event_id: String) -> void:
+	var target_id := StringName(action.execution_context.get("target_actor_id", String(action.actor_id)))
+	var target_state := get_actor_state(target_id)
+	if target_state == null:
+		return
+	var shield_id := String(special.get("shield_id", ""))
+	var capacity := int(special.get("capacity", 0))
+	target_state.persistent_damage_shields[shield_id] = {
+		"shield_id": shield_id,
+		"capacity": capacity,
+		"maximum_capacity": capacity,
+		"source_actor_id": String(action.actor_id),
+		"source_action_instance_id": action.action_instance_id,
+		"physical_attacker_knockback_microfeet": int(special.get("physical_attacker_knockback_microfeet", 0)),
+	}
+	target_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"persistent_damage_shield_applied", action.initiative, action.actor_id, target_id, {
+		"action_instance_id": action.action_instance_id,
+		"shield_id": shield_id,
+		"capacity": capacity,
+		"maximum_capacity": capacity,
+		"expires_at_us": null,
+	}, parent_event_id)
+
+
+func cancel_persistent_damage_shield(actor_id: StringName, shield_id: StringName, request_id: String) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if not actor_state.persistent_damage_shields.has(String(shield_id)):
+		return _failure("persistent_damage_shield_not_active")
+	var canceled: Dictionary = actor_state.persistent_damage_shields[String(shield_id)]
+	actor_state.persistent_damage_shields.erase(String(shield_id))
+	actor_state.revision += 1
+	_state_revision += 1
+	_accepted_request_ids[request_id] = "shield_cancel:%s" % String(shield_id)
+	var event := _record_resolved_event(clock.get_elapsed_us(), &"persistent_damage_shield_canceled", _get_actor_initiative(String(actor_id)), actor_id, actor_id, {
+		"shield_id": String(shield_id),
+		"capacity_before": int(canceled.get("capacity", 0)),
+		"ordinary_acts_spent": 0,
+		"request_id": request_id,
+	})
+	return _success({"event_id": event.event_id})
 
 
 func _apply_gathered_material(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> bool:
@@ -2358,6 +2829,59 @@ func _resolve_linked_attack_accuracy(action: CombatActionInstance, parent_event_
 		_resolve_single_linked_attack_accuracy(action, attack, parent_event_id)
 
 
+func _resolve_instant_special_accuracy(attack: CombatAttackInstance, definition: CombatAttackDefinition, parent_event_id: String) -> void:
+	var final_legality := _evaluate_final_attack_legality(attack, definition)
+	if not final_legality.get("success", false):
+		attack.status = CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED
+		attack.final_legality_reason = String(final_legality.get("reason", "final_legality_failed"))
+		attack.resolved_at_us = clock.get_elapsed_us()
+		attack.revision += 1
+		_state_revision += 1
+		var failed := _record_resolved_event(clock.get_elapsed_us(), &"special_attack_final_legality_failed", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+			"attack_instance_id": attack.attack_instance_id, "special_id": String(attack.special_id),
+			"reason": attack.final_legality_reason, "accuracy_rolled": false,
+		}, parent_event_id)
+		attack.result_event_id = failed.event_id
+		return
+	attack.natural_roll = roll_int(1, 20)
+	attack.rng_draw_index = random.get_draw_count()
+	attack.adjusted_roll = int(attack.natural_roll) - attack.roll_bonus
+	var critical_result := definition.critical_trigger_policy.classify(int(attack.natural_roll))
+	attack.critical_success = critical_result == CombatCriticalTriggerPolicy.RESULT_SUCCESS
+	attack.critical_failure = critical_result == CombatCriticalTriggerPolicy.RESULT_FAILURE
+	attack.accuracy_success = attack.critical_success or (not attack.critical_failure and int(attack.adjusted_roll) <= attack.acc_target)
+	attack.status = CombatAttackInstance.STATUS_PENDING_DEFENSE if attack.accuracy_success else CombatAttackInstance.STATUS_MISSED
+	attack.resolved_at_us = clock.get_elapsed_us()
+	attack.revision += 1
+	_state_revision += 1
+	var result := _record_resolved_event(clock.get_elapsed_us(), &"special_attack_accuracy_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+		"attack_instance_id": attack.attack_instance_id, "special_id": String(attack.special_id),
+		"target_location": String(attack.target_location), "natural_d20": attack.natural_roll,
+		"adjusted_roll": attack.adjusted_roll, "acc_target": attack.acc_target,
+		"accuracy_success": attack.accuracy_success, "critical_success": attack.critical_success,
+		"critical_failure": attack.critical_failure, "result_state": attack.status,
+		"damage_applied": false,
+	}, parent_event_id)
+	attack.accuracy_event_id = result.event_id
+	attack.result_event_id = result.event_id
+	if critical_result != CombatCriticalTriggerPolicy.RESULT_NONE:
+		var record := _record_critical_trigger(
+			"special:%s:acc" % attack.attack_instance_id, &"special_attack", critical_result,
+			int(attack.natural_roll), definition.critical_trigger_policy, attack.attacker_id,
+			attack.target_id, result.event_id
+		)
+		attack.critical_record_id = record.critical_record_id
+		attack.result_event_id = record.event_id
+		record.consequence_status = CombatCriticalRecord.CONSEQUENCE_BLOCKED
+		record.consequence_reason = "special_critical_consequence_not_approved"
+		var unavailable := _record_resolved_event(clock.get_elapsed_us(), &"critical_effect_unavailable", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
+			"critical_record_id": record.critical_record_id,
+			"reason": "special_critical_consequence_not_approved",
+		}, record.event_id)
+		record.child_event_ids.append(unavailable.event_id)
+		_state_revision += 1
+
+
 func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack: CombatAttackInstance, parent_event_id: String) -> void:
 	if attack.status != CombatAttackInstance.STATUS_EXECUTING:
 		return
@@ -2481,6 +3005,11 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 		return _failure("attacker_not_eligible_at_resolution")
 	if target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
 		return _failure("target_not_eligible_at_resolution")
+	if not attacker_state.equipment_refs.has(String(attack.weapon_ref)):
+		return _failure("weapon_not_equipped_at_resolution")
+	if attacker_state.hand_occupancy_authoritative \
+	and not attacker_state.hand_occupancy.values().has(String(attack.weapon_ref)):
+		return _failure("weapon_not_in_hand_at_resolution")
 	attack.final_attacker_position_microfeet = attacker_state.position_microfeet
 	attack.final_target_position_microfeet = target_state.position_microfeet
 	attack.final_attacker_elevation_microfeet = attacker_state.elevation_microfeet
@@ -2489,8 +3018,12 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 	var elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
 	var distance_squared := offset.x * offset.x + offset.y * offset.y + elevation_offset * elevation_offset
 	attack.final_distance_squared_microfeet = distance_squared
-	var minimum_range := 0 if definition.minimum_range_microfeet == null else int(definition.minimum_range_microfeet)
-	var maximum_range := int(definition.maximum_range_microfeet)
+	var effective_minimum_range: Variant = definition.minimum_range_microfeet if attack.minimum_range_microfeet_override == null else attack.minimum_range_microfeet_override
+	var effective_maximum_range: Variant = definition.maximum_range_microfeet if attack.maximum_range_microfeet_override == null else attack.maximum_range_microfeet_override
+	if effective_maximum_range == null:
+		return _failure("unresolved_attack_range")
+	var minimum_range := 0 if effective_minimum_range == null else int(effective_minimum_range)
+	var maximum_range := int(effective_maximum_range)
 	attack.final_range_legal = distance_squared >= minimum_range * minimum_range \
 		and distance_squared <= maximum_range * maximum_range
 	if not attack.final_range_legal:
@@ -2628,10 +3161,19 @@ func _evaluate_defense_eligibility(
 			result["eligible"] = true
 			result["reason"] = "eligible"
 		CombatDefenseProfile.WEAPON_BLOCK:
+			if attack.is_special_attack:
+				result["reason"] = "special_attack_not_blockable"
+				return result
 			return _evaluate_block_eligibility(defender_state, profile.weapon_block, defense_type, profile.get_modifier(defense_type))
 		CombatDefenseProfile.SHIELD_BLOCK:
+			if attack.is_special_attack:
+				result["reason"] = "special_attack_not_blockable"
+				return result
 			return _evaluate_block_eligibility(defender_state, profile.shield_block, defense_type, profile.get_modifier(defense_type))
 		CombatDefenseProfile.PHYSICAL_SOAK:
+			if attack.is_special_attack:
+				result["reason"] = "special_attack_not_physical_soak_eligible"
+				return result
 			if dodge_or_soak_attempted:
 				result["reason"] = "mutually_exclusive_with_dodge"
 				return result
@@ -2875,7 +3417,8 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 	if definition == null or definition.physical_damage == null:
 		return _failure("physical_damage_definition_unresolved")
 	var damage_definition: CombatPhysicalDamageDefinition = definition.physical_damage
-	if damage_definition.strength_bonus_eligible == null:
+	var strength_bonus_eligible: Variant = damage_definition.strength_bonus_eligible if attack.strength_bonus_eligible_override == null else attack.strength_bonus_eligible_override
+	if strength_bonus_eligible == null:
 		return _failure("strength_bonus_eligibility_unresolved")
 	if damage_definition.minimum_one_applies == null:
 		return _failure("minimum_one_damage_policy_unresolved")
@@ -2891,7 +3434,7 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 
 	var attacker_definition: CombatActorDefinition = _actor_definitions[String(attack.attacker_id)]
 	var strength_bonus := 0
-	if damage_definition.strength_bonus_eligible == true:
+	if strength_bonus_eligible == true:
 		var sb_value: Variant = get_effective_actor_combat_stat(attack.attacker_id, "sb")
 		if sb_value == null:
 			return _failure("attacker_strength_bonus_unresolved")
@@ -2957,6 +3500,7 @@ func _prepare_physical_damage(attack: CombatAttackInstance) -> Dictionary:
 
 	return _success({
 		"damage_definition": damage_definition,
+		"flat_bonus": damage_definition.flat_bonus if attack.flat_bonus_override == null else int(attack.flat_bonus_override),
 		"damage_dice_count": damage_definition.dice_count if attack.damage_dice_count_override == null else int(attack.damage_dice_count_override),
 		"damage_die_sides": damage_definition.die_sides if attack.damage_die_sides_override == null else int(attack.damage_die_sides_override),
 		"strength_bonus": strength_bonus,
@@ -3562,6 +4106,8 @@ func _get_dodge_stat_name(delivery_class: StringName) -> String:
 		return "dt"
 	if delivery_class == &"thrown":
 		return "dp"
+	if delivery_class == &"magic_projectile":
+		return "dp"
 	return ""
 
 
@@ -3747,6 +4293,38 @@ func _is_special_touch_legal(actor_id: StringName, target_id: StringName, fallba
 	return fallback_fact
 
 
+func configure_nac_automation(actor_id: StringName, settings: Dictionary) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	var profile := String(settings.get("profile", "Balanced"))
+	if not ["Balanced", "Defensive", "Aggressive", "Guardian"].has(profile):
+		return _failure("unsupported_nac_profile")
+	var minimum_mana_reserve := int(settings.get("minimum_mana_reserve", 0))
+	var automatic_nac_budget := int(settings.get("automatic_nac_budget", 5))
+	if minimum_mana_reserve < 0 or automatic_nac_budget < 0 or automatic_nac_budget > 5:
+		return _failure("invalid_nac_automation_limits")
+	actor_state.nac_automation_settings = {
+		"profile": profile,
+		"automatic_enabled": bool(settings.get("automatic_enabled", false)),
+		"minimum_mana_reserve": minimum_mana_reserve,
+		"automatic_nac_budget": automatic_nac_budget,
+		"emergency_defense_enabled": bool(settings.get("emergency_defense_enabled", true)),
+		"offensive_triggers_enabled": bool(settings.get("offensive_triggers_enabled", true)),
+		"ally_protection_enabled": bool(settings.get("ally_protection_enabled", false)),
+		"priority": PackedStringArray(settings.get("priority", PackedStringArray(["force_bolt"]))),
+	}
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"nac_automation_configured", _get_actor_initiative(String(actor_id)), actor_id, &"", actor_state.nac_automation_settings.duplicate(true))
+	return _success({"settings": actor_state.nac_automation_settings.duplicate(true)})
+
+
+func get_nac_automation(actor_id: StringName) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	return {} if actor_state == null else actor_state.nac_automation_settings.duplicate(true)
+
+
 func _validate_nac_attack_context(actor_state: CombatActorState, context: Dictionary) -> Dictionary:
 	if context.is_empty():
 		return _success()
@@ -3781,6 +4359,7 @@ func _commit_nac_attack_context(
 	if actor_state.nac_round_index != round_index:
 		actor_state.nac_round_index = round_index
 		actor_state.nac_uses_this_round = 0
+		actor_state.automatic_nac_uses_this_round = 0
 	var before := int(actor_state.ability_daily_remaining[ability_id])
 	actor_state.ability_daily_remaining[ability_id] = before - 1
 	actor_state.nac_uses_this_round += 1

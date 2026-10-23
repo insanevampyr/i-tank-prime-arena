@@ -17,6 +17,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 @export var developer_debug_path: NodePath
 @export var encounter_button_path: NodePath
 @export var encounter_selector_path: NodePath
+@export var character_selector_path: NodePath
 @export var debug_button_path: NodePath
 @export var attack_readiness_path: NodePath
 @export var run_readiness_path: NodePath
@@ -37,6 +38,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 @onready var _developer_debug: RichTextLabel = get_node_or_null(developer_debug_path)
 @onready var _encounter_button: Button = get_node_or_null(encounter_button_path)
 @onready var _encounter_selector: Button = get_node_or_null(encounter_selector_path)
+@onready var _character_selector: Button = get_node_or_null(character_selector_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
 @onready var _attack_readiness: Control = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness: Control = get_node_or_null(run_readiness_path)
@@ -90,6 +92,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	var seed_label_rect := Rect2(margin, seed_y, seed_label_width, seed_height)
 	var seed_input_rect := Rect2(seed_label_rect.end.x + seed_gap, seed_y, seed_input_width, seed_height)
 	var seed_apply_button_rect := Rect2(seed_input_rect.end.x + seed_gap, seed_y, seed_button_width, seed_height)
+	var character_selector_rect := Rect2(seed_apply_button_rect.end.x + seed_gap, seed_y, (176.0 if compact else 200.0) / canvas_scale, seed_height)
 	var encounter_button_size := Vector2((104.0 if compact else 120.0) / canvas_scale, (48.0 if compact else 52.0) / canvas_scale)
 	var encounter_button_rect := Rect2(
 		safe_size.x - margin - encounter_button_size.x,
@@ -184,6 +187,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"seed_label_rect": seed_label_rect,
 		"seed_input_rect": seed_input_rect,
 		"seed_apply_button_rect": seed_apply_button_rect,
+		"character_selector_rect": character_selector_rect,
 		"movement_debug_rect": debug_rect,
 		"orientation_warning_rect": warning_rect,
 		"combat_status_rect": combat_status_rect,
@@ -240,6 +244,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_apply_control_rect(_seed_label, metrics["seed_label_rect"])
 	_apply_control_rect(_seed_input, metrics["seed_input_rect"])
 	_apply_control_rect(_seed_apply_button, metrics["seed_apply_button_rect"])
+	_apply_control_rect(_character_selector, metrics["character_selector_rect"])
 	_apply_control_rect(_movement_debug, metrics["movement_debug_rect"])
 	_apply_control_rect(_orientation_warning, metrics["orientation_warning_rect"])
 	_apply_control_rect(_combat_status, metrics["combat_status_rect"])

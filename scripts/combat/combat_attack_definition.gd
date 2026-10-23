@@ -67,8 +67,8 @@ func _init(
 	if p_minimum_range_microfeet != null and p_maximum_range_microfeet != null:
 		assert(p_minimum_range_microfeet <= p_maximum_range_microfeet, "Minimum range cannot exceed maximum range.")
 	assert(
-		String(p_delivery_class).is_empty() or p_delivery_class == &"hand_held" or p_delivery_class == &"thrown",
-		"Phase 1 physical delivery must be hand-held, thrown, or explicitly unresolved."
+		String(p_delivery_class).is_empty() or p_delivery_class == &"hand_held" or p_delivery_class == &"thrown" or p_delivery_class == &"magic_projectile",
+		"Delivery must be hand-held, thrown, magic projectile, or explicitly unresolved."
 	)
 	if p_physical_soak_eligible != null:
 		assert(typeof(p_physical_soak_eligible) == TYPE_BOOL, "Physical Soak eligibility must be boolean or unresolved.")
@@ -105,6 +105,16 @@ func _init(
 		for profile: Dictionary in strike_profiles:
 			assert(int(profile.get("dice_count", 0)) > 0 and int(profile.get("die_sides", 0)) > 0, "Strike profiles require valid damage dice.")
 			assert(not String(profile.get("label", "")).is_empty(), "Strike profiles require a stable label.")
+			if profile.has("weapon_ref"):
+				assert(not String(profile["weapon_ref"]).is_empty(), "Strike weapon references cannot be empty.")
+			if profile.has("minimum_range_microfeet"):
+				assert(typeof(profile["minimum_range_microfeet"]) == TYPE_INT and int(profile["minimum_range_microfeet"]) >= 0, "Strike minimum range must be non-negative.")
+			if profile.has("maximum_range_microfeet"):
+				assert(typeof(profile["maximum_range_microfeet"]) == TYPE_INT and int(profile["maximum_range_microfeet"]) >= 0, "Strike maximum range must be non-negative.")
+			if profile.has("flat_bonus"):
+				assert(typeof(profile["flat_bonus"]) == TYPE_INT, "Strike flat damage bonuses must be integers.")
+			if profile.has("strength_bonus_eligible"):
+				assert(typeof(profile["strength_bonus_eligible"]) == TYPE_BOOL, "Strike SB eligibility must be boolean.")
 	if critical_trigger_policy == null:
 		critical_trigger_policy = CombatCriticalTriggerPolicy.new()
 

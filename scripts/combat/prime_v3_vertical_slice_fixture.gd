@@ -11,6 +11,12 @@ const SHIELD_REF := &"prime_v3_metal_buckler"
 const ARMOR_REF := &"prime_v3_plate_torso"
 const CHARACTER_DEFINITION_ID := &"prime_v3_uncommon_guard"
 const LOADOUT_DEFINITION_ID := &"arena_guard_plate_buckler"
+const PLAYER_CHARACTER_GUARD := &"uncommon_guard"
+const PLAYER_CHARACTER_VAELIS := &"vaelis_thorn"
+const VAELIS_CHARACTER_DEFINITION_ID := &"vaelis_thorn"
+const VAELIS_LOADOUT_DEFINITION_ID := &"vaelis_thorn_short_sword_wand"
+const VAELIS_WEAPON_REF := &"prime_v3_short_sword"
+const VAELIS_WAND_REF := &"prime_v3_short_wand"
 const ENCOUNTER_MEDIUM_GUARDS := &"medium_guard_vs_medium_guard"
 const ENCOUNTER_SYNTHETIC_SMALL_GUARD := &"medium_guard_vs_synthetic_small_guard"
 const ENCOUNTER_WAVE_ONE_GOBLINS := &"wave_1_common_goblins"
@@ -39,7 +45,8 @@ static func configure_simulation(
 	simulation: CombatSimulation,
 	player_position_microfeet: Vector2i,
 	opponent_position_microfeet: Vector2i,
-	encounter_fixture_id: StringName = ENCOUNTER_MEDIUM_GUARDS
+	encounter_fixture_id: StringName = ENCOUNTER_MEDIUM_GUARDS,
+	player_character_id: StringName = PLAYER_CHARACTER_GUARD
 ) -> Dictionary:
 	if simulation == null:
 		return {"success": false, "reason": "missing_simulation"}
@@ -51,14 +58,16 @@ static func configure_simulation(
 	if not [ENCOUNTER_MEDIUM_GUARDS, ENCOUNTER_SYNTHETIC_SMALL_GUARD].has(encounter_fixture_id):
 		return {"success": false, "reason": "unsupported_encounter_fixture"}
 	for actor_id: StringName in [PLAYER_ID, OPPONENT_ID]:
+		var is_player := actor_id == PLAYER_ID
 		var actor := (
 			make_synthetic_small_guard_actor(actor_id)
 			if actor_id == OPPONENT_ID and encounter_fixture_id == ENCOUNTER_SYNTHETIC_SMALL_GUARD
-			else make_guard_actor(actor_id, "Player Guard Fixture" if actor_id == PLAYER_ID else "Opponent Guard Fixture")
+			else (make_player_actor(player_character_id, actor_id) if is_player else make_guard_actor(actor_id, "Opponent Guard Fixture"))
 		)
-		var defense_profile := make_defense_profile(actor_id)
-		var protection_profile := make_damage_protection_profile(actor_id)
-		var validation := validate_combatant_fixture(actor, defense_profile, protection_profile, attack_definition)
+		var actor_attack := make_player_attack_definition(player_character_id) if is_player else attack_definition
+		var defense_profile := make_player_defense_profile(player_character_id, actor_id) if is_player else make_defense_profile(actor_id)
+		var protection_profile := make_player_damage_protection_profile(player_character_id, actor_id) if is_player else make_damage_protection_profile(actor_id)
+		var validation := validate_player_combatant(player_character_id, actor, defense_profile, protection_profile, actor_attack) if is_player else validate_combatant_fixture(actor, defense_profile, protection_profile, actor_attack)
 		if not validation.get("success", false):
 			return validation
 		var actor_result := simulation.register_actor(actor)
@@ -70,9 +79,13 @@ static func configure_simulation(
 		var protection_result := simulation.register_damage_protection_profile(actor_id, protection_profile)
 		if not protection_result.get("success", false):
 			return protection_result
-		var reaction_result := simulation.register_critical_reaction_attack(actor_id, attack_definition, true)
+		var reaction_result := simulation.register_critical_reaction_attack(actor_id, actor_attack, true)
 		if not reaction_result.get("success", false):
 			return reaction_result
+		if is_player and player_character_id == PLAYER_CHARACTER_VAELIS:
+			var hand_result := simulation.configure_actor_hand_occupancy(actor_id, {"left": String(VAELIS_WAND_REF), "right": String(VAELIS_WEAPON_REF)})
+			if not hand_result.get("success", false):
+				return hand_result
 
 	var player_position_result := simulation.apply_authoritative_position(PLAYER_ID, player_position_microfeet, 0)
 	if not player_position_result.get("success", false):
@@ -85,7 +98,8 @@ static func configure_simulation(
 		return opening_result
 	return {
 		"success": true,
-		"attack_definition": attack_definition,
+		"attack_definition": make_player_attack_definition(player_character_id),
+		"opponent_attack_definition": attack_definition,
 		"opening_order": opening_result["opening_order"],
 		"encounter_fixture_id": String(encounter_fixture_id),
 	}
@@ -145,6 +159,122 @@ static func make_guard_actor(actor_id: StringName, display_name: String) -> Comb
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
 	var result := catalog.instantiate_actor(CHARACTER_DEFINITION_ID, LOADOUT_DEFINITION_ID, actor_id, display_name)
 	return result.get("actor") as CombatActorDefinition
+
+
+static func make_player_actor(player_character_id: StringName, actor_id: StringName = PLAYER_ID) -> CombatActorDefinition:
+	if player_character_id == PLAYER_CHARACTER_GUARD:
+		return make_guard_actor(actor_id, "Player Guard Fixture")
+	if player_character_id == PLAYER_CHARACTER_VAELIS:
+		var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+		var result := catalog.instantiate_actor(VAELIS_CHARACTER_DEFINITION_ID, VAELIS_LOADOUT_DEFINITION_ID, actor_id, "Vaelis Thorn")
+		return result.get("actor") as CombatActorDefinition
+	return null
+
+
+static func make_player_attack_definition(player_character_id: StringName) -> CombatAttackDefinition:
+	if player_character_id == PLAYER_CHARACTER_GUARD:
+		return make_attack_definition()
+	if player_character_id == PLAYER_CHARACTER_VAELIS:
+		var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+		var sword := catalog.get_weapon(VAELIS_WEAPON_REF)
+		var wand := catalog.get_weapon(VAELIS_WAND_REF)
+		if sword == null or wand == null:
+			return null
+		var attack := sword.make_attack_definition(&"vaelis_thorn_sword_wand_attack", HitLocations.get_same_size_attack_profile()) as CombatAttackDefinition
+		if attack == null:
+			return null
+		attack.strikes_per_act = 2
+		attack.strike_profiles = [
+			{
+				"label": "short_sword",
+				"weapon_ref": String(VAELIS_WEAPON_REF),
+				"dice_count": sword.damage_dice_count,
+				"die_sides": sword.damage_die_sides,
+				"flat_bonus": sword.fixed_damage_bonus,
+				"strength_bonus_eligible": sword.strength_bonus_eligible,
+				"damage_types": Array(sword.damage_types),
+				"minimum_range_microfeet": 0,
+				"maximum_range_microfeet": sword.reach_microfeet,
+			},
+			{
+				"label": "short_wand",
+				"weapon_ref": String(VAELIS_WAND_REF),
+				"dice_count": wand.damage_dice_count,
+				"die_sides": wand.damage_die_sides,
+				"flat_bonus": wand.fixed_damage_bonus,
+				"strength_bonus_eligible": wand.strength_bonus_eligible,
+				"damage_types": Array(wand.damage_types),
+				"minimum_range_microfeet": 0,
+				"maximum_range_microfeet": wand.reach_microfeet,
+			},
+		]
+		return attack
+	return null
+
+
+static func make_player_defense_profile(player_character_id: StringName, actor_id: StringName = PLAYER_ID) -> CombatDefenseProfile:
+	if player_character_id == PLAYER_CHARACTER_GUARD:
+		return make_defense_profile(actor_id)
+	if player_character_id == PLAYER_CHARACTER_VAELIS:
+		return CombatDefenseProfile.new(
+			&"vaelis_thorn_defenses",
+			PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]),
+			{}, null, null,
+			PackedStringArray(["PRIME-V3 pp. 19-20; supplied Vaelis DT/DP allocation; no armor or shield"])
+		)
+	return null
+
+
+static func make_player_damage_protection_profile(player_character_id: StringName, actor_id: StringName = PLAYER_ID) -> CombatDamageProtectionProfile:
+	if player_character_id == PLAYER_CHARACTER_GUARD:
+		return make_damage_protection_profile(actor_id)
+	if player_character_id == PLAYER_CHARACTER_VAELIS:
+		return CombatDamageProtectionProfile.new(
+			&"vaelis_thorn_protection", [], {},
+			PackedStringArray(["Supplied Vaelis record: light clothing, no armor; PRIME-V3 p. 53 NAL 1 at END 6"])
+		)
+	return null
+
+
+static func validate_player_combatant(
+	player_character_id: StringName,
+	actor: CombatActorDefinition,
+	defense_profile: CombatDefenseProfile,
+	protection_profile: CombatDamageProtectionProfile,
+	attack_definition: CombatAttackDefinition
+) -> Dictionary:
+	if player_character_id == PLAYER_CHARACTER_GUARD:
+		return validate_combatant_fixture(actor, defense_profile, protection_profile, attack_definition)
+	if player_character_id != PLAYER_CHARACTER_VAELIS:
+		return {"success": false, "reason": "unsupported_player_character"}
+	if actor == null or defense_profile == null or protection_profile == null or attack_definition == null:
+		return {"success": false, "reason": "vaelis_component_missing"}
+	if not actor.unresolved_fields.is_empty():
+		return {"success": false, "reason": "vaelis_fields_unresolved", "fields": Array(actor.unresolved_fields)}
+	var equipment_validation := CombatDefinitionCatalog.load_default_fixture_catalog().validate_actor_equipment(actor)
+	if not equipment_validation.get("success", false):
+		return {"success": false, "reason": "vaelis_equipment_invalid", "issues": equipment_validation.get("issues", [])}
+	if actor.equipment_refs != PackedStringArray([String(VAELIS_WEAPON_REF), String(VAELIS_WAND_REF)]):
+		return {"success": false, "reason": "vaelis_loadout_mismatch"}
+	if attack_definition.weapon_ref != VAELIS_WEAPON_REF or attack_definition.maximum_range_microfeet != 2_000_000 \
+	or attack_definition.strikes_per_act != 2 or attack_definition.strike_profiles.size() != 2 \
+	or String(attack_definition.strike_profiles[1].get("weapon_ref", "")) != String(VAELIS_WAND_REF):
+		return {"success": false, "reason": "vaelis_attack_mismatch"}
+	if defense_profile.weapon_block != null or defense_profile.shield_block != null or not protection_profile.armors.is_empty():
+		return {"success": false, "reason": "vaelis_protection_mismatch"}
+	return {"success": true}
+
+
+static func get_player_character_display_name(player_character_id: StringName) -> String:
+	return "Vaelis Thorn" if player_character_id == PLAYER_CHARACTER_VAELIS else "Uncommon Guard"
+
+
+static func get_player_primary_weapon_display_name(player_character_id: StringName) -> String:
+	return "SHORT SWORD" if player_character_id == PLAYER_CHARACTER_VAELIS else "AXE"
+
+
+static func get_player_loadout_id(player_character_id: StringName) -> StringName:
+	return VAELIS_LOADOUT_DEFINITION_ID if player_character_id == PLAYER_CHARACTER_VAELIS else LOADOUT_DEFINITION_ID
 
 
 static func make_synthetic_small_guard_actor(actor_id: StringName = OPPONENT_ID) -> CombatActorDefinition:
