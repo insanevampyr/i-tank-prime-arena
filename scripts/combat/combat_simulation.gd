@@ -53,6 +53,7 @@ var _special_touch_resolver: Callable
 var _gatherable_material_resolver: Callable
 var _world_item_landing_resolver: Callable
 var _world_item_pickup_resolver: Callable
+var _thrown_weapon_trajectory_resolver: Callable
 
 
 func _init(seed_value: int) -> void:
@@ -116,6 +117,10 @@ func set_world_item_landing_resolver(resolver: Callable) -> void:
 
 func set_world_item_pickup_resolver(resolver: Callable) -> void:
 	_world_item_pickup_resolver = resolver
+
+
+func set_thrown_weapon_trajectory_resolver(resolver: Callable) -> void:
+	_thrown_weapon_trajectory_resolver = resolver
 
 
 func get_ability_payment_preview(actor_id: StringName, definition: CombatActionDefinition) -> Dictionary:
@@ -343,15 +348,38 @@ func resolve_thrown_weapon_landing(
 		CombatAttackInstance.STATUS_MISSED,
 		CombatAttackInstance.STATUS_DEFENDED,
 		CombatAttackInstance.STATUS_DAMAGE_RESOLVED,
+		CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED,
 	].has(attack.status):
 		return _failure("thrown_weapon_attack_not_terminal")
 	var landing_validation := _validate_world_item_landing(world_item, position_microfeet)
 	if not landing_validation.get("success", false):
 		return landing_validation
+	return _commit_thrown_weapon_landing(
+		attack,
+		world_item,
+		position_microfeet,
+		authoritative_source_ref,
+		request_id,
+		{"contact_kind": "externally_authoritative"},
+		""
+	)
+
+
+func _commit_thrown_weapon_landing(
+	attack: CombatAttackInstance,
+	world_item: Dictionary,
+	position_microfeet: Vector2i,
+	authoritative_source_ref: String,
+	request_id: String,
+	landing_evidence: Dictionary,
+	parent_event_id: String
+) -> Dictionary:
+	var world_item_id := String(world_item.get("world_item_id", ""))
 	world_item["state"] = "dropped"
 	world_item["position_microfeet"] = position_microfeet
 	world_item["landing_outcome"] = attack.status
 	world_item["landing_source_ref"] = authoritative_source_ref
+	world_item["landing_evidence"] = landing_evidence.duplicate(true)
 	world_item["revision"] = int(world_item.get("revision", 0)) + 1
 	_world_items[world_item_id] = world_item
 	_accepted_request_ids[request_id] = "world_item_landing:%s" % world_item_id
@@ -360,16 +388,22 @@ func resolve_thrown_weapon_landing(
 		clock.get_elapsed_us(), &"thrown_weapon_landed", _get_actor_initiative(String(attack.attacker_id)),
 		attack.attacker_id, attack.target_id,
 		{
-			"attack_instance_id": attack_instance_id,
+			"attack_instance_id": attack.attack_instance_id,
 			"world_item_id": world_item_id,
 			"equipment_ref": world_item.get("equipment_ref", ""),
 			"position_microfeet": [position_microfeet.x, position_microfeet.y],
 			"landing_outcome": attack.status,
 			"authoritative_source_ref": authoritative_source_ref,
+			"landing_evidence": landing_evidence.duplicate(true),
 			"request_id": request_id,
-		}, attack.result_event_id
+		}, attack.result_event_id if parent_event_id.is_empty() else parent_event_id
 	)
-	return _success({"world_item_id": world_item_id, "event_id": event.event_id})
+	return _success({
+		"world_item_id": world_item_id,
+		"event_id": event.event_id,
+		"position_microfeet": position_microfeet,
+		"landing_evidence": landing_evidence.duplicate(true),
+	})
 
 
 func start_world_item_retrieval_action(
@@ -1482,6 +1516,8 @@ func resolve_pending_defense(
 	)
 	resolution.final_event_id = resolved.event_id
 	if resolution.status == CombatDefenseResolution.STATUS_DEFENDED:
+		var trajectory_outcome := "miss" if resolution.successful_defense_type == CombatDefenseProfile.DODGE else "blocked"
+		_resolve_automatic_thrown_weapon_landing(attack, trajectory_outcome, resolved.event_id)
 		_finalize_deferred_critical_consequences(attack)
 	return _success({"defense_resolution_id": defense_resolution_id, "status": resolution.status})
 
@@ -1660,6 +1696,7 @@ func complete_pending_dodge_displacement(
 		successful_attempt.resources_spent
 	)
 	resolution.final_event_id = event.event_id
+	_resolve_automatic_thrown_weapon_landing(attack, "miss", event.event_id)
 	_finalize_deferred_critical_consequences(attack)
 	return _success({"defense_resolution_id": resolution.defense_resolution_id, "status": resolution.status})
 
@@ -1791,6 +1828,7 @@ func resolve_physical_damage(attack_instance_id: String, request_id: String) -> 
 	if resolution.final_damage > 0:
 		_schedule_special_interruption_for_physical_hit(attack.target_id, attack.attacker_id, event.event_id)
 		_apply_successful_hit_knockback(attack, event.event_id)
+	_resolve_automatic_thrown_weapon_landing(attack, "hit", event.event_id)
 	_finalize_deferred_critical_consequences(attack)
 	return _success({"damage_resolution_id": resolution_id, "final_damage": resolution.final_damage})
 
@@ -2904,6 +2942,78 @@ func _validate_world_item_landing(world_item: Dictionary, position_microfeet: Ve
 	return _success()
 
 
+func _resolve_automatic_thrown_weapon_landing(
+	attack: CombatAttackInstance,
+	trajectory_outcome: String,
+	parent_event_id: String = ""
+) -> Dictionary:
+	if not _thrown_weapon_context_by_attack_id.has(attack.attack_instance_id):
+		return _failure("thrown_weapon_context_unresolved")
+	var context: Dictionary = _thrown_weapon_context_by_attack_id[attack.attack_instance_id]
+	var world_item_id := String(context.get("world_item_id", ""))
+	if not bool(context.get("released", false)) or not _world_items.has(world_item_id):
+		return _failure("thrown_weapon_not_released")
+	var world_item: Dictionary = _world_items[world_item_id]
+	if String(world_item.get("state", "")) != "pending_landing":
+		return _success({"world_item_id": world_item_id, "already_resolved": true})
+	if not _thrown_weapon_trajectory_resolver.is_valid():
+		return _failure("thrown_weapon_trajectory_unresolved")
+	if attack.final_attacker_position_microfeet == null or attack.final_target_position_microfeet == null:
+		return _failure("thrown_weapon_resolution_positions_unresolved")
+	var final_attacker_position: Vector2i = attack.final_attacker_position_microfeet
+	var final_target_position: Vector2i = attack.final_target_position_microfeet
+	var definition: CombatAttackDefinition = _attack_definitions.get(String(attack.attack_definition_id))
+	if definition == null or definition.maximum_range_microfeet == null:
+		return _failure("thrown_weapon_maximum_range_unresolved")
+	var stop_at_impact := ["hit", "blocked", "intercepted", "obstacle_intercepted"].has(trajectory_outcome)
+	var request := {
+		"attack_instance_id": attack.attack_instance_id,
+		"world_item_id": world_item_id,
+		"trajectory_outcome": trajectory_outcome,
+		"start_microfeet": final_attacker_position,
+		"direction_point_microfeet": final_target_position,
+		"maximum_distance_microfeet": int(definition.maximum_range_microfeet),
+		"stop_at_direction_point": stop_at_impact,
+	}
+	var resolution: Variant = _thrown_weapon_trajectory_resolver.call(request.duplicate(true))
+	if typeof(resolution) != TYPE_DICTIONARY:
+		return _failure("thrown_weapon_trajectory_unresolved")
+	var trajectory: Dictionary = resolution
+	if not trajectory.get("success", false):
+		return _failure(String(trajectory.get("reason", "thrown_weapon_trajectory_unresolved")))
+	var position_value: Variant = trajectory.get("position_microfeet")
+	if typeof(position_value) != TYPE_VECTOR2I:
+		return _failure("thrown_weapon_landing_position_unresolved")
+	if trajectory_outcome == "obstacle_intercepted" \
+	and String(trajectory.get("contact_kind", "")) != "solid_obstacle":
+		return _failure("thrown_weapon_obstacle_contact_unresolved")
+	var position_microfeet: Vector2i = position_value
+	if _world_item_landing_resolver.is_valid():
+		var landing_validation := _validate_world_item_landing(world_item, position_microfeet)
+		if not landing_validation.get("success", false):
+			return landing_validation
+	var landing_evidence := {
+		"trajectory_outcome": trajectory_outcome,
+		"contact_kind": String(trajectory.get("contact_kind", "")),
+		"obstacle_id": String(trajectory.get("obstacle_id", "")),
+		"traveled_distance_microfeet": int(trajectory.get("traveled_distance_microfeet", 0)),
+		"maximum_distance_microfeet": int(definition.maximum_range_microfeet),
+		"resolution_target_microfeet": [
+			final_target_position.x,
+			final_target_position.y,
+		],
+	}
+	return _commit_thrown_weapon_landing(
+		attack,
+		world_item,
+		position_microfeet,
+		"Task 35E-Fix1 designer-approved deterministic trajectory",
+		"automatic_thrown_landing:%s" % attack.attack_instance_id,
+		landing_evidence,
+		parent_event_id
+	)
+
+
 func _validate_world_item_retrieval_prerequisites(actor_state: CombatActorState, world_item: Dictionary) -> Dictionary:
 	if not actor_state.hand_occupancy_authoritative:
 		return _failure("retrieval_hand_occupancy_unresolved")
@@ -3160,9 +3270,21 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 		return
 	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
 	var final_legality := _evaluate_final_attack_legality(attack, definition)
-	if final_legality.get("success", false) \
-	and _thrown_weapon_context_by_attack_id.has(attack.attack_instance_id):
+	var is_committed_throw := _thrown_weapon_context_by_attack_id.has(attack.attack_instance_id)
+	var failed_throw_trajectory_outcome := ""
+	if final_legality.get("success", false) and is_committed_throw:
 		final_legality = _release_committed_thrown_weapon(attack, parent_event_id)
+	elif is_committed_throw and String(final_legality.get("reason", "")) in [
+		"target_out_of_range_at_resolution",
+		"line_of_sight_blocked_at_resolution",
+	]:
+		var release_result := _release_committed_thrown_weapon(attack, parent_event_id)
+		if not release_result.get("success", false):
+			final_legality = release_result
+		else:
+			failed_throw_trajectory_outcome = "obstacle_intercepted" \
+				if String(final_legality.get("reason", "")) == "line_of_sight_blocked_at_resolution" \
+				else "miss"
 	if not final_legality["success"]:
 		attack.status = CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED
 		attack.resolved_at_us = clock.get_elapsed_us()
@@ -3192,6 +3314,8 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 			parent_event_id
 		)
 		attack.result_event_id = failed.event_id
+		if not failed_throw_trajectory_outcome.is_empty():
+			_resolve_automatic_thrown_weapon_landing(attack, failed_throw_trajectory_outcome, failed.event_id)
 		return
 	var critical_result := CombatCriticalTriggerPolicy.RESULT_NONE
 	if attack.automatic_accuracy_reason == "called_shot":
@@ -3267,6 +3391,7 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 		attack.result_event_id = critical_record.event_id
 		_apply_critical_consequence(critical_record, attack)
 	if attack.status == CombatAttackInstance.STATUS_MISSED:
+		_resolve_automatic_thrown_weapon_landing(attack, "miss")
 		_finalize_deferred_critical_consequences(attack)
 
 

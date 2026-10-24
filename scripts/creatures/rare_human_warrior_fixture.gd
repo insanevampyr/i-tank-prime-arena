@@ -103,6 +103,23 @@ static func start_spear_throw(
 	)
 
 
+static func configure_spear_landing_geometry(
+	simulation: CombatSimulation,
+	battlefield: ArenaBattlefield
+) -> void:
+	simulation.set_thrown_weapon_trajectory_resolver(func(request: Dictionary) -> Dictionary:
+		return battlefield.resolve_ground_projectile_trajectory(
+			request["start_microfeet"],
+			request["direction_point_microfeet"],
+			int(request["maximum_distance_microfeet"]),
+			bool(request["stop_at_direction_point"])
+		)
+	)
+	simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> bool:
+		return battlefield.is_ground_world_item_position_legal(position)
+	)
+
+
 static func start_unarmed_fallback_attack(
 	simulation: CombatSimulation,
 	attacker_id: StringName,
@@ -171,7 +188,6 @@ static func get_activation_status() -> Dictionary:
 		"reason": "wave_5_boss_rules_unresolved",
 		"unresolved": PackedStringArray([
 			"exact_combat_abilities_and_prerequisites",
-			"automatic_boar_spear_miss_block_hit_landing_position_policy",
 			"health_potion_use_action_and_consumption_timing",
 		]),
 	}

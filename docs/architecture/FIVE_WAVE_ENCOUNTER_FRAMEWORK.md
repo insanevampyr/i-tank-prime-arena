@@ -106,7 +106,7 @@ Presentation uses gray-blue `M` placeholders, independent HPC/facing markers and
 
 Tasks 35C-35E keep Wave 5 inactive while validating the Rare Human Warrior's source data and physical equipment pathways. The boss's complete Scale mail, racial NAL +1, hand-held Boar Spear, 30% weapon Block, source-specific 18-foot thrown mode, authoritative dropped-item possession, one-Act interrupted retrieval and one-strike Human unarmed fallback now reuse the shared deterministic combat scheduler. A released spear is unavailable for melee and Block until a legal retrieval completes.
 
-No printed rule supplies miss/block/hit landing coordinates. A throw therefore creates a `pending_landing` world item and requires a separately supplied authoritative legal position before retrieval. This explicit boundary is part of snapshots and replay; it is not an automatic scatter rule. Exact Combat abilities, potion actions, automatic landing policy and boss AI still block encounter activation.
+No printed rule supplies miss/block/hit landing coordinates. Task 35E-Fix1 adds an explicit owner-approved Arena rule without changing Prime: the existing pending world item now lands from the attack's authoritative resolution position and established trajectory. Hits and physical interceptions stop at contact; misses and successful Dodges continue only to the spear's verified 18-foot maximum; solid obstacles and battlefield edges stop travel first. Coordinates stay in integer micro-feet, landing evidence remains in events/snapshots, and retrieval still requires legal movement, both hands and one completed Act. Exact Combat abilities, potion actions and boss AI still block encounter activation.
 
 ## Task 33B: Wave 4 swarm behavior and legal dive attacks
 

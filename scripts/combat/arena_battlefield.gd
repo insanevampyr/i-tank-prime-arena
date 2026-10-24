@@ -396,6 +396,78 @@ func has_line_of_sight(start_microfeet: Vector2i, end_microfeet: Vector2i) -> bo
 	return true
 
 
+func resolve_ground_projectile_trajectory(
+	start_microfeet: Vector2i,
+	direction_point_microfeet: Vector2i,
+	maximum_distance_microfeet: int,
+	stop_at_direction_point: bool
+) -> Dictionary:
+	if maximum_distance_microfeet <= 0:
+		return {"success": false, "reason": "projectile_maximum_distance_unresolved"}
+	if not _point_within_inclusive_bounds(start_microfeet):
+		return {"success": false, "reason": "projectile_start_outside_battlefield"}
+	var direction := direction_point_microfeet - start_microfeet
+	var direction_length := sqrt(float(direction.length_squared()))
+	if direction_length <= 0.0:
+		return {"success": false, "reason": "projectile_trajectory_direction_unresolved"}
+	if stop_at_direction_point and direction_length > float(maximum_distance_microfeet):
+		return {"success": false, "reason": "projectile_contact_beyond_maximum_range"}
+	var intended_end := direction_point_microfeet
+	if not stop_at_direction_point:
+		var scale := float(maximum_distance_microfeet) / direction_length
+		intended_end = Vector2i(
+			roundi(float(start_microfeet.x) + float(direction.x) * scale),
+			roundi(float(start_microfeet.y) + float(direction.y) * scale)
+		)
+		intended_end = _clamp_projectile_endpoint_to_maximum(
+			start_microfeet, intended_end, maximum_distance_microfeet
+		)
+
+	var segment := intended_end - start_microfeet
+	var contact_fraction := 1.0
+	var contact_kind := "impact" if stop_at_direction_point else "maximum_range"
+	var obstacle_id := ""
+	var boundary_fraction := _segment_battlefield_exit_fraction(start_microfeet, intended_end)
+	if boundary_fraction < contact_fraction:
+		contact_fraction = boundary_fraction
+		contact_kind = "battlefield_edge"
+	for obstacle: Dictionary in _obstacles:
+		var obstacle_fraction: Variant = _segment_rect_entry_fraction(
+			start_microfeet, intended_end, obstacle["rect_microfeet"]
+		)
+		if obstacle_fraction == null:
+			continue
+		if float(obstacle_fraction) < contact_fraction:
+			contact_fraction = float(obstacle_fraction)
+			contact_kind = "solid_obstacle"
+			obstacle_id = String(obstacle["id"])
+
+	var contact := Vector2i(
+		roundi(float(start_microfeet.x) + float(segment.x) * contact_fraction),
+		roundi(float(start_microfeet.y) + float(segment.y) * contact_fraction)
+	)
+	var traveled_distance := roundi(Vector2(contact - start_microfeet).length())
+	return {
+		"success": true,
+		"position_microfeet": contact,
+		"contact_kind": contact_kind,
+		"obstacle_id": obstacle_id,
+		"traveled_distance_microfeet": traveled_distance,
+		"maximum_distance_microfeet": maximum_distance_microfeet,
+	}
+
+
+func is_ground_world_item_position_legal(position_microfeet: Vector2i) -> bool:
+	if not _point_within_inclusive_bounds(position_microfeet):
+		return false
+	for obstacle: Dictionary in _obstacles:
+		var rect: Rect2i = obstacle["rect_microfeet"]
+		if position_microfeet.x > rect.position.x and position_microfeet.x < rect.end.x \
+		and position_microfeet.y > rect.position.y and position_microfeet.y < rect.end.y:
+			return false
+	return true
+
+
 func is_attack_position_legal(position_microfeet: Vector2i, target_microfeet: Vector2i, attack_range_microfeet: int) -> bool:
 	return _within_reach_and_visible(position_microfeet, target_microfeet, attack_range_microfeet)
 
@@ -640,3 +712,68 @@ func _segment_intersects_rect(start: Vector2i, finish: Vector2i, rect: Rect2i) -
 		if t_min > t_max:
 			return false
 	return true
+
+
+func _segment_rect_entry_fraction(start: Vector2i, finish: Vector2i, rect: Rect2i) -> Variant:
+	var direction := Vector2(finish - start)
+	var t_min := 0.0
+	var t_max := 1.0
+	var minimum := Vector2(rect.position)
+	var maximum := Vector2(rect.end)
+	for axis in range(2):
+		var origin := float(start[axis])
+		var delta := direction[axis]
+		if is_zero_approx(delta):
+			if origin >= minimum[axis] and origin <= maximum[axis]:
+				continue
+			return null
+		var inverse := 1.0 / delta
+		var near := (minimum[axis] - origin) * inverse
+		var far := (maximum[axis] - origin) * inverse
+		if near > far:
+			var swap := near
+			near = far
+			far = swap
+		t_min = maxf(t_min, near)
+		t_max = minf(t_max, far)
+		if t_min > t_max:
+			return null
+	return t_min if t_min >= 0.0 and t_min <= 1.0 else null
+
+
+func _segment_battlefield_exit_fraction(start: Vector2i, finish: Vector2i) -> float:
+	var delta := finish - start
+	var exit_fraction := 1.0
+	var minimum := bounds_microfeet.position
+	var maximum := bounds_microfeet.end
+	if delta.x < 0 and finish.x < minimum.x:
+		exit_fraction = minf(exit_fraction, float(minimum.x - start.x) / float(delta.x))
+	elif delta.x > 0 and finish.x > maximum.x:
+		exit_fraction = minf(exit_fraction, float(maximum.x - start.x) / float(delta.x))
+	if delta.y < 0 and finish.y < minimum.y:
+		exit_fraction = minf(exit_fraction, float(minimum.y - start.y) / float(delta.y))
+	elif delta.y > 0 and finish.y > maximum.y:
+		exit_fraction = minf(exit_fraction, float(maximum.y - start.y) / float(delta.y))
+	return clampf(exit_fraction, 0.0, 1.0)
+
+
+func _point_within_inclusive_bounds(point: Vector2i) -> bool:
+	return point.x >= bounds_microfeet.position.x and point.x <= bounds_microfeet.end.x \
+		and point.y >= bounds_microfeet.position.y and point.y <= bounds_microfeet.end.y
+
+
+func _clamp_projectile_endpoint_to_maximum(
+	start_microfeet: Vector2i,
+	endpoint_microfeet: Vector2i,
+	maximum_distance_microfeet: int
+) -> Vector2i:
+	var maximum_squared := int(maximum_distance_microfeet) * int(maximum_distance_microfeet)
+	var endpoint := endpoint_microfeet
+	var delta := endpoint - start_microfeet
+	while delta.length_squared() > maximum_squared:
+		if absi(delta.x) >= absi(delta.y) and delta.x != 0:
+			endpoint.x -= signi(delta.x)
+		elif delta.y != 0:
+			endpoint.y -= signi(delta.y)
+		delta = endpoint - start_microfeet
+	return endpoint
