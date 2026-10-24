@@ -6,6 +6,7 @@ const ArenaWaveCatalog = preload("res://scripts/combat/arena_wave_catalog.gd")
 const ArenaWaveStateMachine = preload("res://scripts/combat/arena_wave_state_machine.gd")
 const CombatActorDefinition = preload("res://scripts/combat/combat_actor_definition.gd")
 const CombatSimulation = preload("res://scripts/combat/combat_simulation.gd")
+const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 const TwoClientSyncHarness = preload("res://scripts/sync/two_client_sync_harness.gd")
 
 const PLAYER_POSITION := Vector2i(20_000_000, 12_000_000)
@@ -19,7 +20,10 @@ func run() -> Array[String]:
 	_test_catalog_is_exact_and_creature_free()
 	_test_seeded_initialization_blocks_without_creature_integrations()
 	_test_state_machine_transition_contract()
-	_test_recovery_restores_only_modeled_resources()
+	_test_automatic_between_wave_recovery_is_prohibited()
+	_test_safe_downtime_preserves_authoritative_actor_state()
+	_test_multiplayer_deadline_uses_separate_authoritative_time()
+	_test_next_wave_control_presentation()
 	_test_reset_replays_wave_draws_and_history()
 	_test_replay_and_two_client_convergence()
 	return _failures
@@ -92,14 +96,14 @@ func _test_state_machine_transition_contract() -> void:
 		alive[actor_id] = {"defeated": true}
 	_expect_true(machine.observe_active_enemy_states(alive).get("success", false), "All defeated authoritative statuses must detect victory.")
 	_expect_equal(machine.get_state(), ArenaWaveStateMachine.STATE_VICTORY_DETECTED, "Victory must be a distinct transition before recovery.")
-	_expect_true(machine.begin_between_wave_recovery().get("success", false), "Only detected victory may enter between-wave recovery.")
-	_expect_equal(machine.get_state(), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_RECOVERY, "Wave 1 victory must enter between-wave recovery.")
-	_expect_true(machine.complete_between_wave_recovery(roll_quantity).get("success", false), "Recovery completion must advance deterministically to the next configured wave.")
+	_expect_true(machine.begin_between_wave_downtime().get("success", false), "Only detected victory may enter between-wave downtime.")
+	_expect_equal(machine.get_state(), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Wave 1 victory must enter between-wave downtime.")
+	_expect_true(machine.advance_from_between_wave_downtime(roll_quantity, "solo_next_wave").get("success", false), "An explicit downtime action must advance deterministically to the next configured wave.")
 	_expect_equal(machine.get_current_wave_id(), "wave_2", "Advancement must select Wave 2.")
 	_expect_equal(machine.get_state(), ArenaWaveStateMachine.STATE_BLOCKED, "Wave 2 must block until its own creature integration exists.")
 
 
-func _test_recovery_restores_only_modeled_resources() -> void:
+func _test_automatic_between_wave_recovery_is_prohibited() -> void:
 	var simulation := CombatSimulation.new(31_002)
 	var definition := CombatActorDefinition.new(
 		&"recovery_actor",
@@ -113,10 +117,111 @@ func _test_recovery_restores_only_modeled_resources() -> void:
 	var state := simulation.get_actor_state(&"recovery_actor")
 	state.current_hpc = 4
 	state.resources = {"mana": 1, "ap": 0, "ability_uses": 0}
+	var preserved := state.to_dictionary()
 	var recovery := simulation.restore_actor_between_wave_resources(&"recovery_actor")
-	_expect_true(recovery.get("success", false), "Modeled between-wave recovery must restore legal maxima.")
-	_expect_equal(state.current_hpc, 25, "Recovery must restore HPC from the registered HPM value.")
-	_expect_equal(state.resources, {"mana": 7, "ap": 0, "ability_uses": 2}, "Between-wave recovery restores modeled Mana but must preserve spent AP until game-world midnight.")
+	_expect_true(not recovery.get("success", false), "The obsolete automatic recovery entry point must fail closed.")
+	_expect_equal(recovery.get("reason"), "automatic_between_wave_recovery_prohibited", "The recovery rejection must identify the superseding downtime rule.")
+	_expect_equal(state.to_dictionary(), preserved, "The rejected recovery call must preserve HPC, Mana, AP, uses and all other actor state exactly.")
+
+
+func _test_safe_downtime_preserves_authoritative_actor_state() -> void:
+	var session := ArenaCombatSession.new(35_101, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.PLAYER_CHARACTER_VAELIS)
+	_expect_true(session.initialize_wave_one_goblins(PLAYER_POSITION, OPPONENT_POSITION, true).get("success", false), "Playable Wave 1 must initialize for downtime coverage.")
+	var player_state := session.get_actor_state(Fixture.PLAYER_ID)
+	player_state.current_hpc = 6
+	player_state.resources["mana"] = 11
+	player_state.resources["ap"] = 2
+	player_state.ability_daily_remaining["fixture_daily_use"] = 0
+	player_state.equipment_refs.append(&"preserved_test_equipment")
+	player_state.hand_occupancy = {"left": "preserved_item", "right": "short_wand"}
+	player_state.hand_occupancy_authoritative = true
+	player_state.held_materials = {"dirt": 1}
+	player_state.conditions.append(&"preserved_injury")
+	player_state.timed_stat_effects["paused_effect"] = {
+		"effect_id": "paused_effect",
+		"expires_at_us": session.simulation.clock.get_elapsed_us() + 5_000_000,
+		"stat_modifiers": {"nal": 2},
+	}
+	player_state.persistent_damage_shields["force_shield"] = {
+		"shield_id": "force_shield",
+		"capacity": 13,
+		"maximum_capacity": 20,
+	}
+	var preserved := player_state.to_dictionary()
+	_forcibly_defeat_active_wave(session)
+	session.advance_by(1)
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Wave victory must enter safe downtime automatically.")
+	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Authoritative wave state must identify downtime explicitly.")
+	_expect_equal(player_state.to_dictionary(), preserved, "Entering downtime must preserve HPC, Mana, AP, equipment, held materials, injuries, effects and Force Shield capacity exactly.")
+	var combat_clock_us := session.simulation.clock.get_elapsed_us()
+	var event_count := session.get_resolved_event_count()
+	session.advance_by(300_000_000)
+	_expect_equal(session.simulation.clock.get_elapsed_us(), combat_clock_us, "Unlimited solo downtime must not advance combat simulation time.")
+	_expect_equal(session.get_resolved_event_count(), event_count, "Waiting in downtime must not create combat or enemy-action events.")
+	_expect_equal(player_state.to_dictionary(), preserved, "Arbitrary downtime must not restore resources or expire effects.")
+	var advance := session.request_next_wave()
+	_expect_true(advance.get("success", false), "Solo NEXT WAVE must perform one explicit authoritative advancement.")
+	_expect_equal(session.get_arena_wave_state().get("current_wave_id"), "wave_2", "Solo NEXT WAVE must select Wave 2 exactly once.")
+	_expect_equal(player_state.to_dictionary(), preserved, "Explicit wave advancement must carry the complete actor state forward unchanged.")
+	_expect_equal(session.request_next_wave().get("reason"), "wave_advance_already_committed", "A repeated NEXT WAVE request must not advance twice.")
+	_expect_equal(_count_wave_events(session, "arena_wave_downtime_completed"), 1, "Solo advancement must record one downtime completion event.")
+	_expect_true(session.reset_encounter(false).get("success", false), "RESET must remain a safe deterministic fixture reconstruction after downtime.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_READY, "RESET must return the development fixture to READY without implying persistent-profile deletion.")
+	_expect_equal(session.get_arena_wave_state().get("current_wave_id"), "wave_1", "Wave fixture RESET must return to its configured starting wave.")
+	_expect_true(session.get_actor_state(Fixture.PLAYER_ID).persistent_damage_shields.is_empty(), "RESET must reconstruct fresh temporary encounter state rather than carrying the prior run's shield.")
+
+
+func _test_multiplayer_deadline_uses_separate_authoritative_time() -> void:
+	var first := _multiplayer_downtime_session(35_102)
+	var second := _multiplayer_downtime_session(35_102)
+	var first_clock_us := first.simulation.clock.get_elapsed_us()
+	_expect_true(first.advance_multiplayer_downtime_real_time(119_999).get("success", false), "An authoritative multiplayer downtime delta below the deadline must be accepted.")
+	_expect_equal(first.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Multiplayer downtime must remain active before 120 seconds.")
+	_expect_equal(first.simulation.clock.get_elapsed_us(), first_clock_us, "Multiplayer wall-clock downtime must not advance combat simulation time.")
+	var deadline := first.advance_multiplayer_downtime_real_time(1)
+	_expect_true(deadline.get("success", false) and deadline.get("advanced", false), "The authoritative 120-second boundary must advance automatically.")
+	second.advance_multiplayer_downtime_real_time(60_000)
+	second.advance_multiplayer_downtime_real_time(60_000)
+	_expect_equal(first.get_state_snapshot(), second.get_state_snapshot(), "Equivalent authoritative downtime totals must converge without using a client clock.")
+	_expect_equal(_wave_event_signature(first), _wave_event_signature(second), "Equivalent deadline inputs must preserve deterministic wave event history.")
+	_expect_equal(_count_wave_events(first, "arena_wave_multiplayer_deadline_reached"), 1, "The multiplayer deadline must be recorded exactly once.")
+	_expect_true(not first.advance_multiplayer_downtime_real_time(1).get("success", false), "A completed multiplayer deadline must reject duplicate advancement.")
+
+	var harness := TwoClientSyncHarness.new(35_103)
+	var authority_session := ArenaCombatSession.new(35_103, harness.authority.simulation, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+	authority_session.set_session_mode(ArenaCombatSession.SESSION_MODE_MULTIPLAYER)
+	_expect_true(authority_session.initialize_wave_one_goblins(PLAYER_POSITION, OPPONENT_POSITION, true).get("success", false), "External multiplayer authority must initialize Wave 1.")
+	_forcibly_defeat_active_wave(authority_session)
+	authority_session.advance_by(1)
+	authority_session.advance_multiplayer_downtime_real_time(120_000)
+	var envelopes := harness.authority.publish_current_events()
+	harness.deliver_in_order(envelopes)
+	_expect_true(harness.compare_clients().get("success", false), "Downtime and deadline events must converge for two simulated clients.")
+	_expect_equal(harness.authority.get_state_digest(), harness.client_a.get_state_digest(), "The deadline transition snapshot must match the authoritative digest.")
+
+
+func _test_next_wave_control_presentation() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		_failures.append("SceneTree unavailable for NEXT WAVE control verification.")
+		return
+	var packed: PackedScene = load("res://scenes/test_arena.tscn")
+	var scene := packed.instantiate()
+	tree.root.add_child(scene)
+	var controller := scene.get_node("CombatController") as ArenaCombatController
+	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "Wave 1 must remain selectable for NEXT WAVE control coverage.")
+	controller.press_encounter_control_for_testing()
+	var session := controller.get_combat_session_for_testing()
+	_forcibly_defeat_active_wave(session)
+	session.advance_by(1)
+	controller.call("_update_presentation")
+	var encounter_button := scene.get_node("HUD/UI/EncounterButton") as Button
+	_expect_equal(encounter_button.text, "NEXT WAVE", "Solo downtime must expose the explicit NEXT WAVE control.")
+	controller.press_encounter_control_for_testing()
+	_expect_equal(session.get_arena_wave_state().get("current_wave_id"), "wave_2", "The NEXT WAVE control must advance the authoritative circuit.")
+	_expect_equal(encounter_button.text, "RESET", "After one advancement the control must not continue issuing duplicate NEXT WAVE requests.")
+	tree.root.remove_child(scene)
+	scene.free()
 
 
 func _test_reset_replays_wave_draws_and_history() -> void:
@@ -151,6 +256,29 @@ func _ready_session(seed_value: int) -> ArenaCombatSession:
 	var session := ArenaCombatSession.new(seed_value)
 	_expect_true(session.initialize(PLAYER_POSITION, OPPONENT_POSITION, false).get("success", false), "Test fixture must initialize in READY state.")
 	return session
+
+
+func _multiplayer_downtime_session(seed_value: int) -> ArenaCombatSession:
+	var session := ArenaCombatSession.new(seed_value, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+	_expect_true(session.set_session_mode(ArenaCombatSession.SESSION_MODE_MULTIPLAYER).get("success", false), "The future-compatible multiplayer mode must configure before combat.")
+	_expect_true(session.initialize_wave_one_goblins(PLAYER_POSITION, OPPONENT_POSITION, true).get("success", false), "Multiplayer deadline fixture must initialize Wave 1.")
+	_forcibly_defeat_active_wave(session)
+	session.advance_by(1)
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Multiplayer Wave victory must enter downtime.")
+	return session
+
+
+func _forcibly_defeat_active_wave(session: ArenaCombatSession) -> void:
+	for actor_id: String in session.get_targetable_enemy_ids():
+		session.get_actor_state(StringName(actor_id)).current_hpc = 0
+
+
+func _count_wave_events(session: ArenaCombatSession, event_type: String) -> int:
+	var count := 0
+	for event: CombatEvent in session.get_resolved_events():
+		if String(event.event_type) == event_type:
+			count += 1
+	return count
 
 
 func _event_types(session: ArenaCombatSession) -> Array[String]:

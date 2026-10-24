@@ -20,6 +20,11 @@ const ENCOUNTER_RUNNING := "running"
 const ENCOUNTER_PLAYER_VICTORY := "player_victory"
 const ENCOUNTER_PLAYER_DEFEAT := "player_defeat"
 const ENCOUNTER_DOUBLE_DEFEAT := "double_defeat"
+const ENCOUNTER_BETWEEN_WAVE_DOWNTIME := "between_wave_downtime"
+const ENCOUNTER_WAVE_TRANSITION_BLOCKED := "wave_transition_blocked"
+const SESSION_MODE_SOLO := "solo"
+const SESSION_MODE_MULTIPLAYER := "multiplayer"
+const MULTIPLAYER_DOWNTIME_DEADLINE_MS := 120_000
 const OPPONENT_BEHAVIOR_LABEL := "task15_deterministic_test_opponent"
 const OPPONENT_MOVEMENT_TICK_US := 100_000
 const OPPONENT_REPATH_DISTANCE_MICROFEET := ArenaBattlefield.NAVIGATION_STEP_MICROFEET
@@ -73,6 +78,9 @@ var _player_movement_round_index: int = -1
 var _player_movement_spent_microfeet: int = 0
 var _resolved_event_history_generation: int = 0
 var _arena_wave_state_machine: ArenaWaveStateMachine
+var _session_mode: String = SESSION_MODE_SOLO
+var _downtime_elapsed_ms: int = 0
+var _downtime_advance_committed: bool = false
 var _is_wave_one_goblin_encounter: bool = false
 var _goblin_actor_ids := PackedStringArray()
 var _is_wave_two_spadoodle_encounter: bool = false
@@ -692,6 +700,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_opponent_behavior_status = "idle" if _opponent_behavior_enabled else "disabled"
 	_opponent_movement_model = null
 	_arena_wave_state_machine = null
+	_downtime_elapsed_ms = 0
+	_downtime_advance_committed = false
 	_goblin_actor_ids = PackedStringArray()
 	_spadoodle_actor_ids = PackedStringArray()
 	_skelly_actor_ids = PackedStringArray()
@@ -1306,32 +1316,80 @@ func evaluate_current_wave_victory() -> Dictionary:
 	return result
 
 
-func recover_and_advance_wave() -> Dictionary:
-	if _arena_wave_state_machine == null:
-		return _failure("wave_circuit_not_initialized")
-	var transition := _arena_wave_state_machine.begin_between_wave_recovery()
-	if not transition.get("success", false):
-		return transition
-	_publish_wave_transition(transition)
-	if _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE:
-		return transition
-	var recovery := simulation.restore_actor_between_wave_resources(Fixture.PLAYER_ID)
-	if not recovery.get("success", false):
-		return recovery
-	simulation.record_arena_wave_event(&"arena_wave_recovery_applied", recovery)
-	var advance := _arena_wave_state_machine.complete_between_wave_recovery(_roll_wave_quantity)
-	_publish_wave_transition(advance)
-	if not advance.get("success", false):
-		return advance
+func set_session_mode(mode: String) -> Dictionary:
+	if not [SESSION_MODE_SOLO, SESSION_MODE_MULTIPLAYER].has(mode):
+		return _failure("unsupported_session_mode")
+	if _encounter_state == ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("session_mode_locked_during_downtime")
+	_session_mode = mode
+	_downtime_elapsed_ms = 0
+	_downtime_advance_committed = false
+	if _initialized:
+		simulation.record_arena_wave_event(&"arena_wave_session_mode_configured", {
+			"session_mode": _session_mode,
+			"multiplayer_downtime_deadline_ms": MULTIPLAYER_DOWNTIME_DEADLINE_MS,
+		})
+		_sync_wave_snapshot()
+	return {"success": true, "session_mode": _session_mode}
+
+
+func get_between_wave_downtime_state() -> Dictionary:
+	var active := _arena_wave_state_machine != null \
+		and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME
+	var deadline_ms: Variant = MULTIPLAYER_DOWNTIME_DEADLINE_MS if _session_mode == SESSION_MODE_MULTIPLAYER else null
 	return {
-		"success": true,
-		"recovery": recovery,
-		"next_wave_id": _arena_wave_state_machine.get_current_wave_id(),
+		"active": active,
+		"session_mode": _session_mode,
+		"elapsed_real_time_ms": _downtime_elapsed_ms,
+		"deadline_real_time_ms": deadline_ms,
+		"remaining_real_time_ms": null if deadline_ms == null else maxi(0, int(deadline_ms) - _downtime_elapsed_ms),
+		"advance_committed": _downtime_advance_committed,
 	}
 
 
+func request_next_wave() -> Dictionary:
+	if _session_mode != SESSION_MODE_SOLO:
+		return _failure("solo_next_wave_unavailable")
+	return _advance_from_between_wave_downtime("solo_next_wave")
+
+
+func advance_multiplayer_downtime_real_time(delta_ms: int) -> Dictionary:
+	if delta_ms < 0:
+		return _failure("negative_downtime_delta")
+	if _session_mode != SESSION_MODE_MULTIPLAYER:
+		return _failure("multiplayer_downtime_unavailable")
+	if _arena_wave_state_machine == null \
+	or _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME:
+		return _failure("wave_downtime_not_active")
+	if _downtime_advance_committed:
+		return _failure("wave_advance_already_committed")
+	_downtime_elapsed_ms = mini(MULTIPLAYER_DOWNTIME_DEADLINE_MS, _downtime_elapsed_ms + delta_ms)
+	_sync_wave_snapshot()
+	if _downtime_elapsed_ms < MULTIPLAYER_DOWNTIME_DEADLINE_MS:
+		return {
+			"success": true,
+			"advanced": false,
+			"remaining_real_time_ms": MULTIPLAYER_DOWNTIME_DEADLINE_MS - _downtime_elapsed_ms,
+		}
+	simulation.record_arena_wave_event(&"arena_wave_multiplayer_deadline_reached", {
+		"deadline_real_time_ms": MULTIPLAYER_DOWNTIME_DEADLINE_MS,
+		"elapsed_real_time_ms": _downtime_elapsed_ms,
+	})
+	return _advance_from_between_wave_downtime("multiplayer_deadline")
+
+
+func recover_and_advance_wave() -> Dictionary:
+	# Compatibility boundary: this operation no longer restores resources or
+	# combines downtime entry with advancement.
+	return request_next_wave()
+
+
 func get_arena_wave_state() -> Dictionary:
-	return {} if _arena_wave_state_machine == null else _arena_wave_state_machine.to_dictionary()
+	if _arena_wave_state_machine == null:
+		return {}
+	var result := _arena_wave_state_machine.to_dictionary()
+	result["downtime"] = get_between_wave_downtime_state()
+	return result
 
 
 func get_actor_state(actor_id: StringName) -> CombatActorState:
@@ -1405,7 +1463,55 @@ func _publish_wave_transition(result: Dictionary) -> void:
 
 func _sync_wave_snapshot() -> void:
 	if _arena_wave_state_machine != null:
-		simulation.set_arena_wave_state_snapshot(_arena_wave_state_machine.to_dictionary())
+		simulation.set_arena_wave_state_snapshot(get_arena_wave_state())
+
+
+func _enter_between_wave_downtime() -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	var transition := _arena_wave_state_machine.begin_between_wave_downtime()
+	if not transition.get("success", false):
+		return transition
+	_downtime_elapsed_ms = 0
+	_downtime_advance_committed = false
+	_encounter_active = false
+	_encounter_state = ENCOUNTER_BETWEEN_WAVE_DOWNTIME
+	_opponent_behavior_status = "between_wave_downtime"
+	_publish_wave_transition(transition)
+	return {
+		"success": true,
+		"wave_id": _arena_wave_state_machine.get_current_wave_id(),
+		"downtime": get_between_wave_downtime_state(),
+	}
+
+
+func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
+	if _arena_wave_state_machine == null:
+		return _failure("wave_circuit_not_initialized")
+	if _downtime_advance_committed:
+		return _failure("wave_advance_already_committed")
+	if _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME:
+		return _failure("wave_downtime_not_active")
+	var advance := _arena_wave_state_machine.advance_from_between_wave_downtime(_roll_wave_quantity, trigger)
+	if not advance.get("success", false):
+		return advance
+	_downtime_advance_committed = true
+	_publish_wave_transition(advance)
+	if _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE:
+		_encounter_state = ENCOUNTER_PLAYER_VICTORY
+		_opponent_behavior_status = "wave_circuit_complete"
+	else:
+		# Creature spawning for a continuous next-wave session remains an explicit
+		# integration step. The authoritative circuit has advanced exactly once.
+		_encounter_state = ENCOUNTER_WAVE_TRANSITION_BLOCKED
+		_opponent_behavior_status = "next_wave_integration_pending"
+	return {
+		"success": true,
+		"advanced": true,
+		"trigger": trigger,
+		"next_wave_id": _arena_wave_state_machine.get_current_wave_id(),
+		"wave_state": _arena_wave_state_machine.get_state(),
+	}
 
 
 func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String, target_location: StringName = &"torso") -> Dictionary:
@@ -2262,10 +2368,9 @@ func _update_encounter_outcome() -> void:
 			return
 		var wave_victory := evaluate_current_wave_victory()
 		if wave_victory.get("success", false) and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_VICTORY_DETECTED:
-			_encounter_state = ENCOUNTER_PLAYER_VICTORY
-			_encounter_active = false
-			var wave_label := "wave_4" if _is_wave_four_gargoyle_encounter else ("wave_3" if _is_wave_three_skelly_hades_encounter else ("wave_2" if _is_wave_two_spadoodle_encounter else "wave_1"))
-			_opponent_behavior_status = "%s_victory_detected" % wave_label
+			var downtime := _enter_between_wave_downtime()
+			if not downtime.get("success", false):
+				_last_error = String(downtime.get("reason", "between_wave_downtime_failed"))
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	if player_state == null or opponent_state == null:

@@ -2,7 +2,7 @@
 
 ## Scope
 
-Task 31B introduces configuration and authoritative lifecycle state only. It does **not** add creatures, monster statistics, spawn logic, enemy behavior, simulated victories, or a player-facing five-wave launcher. The existing Guard-versus-Guard encounter remains the default playable regression fixture.
+Task 31B introduced the configuration and authoritative lifecycle state. Tasks 31C-33B subsequently integrated independently playable Waves 1-4. Task 35B corrects the shared between-wave boundary without adding Wave 5, progression storage, rewards, or networking. The existing Guard-versus-Guard encounter remains the default playable regression fixture.
 
 ## Approved roster configuration
 
@@ -20,28 +20,31 @@ The catalog identifies creatures and count rules only. It intentionally contains
 
 `ArenaWaveStateMachine` owns the deterministic state contract:
 
-`uninitialized -> blocked_creature_integration -> active_combat -> victory_detected -> between_wave_recovery -> blocked_creature_integration`
+`uninitialized -> blocked_creature_integration -> active_combat -> victory_detected -> between_wave_downtime -> blocked_creature_integration`
 
-After the fifth verified victory, the circuit transitions directly to `complete`; there is no post-circuit recovery phase. A wave becomes `active_combat` only when future creature integration has explicitly registered every roster type and supplied exactly the already-resolved number of real authoritative enemy actor identifiers. The session then detects victory only when every bound actor has authoritative HPC at or below zero.
+Every verified victory, including Wave 5, enters safe downtime. A solo player advances with one explicit NEXT WAVE request; the final request completes the circuit. A future multiplayer host may supply authoritative real-time deltas to a separate 120-second deadline interface. Those deltas never advance combat simulation time. A wave becomes `active_combat` only when creature integration has explicitly registered every roster type and supplied exactly the already-resolved number of real authoritative enemy actor identifiers. The session detects victory only when every bound actor has authoritative HPC at or below zero.
 
 With no creature integrations in Task 31B, every initialized wave deliberately stops at `blocked_creature_integration`. It cannot start the legacy Guard duel, skip a wave, or fabricate a victory.
 
 ## RNG, events, snapshots, and replay
 
-The session resolves dice quantities with `CombatSimulation.roll_int`. Every dice result records its draw index and every fixed quantity is recorded as non-random in the retained event history. The framework emits `arena_wave_*` events for circuit initialization, quantity resolution, blocked availability, activation, verified victory, recovery start/application, and completion.
+The session resolves dice quantities with `CombatSimulation.roll_int`. Every dice result records its draw index and every fixed quantity is recorded as non-random in the retained event history. The framework emits `arena_wave_*` events for circuit initialization, quantity resolution, blocked availability, activation, verified victory, downtime start, explicit/deadline advancement, and completion.
 
 The current wave state is copied into the simulation snapshot before publication. Therefore the normal replay history, authoritative event IDs/timestamps/order, and existing two-client envelopes/digests carry the same state; no side channel or presentation timer owns wave state.
 
 `reset_five_wave_arena()` rebuilds the ready Guard fixture and then creates a fresh wave circuit with the original seed. It replays the same quantity draws and wave event sequence. Ordinary `reset_encounter()` remains the Guard-duel reset and clears any opt-in wave framework.
 
-## Recovery boundary
+## Safe downtime and persistence boundary
 
-Between non-final waves, the player restoration call uses only existing actor state:
+Downtime performs no implicit actor mutation:
 
-- `current_hpc` is restored from the registered `hpm` combat stat.
-- HPC and modeled Mana restore at the approved playtest recovery boundary. Task 32E corrects Ability User persistence: AP and independent per-Special daily counters do not refresh between continuous waves; only an explicit authoritative game-world-midnight event restores them.
+- Current HPC, Mana, applicable AP, equipment references, hand/material state, conditions, timed effects, daily-use counters and persistent shields remain exact.
+- The combat clock does not advance, so timed effects neither expire nor replenish while waiting.
+- Recovery can occur only through a separately legal item, Special or skill action with its normal costs and limits.
+- Solo downtime is unlimited. Multiplayer's future-compatible deadline accepts authority-owned elapsed real time; it is not derived from a client clock and does not spend combat time.
+- Advancement is idempotent: once committed, another NEXT WAVE/deadline request cannot advance again.
 
-The framework does not invent absent resource pools, reset equipment, repair shields, remove conditions, refund unmodeled consumables, or interrupt an action in progress.
+The deprecated automatic-restoration entry point fails closed. RESET still reconstructs the selected deterministic test fixture from its starting definition; it is not a persistent character operation. Future XP, profile, inventory and save state must remain separate from temporary encounter state and are intentionally not implemented here.
 
 ## Future integration seams
 
@@ -55,7 +58,7 @@ The reusable source-backed definition is `data/characters/prime_v3_common_goblin
 
 The existing player target list, Tab cycling and numbered hit locations operate across all living Goblin IDs. The current test scene adds compact `#32864A` green-square Goblin markers with white `G` glyphs and individual HPC labels for Wave 1 through its pre-existing development encounter selector; `DUEL M/M` and `DUEL M/S*` remain intact. The selector's `WAVE 1` option is a development encounter control, not a production creature-selection interface.
 
-After the final active Goblin reaches zero authoritative HPC, the state machine records `arena_wave_victory_detected`. The playable encounter reports victory and stops; it deliberately does not enter recovery or auto-advance. Wave 2 is a separate development selector option in Task 32A. The source's leader-defeat scattering statement is also deferred because no verified leader actor or morale rule has been integrated.
+After the final active Goblin reaches zero authoritative HPC, the state machine records `arena_wave_victory_detected` and enters safe downtime without recovery or automatic advancement. Wave 2 remains a separate development selector option until continuous next-wave creature spawning is integrated. The source's leader-defeat scattering statement is also deferred because no verified leader actor or morale rule has been integrated.
 
 ### Battlefield assessment and deferred Wave Arena configuration
 
@@ -69,7 +72,7 @@ Wave 2 can be initialized directly for development play without fabricating a Wa
 
 The Task 32A owner ruling defines `2 x claws` as two independent ordered attack instances attached to one AT-1 action. Each locks the same declared target/location and independently performs final reach/LOS legality, ACC, defenses, damage and legitimate critical processing. The action still takes exactly five seconds and creates no second Act or extra movement. Eligible physical Strength Bonus remains handled by the existing Prime damage pipeline.
 
-Wave 2 reuses the authoritative Wave 1 multi-actor pursuit, collision, occupancy, target cycling, action scheduler, event history, replay and synchronization paths. Its maximum of three actors uses the unchanged `44 x 23`-foot battlefield and the first three legal wave formation offsets. Presentation uses distinct brown-gold squares with white `S` glyphs, individual HPC labels, target highlights and authoritative facing arrows. Defeating every registered Spadoodle ends the separately launched Wave 2 encounter; it does not begin Wave 3.
+Wave 2 reuses the authoritative Wave 1 multi-actor pursuit, collision, occupancy, target cycling, action scheduler, event history, replay and synchronization paths. Its maximum of three actors uses the unchanged `44 x 23`-foot battlefield and the first three legal wave formation offsets. Presentation uses distinct brown-gold squares with white `S` glyphs, individual HPC labels, target highlights and authoritative facing arrows. Defeating every registered Spadoodle enters safe downtime; it does not automatically begin Wave 3.
 
 ## Task 32B: implemented Wave 3 Skellys and Hades Combat Follower
 
@@ -81,15 +84,15 @@ The fixed follower uses its verified Human profile and STR-6 Short Sword. Its de
 
 The test Arena declares its existing floor as packed dirt in authoritative terrain data. Gathering dirt requires a free left hand and one completed Act; terrain remains validated at completion. The material remains in that hand until a successfully completed two-Act Defensive Buff consumes it, while the right-hand Short Sword remains equipped. Self/ally Mist and Buff require a living legal recipient; a different recipient must stay in touch and unobstructed through completion. The deterministic driver can approach an eligible ally without treating the player as an ally. Hand/material state, daily uses/AP payment, recipient, effects, interruption and expiry are retained in snapshots and event history. Other battlefield definitions provide no dirt unless they author a matching material region.
 
-Task 32E models the printed parenthetical numbers as free daily uses: Called Shot 2, Rejuvenating Mist 3, Rage 2 and Defensive Buff 2. Each counter is independent. Once a counter reaches zero, another activation spends exactly one point from the shared AP pool. Ability activation makes no SS check. Fresh initialization and RESET construct full counters/AP; between-wave recovery preserves them. A distinct idempotent game-world-midnight command restores them without consulting the host clock.
+Task 32E models the printed parenthetical numbers as free daily uses: Called Shot 2, Rejuvenating Mist 3, Rage 2 and Defensive Buff 2. Each counter is independent. Once a counter reaches zero, another activation spends exactly one point from the shared AP pool. Ability activation makes no SS check. Fresh initialization and RESET construct full counters/AP; between-wave downtime preserves their current values. A distinct idempotent game-world-midnight command restores them without consulting the host clock.
 
-The unchanged `44 x 23`-foot battlefield supports the two-to-three enemy roster at legal nonoverlapping starts. Existing deterministic pursuit, occupancy reservations, targeting, nine locations, final reach/LOS, HPC labels and facing indicators are reused. Bone-colored `K` and purple `H` placeholders distinguish the two types. Defeating all registered Wave 3 actors ends that development encounter without beginning Wave 4; Waves 4-5 remain blocked.
+The unchanged `44 x 23`-foot battlefield supports the two-to-three enemy roster at legal nonoverlapping starts. Existing deterministic pursuit, occupancy reservations, targeting, nine locations, final reach/LOS, HPC labels and facing indicators are reused. Bone-colored `K` and purple `H` placeholders distinguish the two types. Defeating all registered Wave 3 actors enters safe downtime without automatically beginning Wave 4; Wave 5 remains blocked.
 
 The source lists Climb and fear of creatures bigger than Medium. The current flat Arena supplies no climbable surface, and the current Medium Guard is not bigger than Medium. Task 32A therefore adds no climbing or fear behavior; later use requires a source-driven environment/target trigger rather than a fabricated generic effect.
 
 ## Task 33A: implemented Wave 4 Mini Gargoyle Swarmers
 
-Wave 4 is independently selectable for development play. Its one authoritative seeded d4 draw, draw index, result and resolved count create one to four independent `mini_gargoyle_swarmer` actors. Each actor has its own source-backed HPC, Initiative, position/elevation, action state, daily Fury use and defeat state. Every registered Gargoyle must reach zero HPC before the wave records victory; the encounter then stops without fabricating Wave 5.
+Wave 4 is independently selectable for development play. Its one authoritative seeded d4 draw, draw index, result and resolved count create one to four independent `mini_gargoyle_swarmer` actors. Each actor has its own source-backed HPC, Initiative, position/elevation, action state, daily Fury use and defeat state. Every registered Gargoyle must reach zero HPC before the wave enters safe downtime; Wave 5 remains inactive and is not fabricated.
 
 Each AT-1 attack Act owns three ordered independent attack instances: slashing claw, slashing claw and piercing bite. The two claws use `1d6 + eligible SB`; the bite uses `1d8 + eligible SB`. All three retain the declared target/location but independently revalidate three-dimensional reach and obstruction, roll ACC, resolve defenses and apply exact damage/critical processing. The owner-approved Small classification selects Prime's directional Small-versus-Medium hit-location modifiers against the current Guard.
 

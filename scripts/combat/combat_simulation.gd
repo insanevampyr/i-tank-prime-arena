@@ -2154,27 +2154,10 @@ func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key) or not _actor_definitions.has(actor_key):
 		return _failure("unknown_actor")
-	var state: CombatActorState = _actor_states[actor_key]
-	var definition: CombatActorDefinition = _actor_definitions[actor_key]
-	if not state.current_action_instance_id.is_empty():
-		return _failure("actor_action_in_progress")
-	var previous_hpc: Variant = state.current_hpc
-	var previous_resources := state.resources.duplicate(true)
-	state.current_hpc = definition.get_combat_stat("hpm")
-	for resource_name: Variant in definition.resource_maxima:
-		# Task 32E owner ruling: AP and daily ability uses persist through continuous waves.
-		if String(resource_name) == "ap":
-			continue
-		state.resources[resource_name] = definition.resource_maxima[resource_name]
-	state.revision += 1
-	_state_revision += 1
-	return _success({
-		"actor_id": actor_key,
-		"previous_hpc": previous_hpc,
-		"restored_hpc": state.current_hpc,
-		"previous_resources": previous_resources,
-		"restored_resources": state.resources.duplicate(true),
-	})
+	# Task 35B supersedes the original recovery prototype. Between-wave
+	# downtime must never restore actor state implicitly; legal actions are the
+	# only recovery path.
+	return _failure("automatic_between_wave_recovery_prohibited")
 
 
 func take_resolved_events() -> Array:

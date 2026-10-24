@@ -200,7 +200,7 @@ func _test_autonomous_wall_overflight_and_victory() -> void:
 	for actor_id: String in ids:
 		session.get_actor_state(StringName(actor_id)).current_hpc = 0
 	session.advance_by(1)
-	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY, "Wave 4 victory must require every spawned Gargoyle defeated.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Wave 4 victory must enter safe downtime only after every spawned Gargoyle is defeated.")
 
 
 func _test_four_gargoyle_performance_and_partition_determinism() -> void:

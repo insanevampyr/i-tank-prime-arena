@@ -7,7 +7,10 @@ const STATE_UNINITIALIZED := "uninitialized"
 const STATE_BLOCKED := "blocked_creature_integration"
 const STATE_ACTIVE := "active_combat"
 const STATE_VICTORY_DETECTED := "victory_detected"
-const STATE_BETWEEN_WAVE_RECOVERY := "between_wave_recovery"
+const STATE_BETWEEN_WAVE_DOWNTIME := "between_wave_downtime"
+# Compatibility alias for callers compiled against the original Task 31B name.
+# The state is downtime and never implies automatic recovery.
+const STATE_BETWEEN_WAVE_RECOVERY := STATE_BETWEEN_WAVE_DOWNTIME
 const STATE_COMPLETE := "complete"
 
 var _definitions: Array[Dictionary] = Catalog.definitions()
@@ -79,27 +82,47 @@ func observe_active_enemy_states(authoritative_enemy_states: Dictionary) -> Dict
 	})])
 
 
-func begin_between_wave_recovery() -> Dictionary:
+func begin_between_wave_downtime() -> Dictionary:
 	if _state != STATE_VICTORY_DETECTED:
 		return _failure("wave_victory_not_detected")
-	if _current_wave_index + 1 >= _definitions.size():
-		_state = STATE_COMPLETE
-		_active_enemy_ids = PackedStringArray()
-		return _success_with_events([_event(&"arena_wave_circuit_completed", {
-			"wave_id": _current_wave_id(),
-		})])
-	_state = STATE_BETWEEN_WAVE_RECOVERY
-	return _success_with_events([_event(&"arena_wave_recovery_started", {
+	_state = STATE_BETWEEN_WAVE_DOWNTIME
+	_active_enemy_ids = PackedStringArray()
+	return _success_with_events([_event(&"arena_wave_downtime_started", {
 		"wave_id": _current_wave_id(),
+		"is_final_wave": _current_wave_index + 1 >= _definitions.size(),
 	})])
 
 
-func complete_between_wave_recovery(roll_quantity: Callable) -> Dictionary:
-	if _state != STATE_BETWEEN_WAVE_RECOVERY:
-		return _failure("wave_recovery_not_active")
+func advance_from_between_wave_downtime(roll_quantity: Callable, trigger: String) -> Dictionary:
+	if _state != STATE_BETWEEN_WAVE_DOWNTIME:
+		return _failure("wave_downtime_not_active")
+	if trigger.is_empty():
+		return _failure("wave_advance_trigger_required")
+	var transition_event := _event(&"arena_wave_downtime_completed", {
+		"wave_id": _current_wave_id(),
+		"trigger": trigger,
+	})
+	if _current_wave_index + 1 >= _definitions.size():
+		_state = STATE_COMPLETE
+		return _success_with_events([transition_event, _event(&"arena_wave_circuit_completed", {
+			"wave_id": _current_wave_id(),
+		})])
 	_current_wave_index += 1
 	_active_enemy_ids = PackedStringArray()
-	return _initialize_current_wave(roll_quantity, false)
+	var initialization := _initialize_current_wave(roll_quantity, false)
+	if initialization.get("success", false):
+		var events: Array[Dictionary] = [transition_event]
+		events.append_array(initialization.get("events", []))
+		initialization["events"] = events
+	return initialization
+
+
+func begin_between_wave_recovery() -> Dictionary:
+	return begin_between_wave_downtime()
+
+
+func complete_between_wave_recovery(roll_quantity: Callable) -> Dictionary:
+	return advance_from_between_wave_downtime(roll_quantity, "legacy_explicit_advance")
 
 
 func get_state() -> String:

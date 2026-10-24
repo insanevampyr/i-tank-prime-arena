@@ -144,8 +144,8 @@ func _test_wave_victory_reset_replay_and_two_client_convergence() -> void:
 		_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_ACTIVE, "Wave 2 must remain active while any Spadoodle lives.")
 	session.get_actor_state(StringName(ids[ids.size() - 1])).current_hpc = 0
 	session.advance_by(1)
-	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_VICTORY_DETECTED, "Wave 2 victory requires every active Spadoodle defeated.")
-	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY, "Wave 2 victory must stop without beginning Wave 3.")
+	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Wave 2 victory requires every active Spadoodle defeated before safe downtime.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Wave 2 victory must stop combat without automatically beginning Wave 3.")
 
 	var replay := _ready_wave_session(32_205, false)
 	var before_reset := _event_signature(replay)

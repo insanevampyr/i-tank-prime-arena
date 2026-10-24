@@ -186,8 +186,8 @@ func _test_wave_victory_requires_all_active_goblins() -> void:
 		_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_ACTIVE, "Wave 1 must not declare victory while any Goblin remains alive.")
 	session.get_actor_state(StringName(ids[ids.size() - 1])).current_hpc = 0
 	session.advance_by(1)
-	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_VICTORY_DETECTED, "Wave 1 victory must occur only after every active Goblin is defeated.")
-	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY, "Wave 1 victory must end the playable Wave 1 encounter without advancing unsupported Wave 2.")
+	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Wave 1 victory must enter safe downtime only after every active Goblin is defeated.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Wave 1 victory must stop combat without automatically advancing to Wave 2.")
 
 
 func _test_reset_replay_and_two_client_convergence() -> void:

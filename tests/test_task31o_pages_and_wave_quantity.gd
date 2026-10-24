@@ -70,10 +70,17 @@ func _test_eight_goblin_registration_targeting_completion_and_reset() -> void:
 	_expect_equal(session.get_targetable_enemy_ids().size(), 8, "RESET with the same seed must reproduce eight Goblins.")
 	_expect_equal(_event_signature(session), initial_signature, "RESET with the same seed must reproduce the complete authoritative history.")
 	_expect_true(session.start_encounter().get("success", false), "The reset maximum-count encounter must start before victory evaluation.")
-	for actor_id: String in session.get_targetable_enemy_ids():
-		session.get_actor_state(StringName(actor_id)).current_hpc = 0
+	var active_ids := session.get_targetable_enemy_ids()
+	for index in range(active_ids.size() - 1):
+		session.get_actor_state(StringName(active_ids[index])).current_hpc = 0
+		var interim := session.evaluate_current_wave_victory()
+		_expect_true(interim.get("success", false), "Wave state must observe each defeated Goblin.")
+		_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_ACTIVE, "Wave 1 must remain active while any of the eight Goblins is alive.")
+		_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_RUNNING, "Earlier Goblin defeats must not enter downtime prematurely.")
+	session.get_actor_state(StringName(active_ids[active_ids.size() - 1])).current_hpc = 0
 	session.advance_by(1)
-	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY, "Wave victory must wait for and then recognize all eight defeated Goblins.")
+	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Wave victory must enter safe downtime only after all eight Goblins are defeated.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "The completed eight-Goblin wave must use the approved between-wave downtime lifecycle.")
 
 
 func _test_eight_goblin_navigation_performance_and_convergence() -> void:

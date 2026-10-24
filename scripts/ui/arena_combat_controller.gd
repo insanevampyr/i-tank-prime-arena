@@ -733,6 +733,13 @@ func _on_encounter_button_pressed() -> void:
 		_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
 		var start_result := _session.start_encounter()
 		_last_ui_message = "Encounter started. Opening Initiative is authoritative." if start_result.get("success", false) else "Start blocked: %s" % _friendly_reason(String(start_result.get("reason", "rejected")))
+	elif _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		var advance_result := _session.request_next_wave()
+		_last_ui_message = (
+			"Advanced to %s; encounter integration is pending." % String(advance_result.get("next_wave_id", "next wave"))
+			if advance_result.get("success", false)
+			else "Next Wave blocked: %s" % _friendly_reason(String(advance_result.get("reason", "rejected")))
+		)
 	else:
 		_reset_encounter()
 	_update_presentation()
@@ -1221,6 +1228,10 @@ func _update_presentation() -> void:
 	match _session.get_encounter_state():
 		ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY:
 			_last_ui_message = "VICTORY: the opponent fixture is defeated. Press RESET."
+		ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+			_last_ui_message = "SAFE DOWNTIME: resources and effects are preserved. Press NEXT WAVE when ready."
+		ArenaCombatSession.ENCOUNTER_WAVE_TRANSITION_BLOCKED:
+			_last_ui_message = "Next wave selected; continuous-wave creature integration is pending. Press RESET."
 		ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT:
 			_last_ui_message = "DEFEAT: the player fixture is defeated. Press RESET."
 		ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT:
@@ -1288,7 +1299,11 @@ func _update_presentation() -> void:
 		)
 	_update_facing_indicators()
 	if _encounter_button != null:
-		_encounter_button.text = "START" if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY else "RESET"
+		_encounter_button.text = (
+			"START"
+			if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
+			else ("NEXT WAVE" if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME else "RESET")
+		)
 		_encounter_button.disabled = false
 	if _encounter_selector != null:
 		_encounter_selector.text = (

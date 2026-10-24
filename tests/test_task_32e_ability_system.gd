@@ -105,10 +105,10 @@ func _test_authoritative_midnight_and_between_wave_persistence() -> void:
 	state.ability_daily_remaining[String(HadesFixture.RAGE_ACTION_ID)] = 1
 	state.resources["ap"] = 3
 	state.current_hpc = 10
+	var before_downtime := state.to_dictionary()
 	var recovery := simulation.restore_actor_between_wave_resources(actor_id)
-	_expect_true(recovery.get("success", false), "Between-wave recovery must remain available.")
-	_expect_equal(state.resources.get("ap"), 3, "Between-wave recovery must not regenerate AP.")
-	_expect_equal(state.ability_daily_remaining.get(String(HadesFixture.CALLED_SHOT_ACTION_ID)), 0, "Between-wave recovery must not regenerate daily uses.")
+	_expect_equal(recovery.get("reason"), "automatic_between_wave_recovery_prohibited", "Between-wave downtime must reject the superseded automatic recovery path.")
+	_expect_equal(state.to_dictionary(), before_downtime, "Between-wave downtime must preserve HPC, resources, daily uses and actor state exactly.")
 	var draws_before := simulation.random.get_draw_count()
 	var midnight := simulation.apply_authoritative_midnight_refresh("world_day_2_midnight")
 	_expect_true(midnight.get("success", false), "An explicit game-world midnight boundary must refresh Ability resources.")

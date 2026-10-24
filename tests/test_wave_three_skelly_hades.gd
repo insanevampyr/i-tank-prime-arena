@@ -305,8 +305,8 @@ func _test_victory_reset_replay_and_two_client_convergence() -> void:
 		_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_ACTIVE, "Wave 3 cannot end while any required enemy lives.")
 	session.get_actor_state(StringName(ids[-1])).current_hpc = 0
 	session.advance_by(1)
-	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_VICTORY_DETECTED, "Wave 3 victory requires every Skelly and the follower defeated.")
-	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY, "Wave 3 victory must stop without beginning Wave 4.")
+	_expect_equal(session.get_arena_wave_state().get("state"), ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME, "Wave 3 victory requires every Skelly and the follower defeated before safe downtime.")
+	_expect_equal(session.get_encounter_state(), ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME, "Wave 3 victory must stop combat without automatically beginning Wave 4.")
 
 	var replay := _ready_wave_session(32_305, false)
 	var before_events := _event_signature(replay)
