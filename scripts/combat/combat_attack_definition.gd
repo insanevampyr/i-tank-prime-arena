@@ -27,6 +27,8 @@ var allows_approach_during_execution: bool
 var uses_size_based_location_acc: bool
 var strikes_per_act: int
 var strike_profiles: Array[Dictionary]
+var requires_equipped_weapon: bool
+var requires_hand_occupancy: bool
 
 
 func _init(
@@ -51,7 +53,9 @@ func _init(
 	p_allows_approach_during_execution: bool = false,
 	p_uses_size_based_location_acc: bool = false,
 	p_strikes_per_act: int = 1,
-	p_strike_profiles: Array[Dictionary] = []
+	p_strike_profiles: Array[Dictionary] = [],
+	p_requires_equipped_weapon: bool = true,
+	p_requires_hand_occupancy: bool = true
 ) -> void:
 	assert(not String(p_attack_definition_id).is_empty(), "Physical attack definitions require a stable identifier.")
 	assert(not String(p_weapon_ref).is_empty(), "Physical attack definitions require an equipment reference.")
@@ -100,6 +104,8 @@ func _init(
 	uses_size_based_location_acc = p_uses_size_based_location_acc
 	strikes_per_act = p_strikes_per_act
 	strike_profiles = p_strike_profiles.duplicate(true)
+	requires_equipped_weapon = p_requires_equipped_weapon
+	requires_hand_occupancy = p_requires_hand_occupancy
 	if not strike_profiles.is_empty():
 		assert(strike_profiles.size() == strikes_per_act, "Strike profiles must define every strike in the Act.")
 		for profile: Dictionary in strike_profiles:
@@ -177,4 +183,6 @@ func to_dictionary() -> Dictionary:
 		"uses_size_based_location_acc": uses_size_based_location_acc,
 		"strikes_per_act": strikes_per_act,
 		"strike_profiles": strike_profiles.duplicate(true),
+		"requires_equipped_weapon": requires_equipped_weapon,
+		"requires_hand_occupancy": requires_hand_occupancy,
 	}

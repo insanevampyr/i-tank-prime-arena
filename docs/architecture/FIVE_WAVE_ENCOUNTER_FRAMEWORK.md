@@ -102,6 +102,12 @@ Fury is committed once to one eligible natural-attack action, consumes one daily
 
 Presentation uses gray-blue `M` placeholders, independent HPC/facing markers and an actor-owned altitude label. `▲ 6 ft` and fractional equivalents are read from authoritative elevation and disappear when the actor is grounded, defeated or removed. Wave 4's nighttime premise and printed 100-foot Dark Sight are recorded, but generalized darkness, detection and hidden-information rules remain deferred rather than approximated. Wave 5 remains configured and blocked.
 
+## Inactive Wave 5 equipment mechanics foundation
+
+Tasks 35C-35E keep Wave 5 inactive while validating the Rare Human Warrior's source data and physical equipment pathways. The boss's complete Scale mail, racial NAL +1, hand-held Boar Spear, 30% weapon Block, source-specific 18-foot thrown mode, authoritative dropped-item possession, one-Act interrupted retrieval and one-strike Human unarmed fallback now reuse the shared deterministic combat scheduler. A released spear is unavailable for melee and Block until a legal retrieval completes.
+
+No printed rule supplies miss/block/hit landing coordinates. A throw therefore creates a `pending_landing` world item and requires a separately supplied authoritative legal position before retrieval. This explicit boundary is part of snapshots and replay; it is not an automatic scatter rule. Exact Combat abilities, potion actions, automatic landing policy and boss AI still block encounter activation.
+
 ## Task 33B: Wave 4 swarm behavior and legal dive attacks
 
 Wave 4 now drives its existing actors through deterministic, creature-specific tactical states: takeoff, high staging, diving, striking, withdrawing and blocked recovery. Stable roster-index lanes surround the current target, one active diver normally leaves the other actors staged, and an unavailable preferred contact point falls back through the other lanes. The attack remains one AT-1 action containing claw/claw/bite; movement during that action spends the existing MR 16 budget and updates its endpoint against the target's current authoritative position without restarting the action.

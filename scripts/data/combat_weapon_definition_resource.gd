@@ -160,6 +160,56 @@ func make_attack_definition(attack_definition_id: StringName, targeting_profile:
 	)
 
 
+func make_thrown_attack_definition(
+	attack_definition_id: StringName,
+	maximum_range_microfeet: int,
+	targeting_profile: Dictionary = {},
+	thrown_damage_types: PackedStringArray = PackedStringArray(["piercing"])
+) -> Variant:
+	if _has_invalid_issue(validate_definition()) or not combat_ready:
+		return null
+	if maximum_range_microfeet <= 0 or thrown_damage_types.is_empty() or String(throw_range_formula).is_empty():
+		return null
+	var acc_modifiers := {"torso": 0}
+	var allowed_locations := PackedStringArray(["torso"])
+	var location_multipliers := {
+		"torso": {
+			"numerator": 1,
+			"denominator": 1,
+			"source_ref": "PRIME-V3 pp. 95-98, same-size torso hit location 3",
+		},
+	}
+	var uses_size_based_location_acc := false
+	var attack_sources := source_refs.duplicate()
+	if not targeting_profile.is_empty():
+		acc_modifiers = targeting_profile.get("acc_modifiers_by_location", {}).duplicate(true)
+		allowed_locations = targeting_profile.get("allowed_target_locations", PackedStringArray()).duplicate()
+		location_multipliers = targeting_profile.get("location_multipliers", {}).duplicate(true)
+		uses_size_based_location_acc = bool(targeting_profile.get("uses_size_based_location_acc", false))
+		for profile_source: String in targeting_profile.get("source_refs", PackedStringArray()):
+			if not attack_sources.has(profile_source):
+				attack_sources.append(profile_source)
+		if not allowed_locations.has("torso") or acc_modifiers.keys().size() != allowed_locations.size() or location_multipliers.keys().size() != allowed_locations.size():
+			return null
+	var damage := CombatPhysicalDamageDefinition.new(
+		damage_dice_count, damage_die_sides, fixed_damage_bonus,
+		strength_bonus_eligible, true, location_multipliers, null, true,
+		CombatPhysicalDamageDefinition.ROUNDING_FLOOR, attack_sources
+	)
+	var critical_policy := CombatCriticalTriggerPolicy.new(
+		StringName("%s_thrown_critical_range" % String(definition_id)),
+		critical_success_max_natural, 0, 20, &"",
+		"%s: natural 1-%d is a critical strike" % [display_name, critical_success_max_natural],
+		"PRIME-V3 natural 20 critical failure", attack_sources
+	)
+	return CombatAttackDefinition.new(
+		attack_definition_id, definition_id, required_acts, true, true, 0,
+		acc_modifiers, allowed_locations, 0, maximum_range_microfeet, true,
+		attack_sources, &"thrown", thrown_damage_types, true, ducking_policy,
+		damage, critical_policy, false, uses_size_based_location_acc, 1
+	)
+
+
 func make_block_definition() -> Variant:
 	if _has_invalid_issue(validate_definition()) or block_target < 0:
 		return null

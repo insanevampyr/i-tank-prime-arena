@@ -244,13 +244,272 @@ func _test_location_protection_and_weapon_block() -> void:
 func _test_throw_retrieval_and_unarmed_gates() -> void:
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
 	var weapon := catalog.get_weapon(Fixture.WEAPON_REF)
-	_expect_true(weapon.blocked_capabilities.has("thrown_spear_delivery_and_recovery_not_implemented"), "Thrown delivery, dropped position and one-Act recovery must remain a single explicit gate.")
-	var attack := Fixture.make_melee_attack_definition(CombatHitLocationCatalog.get_same_size_attack_profile())
-	_expect_true(attack != null and attack.delivery_class == &"hand_held", "Task 35D must activate only the hand-held spear mode.")
+	_expect_true(weapon.blocked_capabilities.has("automatic_thrown_landing_position_policy_unverified"), "Only automatic miss/block/hit landing selection must remain explicitly gated.")
+	var profile := CombatHitLocationCatalog.get_same_size_attack_profile()
+	var attack := Fixture.make_melee_attack_definition(profile)
+	var thrown := Fixture.make_thrown_attack_definition(profile)
+	var unarmed := Fixture.make_unarmed_attack_definition(profile)
+	_expect_true(attack != null and attack.delivery_class == &"hand_held", "The verified hand-held spear mode must remain available.")
+	_expect_true(thrown != null and thrown.delivery_class == &"thrown", "The boss fixture must expose the source-verified thrown spear delivery.")
+	if thrown != null:
+		_expect_equal(thrown.maximum_range_microfeet, 18_000_000, "The specific one-square-per-STR boss rule must resolve STR 18 to 18 feet, not the generic chart's longer range.")
+		_expect_equal(thrown.damage_types, PackedStringArray(["piercing"]), "Prime's thrown Boar Spear mode must retain Piercing delivery.")
+		_expect_true(thrown.physical_damage.strength_bonus_eligible == true, "Prime thrown physical weapons must retain eligible SB.")
+	_expect_true(unarmed != null and unarmed.delivery_class == &"hand_held", "The source-verified Human unarmed fallback must be available.")
+	if unarmed != null:
+		_expect_true(unarmed.physical_damage.dice_count == 1 and unarmed.physical_damage.die_sides == 4 and unarmed.physical_damage.strength_bonus_eligible == true, "Unarmed fallback must use Prime's 1d4 Bashing plus eligible SB.")
+		_expect_equal(unarmed.maximum_range_microfeet, 1_000_000, "Unarmed fallback must retain one-foot reach.")
+		_expect_equal(unarmed.strikes_per_act, 1, "The Human fallback must use one generic Unarmed Strike per Act and must not copy Goblin two-fist sequencing.")
+		_expect_true(not unarmed.requires_equipped_weapon and not unarmed.requires_hand_occupancy, "A natural unarmed strike must not masquerade as held equipment.")
+	var supported := _run_throw_retrieval_unarmed_transaction(4)
+	_expect_true(supported.get("success", false), "The source-supported throw, pending landing, movement-gated retrieval and unarmed fallback must complete deterministically.")
+	if supported.get("success", false):
+		_expect_equal(supported.get("throw_damage_flat_bonus"), 8, "Thrown spear damage must retain the printed +8 exactly once.")
+		_expect_equal(supported.get("throw_damage_strength_bonus"), 4, "Thrown spear damage must add the boss's eligible SB +4 exactly once.")
+		_expect_true(bool(supported.get("pending_landing_observed", false)), "A resolved throw must relinquish the spear into an explicit pending-landing state.")
+		_expect_true(bool(supported.get("retrieval_required_movement", false)), "Retrieval must remain illegal until authoritative pickup reach is satisfied by movement.")
+		_expect_equal(supported.get("retrieval_duration_us"), 2_500_000, "AT 2 one-Act retrieval must take exactly 2.5 seconds.")
+		_expect_equal(supported.get("unarmed_strength_bonus"), 4, "The unarmed fallback must apply the source-verified boss SB +4.")
+	var replay := _run_throw_retrieval_unarmed_transaction(4)
+	_expect_true(replay.get("success", false), "The same-seed Task 35E transaction must replay successfully.")
+	if supported.get("success", false) and replay.get("success", false):
+		_expect_equal(replay.get("events"), supported.get("events"), "Throw, landing, unarmed fallback and retrieval event history must replay exactly.")
+		_expect_equal(replay.get("snapshot"), supported.get("snapshot"), "World-item and equipment state must replay exactly.")
+		var harness: TwoClientSyncHarness = supported.get("harness")
+		_expect_true(harness.compare_clients().get("success", false), "Task 35E authoritative history must converge on both simulated clients.")
+	var interrupted := _run_interrupted_retrieval_transaction()
+	_expect_true(interrupted.get("success", false), "An interrupted retrieval must leave the spear dropped and unavailable.")
+	var miss_and_defense := _verify_throw_miss_defense_and_boundaries()
+	_expect_true(miss_and_defense.get("success", false), "Thrown miss, successful defense, range and LOS boundaries must remain deterministic and source-safe.")
 	var unresolved: PackedStringArray = Fixture.get_activation_status().get("unresolved", PackedStringArray())
-	_expect_true(unresolved.has("boar_spear_thrown_delivery_world_location_and_recovery_pipeline"), "Wave 5 must remain gated on the missing authoritative thrown/world-item transaction.")
-	_expect_true(unresolved.has("human_unarmed_strength_bonus_and_strikes_per_act"), "Human unarmed fallback must remain gated until SB eligibility and attacks-per-Act are sourced.")
+	_expect_true(unresolved.has("automatic_boar_spear_miss_block_hit_landing_position_policy"), "Automatic landing/scatter selection must remain gated instead of inventing a Prime rule.")
 	_expect_true(not Fixture.get_activation_status().get("encounter_ready", true), "Equipment completion must not activate Wave 5.")
+
+
+func _run_throw_retrieval_unarmed_transaction(seed_value: int) -> Dictionary:
+	var harness := TwoClientSyncHarness.new(seed_value)
+	var simulation := harness.authority.simulation
+	var boss_result := Fixture.instantiate_foundation_actor(&"task35e_boss", "Task 35E Boss")
+	var boss: CombatActorDefinition = boss_result.get("actor")
+	var target := _make_test_actor(&"task35e_target", PackedStringArray(), false, 500, 0)
+	if boss == null:
+		return {"success": false, "reason": "boss_instantiation"}
+	simulation.register_actor(boss)
+	simulation.register_actor(target)
+	if not simulation.configure_actor_hand_occupancy(boss.actor_id, {"left": String(Fixture.WEAPON_REF), "right": String(Fixture.WEAPON_REF)}).get("success", false):
+		return {"success": false, "reason": "two_hand_configuration"}
+	simulation.get_actor_state(target.actor_id).awareness = &"unaware"
+	simulation.register_defense_profile(target.actor_id, _make_no_defense_profile(&"task35e_no_defense"))
+	simulation.register_damage_protection_profile(target.actor_id, CombatDamageProtectionProfile.new(&"task35e_target_protection"))
+	var landing_position := Vector2i(5_000_000, 0)
+	simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> Dictionary:
+		return {"success": position == landing_position, "reason": "test_landing_position_illegal"}
+	)
+	simulation.set_world_item_pickup_resolver(func(actor_id: StringName, item: Dictionary) -> Dictionary:
+		return {
+			"success": simulation.get_actor_state(actor_id).position_microfeet == item.get("position_microfeet"),
+			"reason": "world_item_out_of_pickup_reach",
+		}
+	)
+	simulation.begin_combat()
+	var started := Fixture.start_spear_throw(simulation, boss.actor_id, target.actor_id, "task35e_throw", &"torso", true)
+	if not started.get("success", false):
+		return {"success": false, "reason": "throw_start", "details": started}
+	var action: CombatActionInstance = simulation.get_action(String(started.get("action_instance_id", "")))
+	simulation.advance_to(2_500_000)
+	var attack: CombatAttackInstance = simulation.get_attack(String(started.get("attack_instance_id", "")))
+	if attack == null or attack.status != CombatAttackInstance.STATUS_PENDING_DEFENSE:
+		return {"success": false, "reason": "throw_accuracy", "status": "null" if attack == null else attack.status}
+	var state := simulation.get_actor_state(boss.actor_id)
+	var world_item_id := String(started.get("world_item_id", ""))
+	var pending_item := simulation.get_world_item(world_item_id)
+	var pending_observed := not state.equipment_refs.has(String(Fixture.WEAPON_REF)) \
+		and not state.hand_occupancy.values().has(String(Fixture.WEAPON_REF)) \
+		and String(pending_item.get("state", "")) == "pending_landing" \
+		and pending_item.get("position_microfeet") == null
+	var defense := simulation.resolve_pending_defense(attack.attack_instance_id, "task35e_throw_defense")
+	if defense.get("status") != CombatDefenseResolution.STATUS_EXHAUSTED:
+		return {"success": false, "reason": "throw_defense", "details": defense}
+	var damage := simulation.resolve_physical_damage(attack.attack_instance_id, "task35e_throw_damage")
+	if not damage.get("success", false):
+		return {"success": false, "reason": "throw_damage", "details": damage}
+	var damage_resolution: CombatDamageResolution = simulation.get_damage_resolution(String(damage.get("damage_resolution_id", "")))
+	var landing := simulation.resolve_thrown_weapon_landing(attack.attack_instance_id, landing_position, "Task 35E authoritative landing fixture", "task35e_landing")
+	if not landing.get("success", false):
+		return {"success": false, "reason": "landing", "details": landing}
+	var unarmed_started := Fixture.start_unarmed_fallback_attack(simulation, boss.actor_id, target.actor_id, "task35e_unarmed", &"torso", true)
+	if not unarmed_started.get("success", false):
+		return {"success": false, "reason": "unarmed_start", "details": unarmed_started}
+	simulation.advance_to(5_000_000)
+	var unarmed_attack: CombatAttackInstance = simulation.get_attack(String(unarmed_started.get("attack_instance_id", "")))
+	if unarmed_attack == null or unarmed_attack.status != CombatAttackInstance.STATUS_PENDING_DEFENSE:
+		return {"success": false, "reason": "unarmed_accuracy", "status": "null" if unarmed_attack == null else unarmed_attack.status}
+	var unarmed_defense := simulation.resolve_pending_defense(unarmed_attack.attack_instance_id, "task35e_unarmed_defense")
+	if unarmed_defense.get("status") != CombatDefenseResolution.STATUS_EXHAUSTED:
+		return {"success": false, "reason": "unarmed_defense"}
+	var unarmed_damage := simulation.resolve_physical_damage(unarmed_attack.attack_instance_id, "task35e_unarmed_damage")
+	if not unarmed_damage.get("success", false):
+		return {"success": false, "reason": "unarmed_damage"}
+	var unarmed_resolution: CombatDamageResolution = simulation.get_damage_resolution(String(unarmed_damage.get("damage_resolution_id", "")))
+	var too_far := simulation.start_world_item_retrieval_action(boss.actor_id, world_item_id, "task35e_retrieve_too_far")
+	var movement_required: bool = not bool(too_far.get("success", false)) and String(too_far.get("reason", "")) == "world_item_out_of_pickup_reach"
+	simulation.apply_authoritative_position(boss.actor_id, landing_position, 0, 5_000_000)
+	var retrieve_started := simulation.start_world_item_retrieval_action(boss.actor_id, world_item_id, "task35e_retrieve")
+	if not retrieve_started.get("success", false):
+		return {"success": false, "reason": "retrieve_start", "details": retrieve_started}
+	var retrieve_action: CombatActionInstance = simulation.get_action(String(retrieve_started.get("action_instance_id", "")))
+	var duration := retrieve_action.final_effect_due_at_us - retrieve_action.started_at_us
+	if simulation.get_actor_state(boss.actor_id).equipment_refs.has(String(Fixture.WEAPON_REF)):
+		return {"success": false, "reason": "retrieved_before_completion"}
+	simulation.advance_to(retrieve_action.final_effect_due_at_us)
+	state = simulation.get_actor_state(boss.actor_id)
+	if not state.equipment_refs.has(String(Fixture.WEAPON_REF)) \
+	or String(state.hand_occupancy.get("left", "")) != String(Fixture.WEAPON_REF) \
+	or String(state.hand_occupancy.get("right", "")) != String(Fixture.WEAPON_REF) \
+	or not simulation.get_world_item(world_item_id).is_empty():
+		return {"success": false, "reason": "retrieve_completion"}
+	var envelopes := harness.authority.publish_current_events()
+	harness.deliver_in_order(envelopes)
+	var events: Array = []
+	for envelope: CombatEventEnvelope in envelopes:
+		events.append(envelope.to_dictionary())
+	return {
+		"success": true,
+		"pending_landing_observed": pending_observed,
+		"retrieval_required_movement": movement_required,
+		"retrieval_duration_us": duration,
+		"throw_damage_flat_bonus": damage_resolution.flat_bonus,
+		"throw_damage_strength_bonus": damage_resolution.strength_bonus,
+		"unarmed_strength_bonus": unarmed_resolution.strength_bonus,
+		"events": events,
+		"snapshot": simulation.get_state_snapshot(),
+		"harness": harness,
+	}
+
+
+func _run_interrupted_retrieval_transaction() -> Dictionary:
+	var simulation := CombatSimulation.new(31)
+	var boss_result := Fixture.instantiate_foundation_actor(&"task35e_interrupt_boss", "Task 35E Interrupt Boss")
+	var boss: CombatActorDefinition = boss_result.get("actor")
+	var target := _make_test_actor(&"task35e_interrupt_target", PackedStringArray(), false, 500, 0)
+	simulation.register_actor(boss)
+	simulation.register_actor(target)
+	simulation.configure_actor_hand_occupancy(boss.actor_id, {"left": String(Fixture.WEAPON_REF), "right": String(Fixture.WEAPON_REF)})
+	simulation.get_actor_state(target.actor_id).awareness = &"unaware"
+	simulation.register_defense_profile(target.actor_id, _make_no_defense_profile(&"task35e_interrupt_defense"))
+	simulation.register_damage_protection_profile(target.actor_id, CombatDamageProtectionProfile.new(&"task35e_interrupt_protection"))
+	simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> bool: return position == Vector2i.ZERO)
+	simulation.set_world_item_pickup_resolver(func(_actor_id: StringName, _item: Dictionary) -> bool: return true)
+	simulation.begin_combat()
+	var started := Fixture.start_spear_throw(simulation, boss.actor_id, target.actor_id, "task35e_interrupt_throw", &"torso", true)
+	if not started.get("success", false):
+		return {"success": false, "reason": "throw_start"}
+	simulation.advance_to(2_500_000)
+	var attack: CombatAttackInstance = simulation.get_attack(String(started.get("attack_instance_id", "")))
+	if attack.status == CombatAttackInstance.STATUS_PENDING_DEFENSE:
+		var defense := simulation.resolve_pending_defense(attack.attack_instance_id, "task35e_interrupt_throw_defense")
+		if defense.get("status") == CombatDefenseResolution.STATUS_EXHAUSTED:
+			simulation.resolve_physical_damage(attack.attack_instance_id, "task35e_interrupt_throw_damage")
+	if not [CombatAttackInstance.STATUS_MISSED, CombatAttackInstance.STATUS_DAMAGE_RESOLVED].has(attack.status):
+		return {"success": false, "reason": "throw_not_terminal", "status": attack.status}
+	var world_item_id := String(started.get("world_item_id", ""))
+	if not simulation.resolve_thrown_weapon_landing(attack.attack_instance_id, Vector2i.ZERO, "Task 35E interruption landing fixture", "task35e_interrupt_landing").get("success", false):
+		return {"success": false, "reason": "landing"}
+	var retrieval := simulation.start_world_item_retrieval_action(boss.actor_id, world_item_id, "task35e_interrupted_retrieval")
+	if not retrieval.get("success", false):
+		return {"success": false, "reason": "retrieval_start"}
+	var retrieval_action: CombatActionInstance = simulation.get_action(String(retrieval.get("action_instance_id", "")))
+	simulation.schedule_interruption(retrieval_action.action_instance_id, 3_000_000, target.actor_id, "task35e_test_interruption")
+	simulation.advance_to(5_000_000)
+	var state := simulation.get_actor_state(boss.actor_id)
+	return {
+		"success": retrieval_action.status == CombatActionInstance.STATUS_INTERRUPTED \
+			and String(simulation.get_world_item(world_item_id).get("state", "")) == "dropped" \
+			and not state.equipment_refs.has(String(Fixture.WEAPON_REF)) \
+			and not state.hand_occupancy.values().has(String(Fixture.WEAPON_REF)),
+	}
+
+
+func _verify_throw_miss_defense_and_boundaries() -> Dictionary:
+	var profile := CombatHitLocationCatalog.get_same_size_attack_profile()
+	var thrown := Fixture.make_thrown_attack_definition(profile)
+	var in_range := _make_throw_boundary_simulation(18_000_000, true)
+	var in_range_start := Fixture.start_spear_throw(in_range["simulation"], in_range["boss_id"], in_range["target_id"], "task35e_in_range", &"torso", true)
+	if not in_range_start.get("success", false):
+		return {"success": false, "reason": "exact_range_rejected"}
+	var outside := _make_throw_boundary_simulation(18_000_001, true)
+	var outside_start := Fixture.start_spear_throw(outside["simulation"], outside["boss_id"], outside["target_id"], "task35e_outside", &"torso", true)
+	if outside_start.get("success", false) or outside_start.get("reason") != "target_out_of_range":
+		return {"success": false, "reason": "outside_range_accepted", "details": outside_start}
+	var blocked_los := _make_throw_boundary_simulation(10_000_000, true)
+	var blocked_start := Fixture.start_spear_throw(blocked_los["simulation"], blocked_los["boss_id"], blocked_los["target_id"], "task35e_blocked_los", &"torso", false)
+	if blocked_start.get("success", false) or blocked_start.get("reason") != "line_of_sight_unverified":
+		return {"success": false, "reason": "blocked_los_accepted", "details": blocked_start}
+	var miss_verified := false
+	for seed_value in range(1, 80):
+		var fixture := _make_throw_boundary_simulation(10_000_000, true, seed_value)
+		var simulation: CombatSimulation = fixture["simulation"]
+		simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> bool: return position == Vector2i(1_000_000, 0))
+		var result := Fixture.start_spear_throw(simulation, fixture["boss_id"], fixture["target_id"], "task35e_miss_%d" % seed_value, &"torso", true)
+		if not result.get("success", false):
+			continue
+		simulation.advance_to(2_500_000)
+		var attack: CombatAttackInstance = simulation.get_attack(String(result.get("attack_instance_id", "")))
+		if attack != null and attack.status == CombatAttackInstance.STATUS_MISSED:
+			var landing := simulation.resolve_thrown_weapon_landing(attack.attack_instance_id, Vector2i(1_000_000, 0), "Task 35E miss landing fixture", "task35e_miss_landing_%d" % seed_value)
+			miss_verified = landing.get("success", false) and String(simulation.get_world_item(String(result.get("world_item_id", ""))).get("landing_outcome", "")) == CombatAttackInstance.STATUS_MISSED
+			break
+	if not miss_verified:
+		return {"success": false, "reason": "miss_not_verified"}
+	var defense_verified := false
+	for seed_value in range(1, 80):
+		var fixture := _make_throw_boundary_simulation(10_000_000, false, seed_value, true)
+		var simulation: CombatSimulation = fixture["simulation"]
+		simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> bool: return position == Vector2i(2_000_000, 0))
+		var result := Fixture.start_spear_throw(simulation, fixture["boss_id"], fixture["target_id"], "task35e_defended_%d" % seed_value, &"torso", true)
+		if not result.get("success", false):
+			continue
+		simulation.advance_to(2_500_000)
+		var attack: CombatAttackInstance = simulation.get_attack(String(result.get("attack_instance_id", "")))
+		if attack == null or attack.status != CombatAttackInstance.STATUS_PENDING_DEFENSE:
+			continue
+		var defense := simulation.resolve_pending_defense(attack.attack_instance_id, "task35e_defense_%d" % seed_value)
+		if defense.get("status") != CombatDefenseResolution.STATUS_DEFENDED:
+			continue
+		var landing := simulation.resolve_thrown_weapon_landing(attack.attack_instance_id, Vector2i(2_000_000, 0), "Task 35E blocked landing fixture", "task35e_defended_landing_%d" % seed_value)
+		defense_verified = landing.get("success", false) and String(simulation.get_world_item(String(result.get("world_item_id", ""))).get("landing_outcome", "")) == CombatAttackInstance.STATUS_DEFENDED
+		break
+	return {"success": defense_verified and thrown != null}
+
+
+func _make_throw_boundary_simulation(
+	distance_microfeet: int,
+	target_unaware: bool,
+	seed_value: int = 97,
+	guaranteed_weapon_block: bool = false
+) -> Dictionary:
+	var simulation := CombatSimulation.new(seed_value)
+	var boss_result := Fixture.instantiate_foundation_actor(&"task35e_boundary_boss", "Task 35E Boundary Boss")
+	var boss: CombatActorDefinition = boss_result.get("actor")
+	var target_equipment := PackedStringArray(["task35e_block_weapon"]) if guaranteed_weapon_block else PackedStringArray()
+	var target := _make_test_actor(&"task35e_boundary_target", target_equipment, false, 500, 0)
+	simulation.register_actor(boss)
+	simulation.register_actor(target)
+	simulation.configure_actor_hand_occupancy(boss.actor_id, {"left": String(Fixture.WEAPON_REF), "right": String(Fixture.WEAPON_REF)})
+	simulation.get_actor_state(target.actor_id).position_microfeet = Vector2i(distance_microfeet, 0)
+	simulation.get_actor_state(target.actor_id).awareness = &"unaware" if target_unaware else &"aware"
+	if guaranteed_weapon_block:
+		simulation.get_actor_state(target.actor_id).conditions.append("held")
+		var block := CombatBlockDefinition.new(CombatBlockDefinition.TYPE_WEAPON, &"task35e_block_weapon", 20, 0, true, true, null, PackedStringArray(["Task 35E guaranteed defense fixture"]))
+		simulation.register_defense_profile(target.actor_id, CombatDefenseProfile.new(
+			&"task35e_block_profile", PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]), {}, block, null,
+			PackedStringArray(["Task 35E guaranteed defense fixture"])
+		))
+	else:
+		simulation.register_defense_profile(target.actor_id, _make_no_defense_profile(&"task35e_boundary_defense"))
+	simulation.register_damage_protection_profile(target.actor_id, CombatDamageProtectionProfile.new(&"task35e_boundary_protection"))
+	simulation.begin_combat()
+	return {"simulation": simulation, "boss_id": boss.actor_id, "target_id": target.actor_id}
 
 
 func _run_authoritative_spear_transaction(seed_value: int) -> Dictionary:

@@ -39,6 +39,8 @@ var _accepted_defense_request_ids: Dictionary = {}
 var _accepted_damage_request_ids: Dictionary = {}
 var _accepted_special_damage_request_ids: Dictionary = {}
 var _processed_midnight_ids: Dictionary = {}
+var _world_items: Dictionary = {}
+var _thrown_weapon_context_by_attack_id: Dictionary = {}
 var _resolved_events: Array = []
 var _arena_wave_state: Dictionary = {}
 var _combat_started: bool = false
@@ -49,6 +51,8 @@ var _attack_final_line_of_sight_resolver: Callable
 var _rage_knockback_resolver: Callable
 var _special_touch_resolver: Callable
 var _gatherable_material_resolver: Callable
+var _world_item_landing_resolver: Callable
+var _world_item_pickup_resolver: Callable
 
 
 func _init(seed_value: int) -> void:
@@ -104,6 +108,14 @@ func set_special_touch_resolver(resolver: Callable) -> void:
 
 func set_gatherable_material_resolver(resolver: Callable) -> void:
 	_gatherable_material_resolver = resolver
+
+
+func set_world_item_landing_resolver(resolver: Callable) -> void:
+	_world_item_landing_resolver = resolver
+
+
+func set_world_item_pickup_resolver(resolver: Callable) -> void:
+	_world_item_pickup_resolver = resolver
 
 
 func get_ability_payment_preview(actor_id: StringName, definition: CombatActionDefinition) -> Dictionary:
@@ -166,7 +178,7 @@ func configure_actor_hand_occupancy(actor_id: StringName, assignments: Dictionar
 			continue
 		if not actor_state.equipment_refs.has(equipment_ref):
 			return _failure("equipment_not_available")
-		if assigned_items.has(equipment_ref):
+		if assigned_items.has(equipment_ref) and assignments.size() != 2:
 			return _failure("equipment_assigned_to_multiple_hands")
 		normalized[hand_name] = equipment_ref
 		assigned_items[equipment_ref] = true
@@ -243,6 +255,164 @@ func start_equip_hand_item_action(
 	action.execution_context = {"equipment_ref": String(equipment_ref), "hand": hand_name}
 	action.revision += 1
 	return result
+
+
+func start_thrown_weapon_attack(
+	attacker_id: StringName,
+	target_id: StringName,
+	definition: CombatAttackDefinition,
+	request_id: String,
+	target_location: StringName,
+	authoritative_line_of_sight: Variant,
+	required_hands: PackedStringArray,
+	strength_requirement: int,
+	source_ref: String
+) -> Dictionary:
+	if definition == null or definition.delivery_class != &"thrown" or definition.strikes_per_act != 1:
+		return _failure("thrown_weapon_definition_invalid")
+	if required_hands.is_empty() or required_hands.size() > 2 or strength_requirement < 0 or source_ref.is_empty():
+		return _failure("thrown_weapon_requirements_unresolved")
+	var actor_state := get_actor_state(attacker_id)
+	var actor_definition := get_actor_definition(attacker_id)
+	if actor_state == null or actor_definition == null:
+		return _failure("unknown_attacker")
+	if int(actor_definition.attributes.get("str", -1)) < strength_requirement:
+		return _failure("equipment_strength_requirement_not_met")
+	if not actor_state.hand_occupancy_authoritative:
+		return _failure("thrown_weapon_hand_occupancy_unresolved")
+	var normalized_hands := required_hands.duplicate()
+	normalized_hands.sort()
+	if normalized_hands.size() != required_hands.size():
+		return _failure("thrown_weapon_hand_requirement_invalid")
+	for hand: String in normalized_hands:
+		if not ["left", "right"].has(hand):
+			return _failure("thrown_weapon_hand_requirement_invalid")
+		if String(actor_state.hand_occupancy.get(hand, "")) != String(definition.weapon_ref):
+			return _failure("weapon_not_in_required_hand")
+	for world_item: Dictionary in _world_items.values():
+		if String(world_item.get("equipment_ref", "")) == String(definition.weapon_ref) \
+		and String(world_item.get("state", "")) != "retrieved":
+			return _failure("weapon_already_in_world")
+	var result := start_physical_attack(
+		attacker_id, target_id, definition, request_id, target_location,
+		authoritative_line_of_sight
+	)
+	if not result.get("success", false):
+		return result
+	var attack_instance_id := String(result.get("attack_instance_id", ""))
+	var world_item_id := "world_item:%s:%s" % [String(attacker_id), String(definition.weapon_ref)]
+	_thrown_weapon_context_by_attack_id[attack_instance_id] = {
+		"world_item_id": world_item_id,
+		"equipment_ref": String(definition.weapon_ref),
+		"owner_actor_id": String(attacker_id),
+		"required_hands": Array(normalized_hands),
+		"strength_requirement": strength_requirement,
+		"source_ref": source_ref,
+		"released": false,
+	}
+	_state_revision += 1
+	result["world_item_id"] = world_item_id
+	return result
+
+
+func resolve_thrown_weapon_landing(
+	attack_instance_id: String,
+	position_microfeet: Vector2i,
+	authoritative_source_ref: String,
+	request_id: String
+) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	if authoritative_source_ref.is_empty():
+		return _failure("thrown_weapon_landing_source_unresolved")
+	if not _thrown_weapon_context_by_attack_id.has(attack_instance_id):
+		return _failure("unknown_thrown_weapon_attack")
+	var context: Dictionary = _thrown_weapon_context_by_attack_id[attack_instance_id]
+	var world_item_id := String(context.get("world_item_id", ""))
+	if not bool(context.get("released", false)) or not _world_items.has(world_item_id):
+		return _failure("thrown_weapon_not_released")
+	var world_item: Dictionary = _world_items[world_item_id]
+	if String(world_item.get("state", "")) != "pending_landing":
+		return _failure("thrown_weapon_landing_already_resolved")
+	var attack: CombatAttackInstance = _attacks.get(attack_instance_id)
+	if attack == null:
+		return _failure("unknown_attack")
+	if not [
+		CombatAttackInstance.STATUS_MISSED,
+		CombatAttackInstance.STATUS_DEFENDED,
+		CombatAttackInstance.STATUS_DAMAGE_RESOLVED,
+	].has(attack.status):
+		return _failure("thrown_weapon_attack_not_terminal")
+	var landing_validation := _validate_world_item_landing(world_item, position_microfeet)
+	if not landing_validation.get("success", false):
+		return landing_validation
+	world_item["state"] = "dropped"
+	world_item["position_microfeet"] = position_microfeet
+	world_item["landing_outcome"] = attack.status
+	world_item["landing_source_ref"] = authoritative_source_ref
+	world_item["revision"] = int(world_item.get("revision", 0)) + 1
+	_world_items[world_item_id] = world_item
+	_accepted_request_ids[request_id] = "world_item_landing:%s" % world_item_id
+	_state_revision += 1
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"thrown_weapon_landed", _get_actor_initiative(String(attack.attacker_id)),
+		attack.attacker_id, attack.target_id,
+		{
+			"attack_instance_id": attack_instance_id,
+			"world_item_id": world_item_id,
+			"equipment_ref": world_item.get("equipment_ref", ""),
+			"position_microfeet": [position_microfeet.x, position_microfeet.y],
+			"landing_outcome": attack.status,
+			"authoritative_source_ref": authoritative_source_ref,
+			"request_id": request_id,
+		}, attack.result_event_id
+	)
+	return _success({"world_item_id": world_item_id, "event_id": event.event_id})
+
+
+func start_world_item_retrieval_action(
+	actor_id: StringName,
+	world_item_id: String,
+	request_id: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	var actor_definition := get_actor_definition(actor_id)
+	if actor_state == null or actor_definition == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
+		return _failure("actor_not_eligible")
+	if not _world_items.has(world_item_id):
+		return _failure("unknown_world_item")
+	var world_item: Dictionary = _world_items[world_item_id]
+	if String(world_item.get("state", "")) != "dropped":
+		return _failure("world_item_not_retrievable")
+	if String(world_item.get("owner_actor_id", "")) != String(actor_id):
+		return _failure("world_item_wrong_owner")
+	if int(actor_definition.attributes.get("str", -1)) < int(world_item.get("strength_requirement", -1)):
+		return _failure("equipment_strength_requirement_not_met")
+	var prerequisites := _validate_world_item_retrieval_prerequisites(actor_state, world_item)
+	if not prerequisites.get("success", false):
+		return prerequisites
+	var definition := CombatActionDefinition.new(
+		StringName("retrieve_world_item:%s" % world_item_id), 1, true, true, {},
+		{"retrieve_world_item": {"world_item_id": world_item_id}},
+		PackedStringArray(["Task 35E owner-approved Arena rule: legal dropped-weapon retrieval and re-equipping cost one ordinary Act"])
+	)
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	var action := get_action(String(result.get("action_instance_id", "")))
+	action.execution_context = {"world_item_id": world_item_id}
+	action.revision += 1
+	return result
+
+
+func get_world_item(world_item_id: String) -> Dictionary:
+	if not _world_items.has(world_item_id):
+		return {}
+	return (_world_items[world_item_id] as Dictionary).duplicate(true)
 
 
 func record_tactical_decision(actor_id: StringName, target_id: StringName, payload: Dictionary) -> CombatEvent:
@@ -961,9 +1131,9 @@ func start_physical_attack(
 	for strike_index in range(1, definition.strikes_per_act + 1):
 		var strike_profile := definition.get_strike_profile(strike_index)
 		var strike_weapon_ref := String(strike_profile.get("weapon_ref", String(definition.weapon_ref)))
-		if not attacker_state.equipment_refs.has(strike_weapon_ref):
+		if definition.requires_equipped_weapon and not attacker_state.equipment_refs.has(strike_weapon_ref):
 			return _failure("weapon_not_equipped")
-		if attacker_state.hand_occupancy_authoritative \
+		if definition.requires_hand_occupancy and attacker_state.hand_occupancy_authoritative \
 		and not attacker_state.hand_occupancy.values().has(strike_weapon_ref):
 			return _failure("weapon_not_in_hand")
 	var attacker_definition: CombatActorDefinition = _actor_definitions[attacker_key]
@@ -2257,9 +2427,24 @@ func get_state_snapshot() -> Dictionary:
 		special_damage_definition_snapshots.append((_verified_special_damage_definitions[special_key] as Dictionary).duplicate(true))
 	var processed_midnight_ids: Array = _processed_midnight_ids.keys()
 	processed_midnight_ids.sort()
+	var world_item_snapshots: Array = []
+	var world_item_keys: Array = _world_items.keys()
+	world_item_keys.sort()
+	for world_item_key: String in world_item_keys:
+		var world_item: Dictionary = (_world_items[world_item_key] as Dictionary).duplicate(true)
+		world_item["position_microfeet"] = _serialized_world_item_position(world_item.get("position_microfeet"))
+		world_item_snapshots.append(world_item)
+	var thrown_context_snapshots: Array = []
+	var thrown_attack_keys: Array = _thrown_weapon_context_by_attack_id.keys()
+	thrown_attack_keys.sort()
+	for attack_key: String in thrown_attack_keys:
+		thrown_context_snapshots.append({
+			"attack_instance_id": attack_key,
+			"context": (_thrown_weapon_context_by_attack_id[attack_key] as Dictionary).duplicate(true),
+		})
 
 	return {
-		"schema_version": 10,
+		"schema_version": 11,
 		"timestamp_us": clock.get_elapsed_us(),
 		"round_index": clock.get_round_index(),
 		"state_revision": _state_revision,
@@ -2288,6 +2473,8 @@ func get_state_snapshot() -> Dictionary:
 		"critical_reaction_definitions": reaction_definition_snapshots,
 		"deferred_critical_consequences": deferred_critical_snapshots,
 		"verified_special_damage_definitions": special_damage_definition_snapshots,
+		"world_items": world_item_snapshots,
+		"thrown_weapon_contexts": thrown_context_snapshots,
 		"pending_events": event_queue.snapshot(),
 	}
 
@@ -2463,6 +2650,8 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		completion_prerequisites_satisfied = _apply_gathered_material(actor_state, action, completed.event_id)
 	if definition.extension_metadata.has("equip_hand_item"):
 		completion_prerequisites_satisfied = _apply_equipped_hand_item(actor_state, action, completed.event_id)
+	if definition.extension_metadata.has("retrieve_world_item"):
+		completion_prerequisites_satisfied = _apply_retrieved_world_item(actor_state, action, completed.event_id)
 	var required_material := String(special.get("requires_material", ""))
 	if completion_prerequisites_satisfied and not required_material.is_empty():
 		completion_prerequisites_satisfied = _consume_held_material(actor_state, action, required_material, completed.event_id)
@@ -2638,6 +2827,107 @@ func _apply_equipped_hand_item(actor_state: CombatActorState, action: CombatActi
 		"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
 	}, parent_event_id)
 	return true
+
+
+func _apply_retrieved_world_item(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> bool:
+	var world_item_id := String(action.execution_context.get("world_item_id", ""))
+	if world_item_id.is_empty() or not _world_items.has(world_item_id):
+		_record_world_item_retrieval_failure(actor_state, action, world_item_id, "world_item_unavailable_at_completion", parent_event_id)
+		return false
+	var world_item: Dictionary = _world_items[world_item_id]
+	if String(world_item.get("state", "")) != "dropped" \
+	or String(world_item.get("owner_actor_id", "")) != String(actor_state.actor_id):
+		_record_world_item_retrieval_failure(actor_state, action, world_item_id, "world_item_unavailable_at_completion", parent_event_id)
+		return false
+	var actor_definition := get_actor_definition(actor_state.actor_id)
+	if actor_definition == null \
+	or int(actor_definition.attributes.get("str", -1)) < int(world_item.get("strength_requirement", -1)):
+		_record_world_item_retrieval_failure(actor_state, action, world_item_id, "equipment_strength_requirement_not_met", parent_event_id)
+		return false
+	var prerequisites := _validate_world_item_retrieval_prerequisites(actor_state, world_item)
+	if not prerequisites.get("success", false):
+		_record_world_item_retrieval_failure(actor_state, action, world_item_id, String(prerequisites.get("reason", "retrieval_prerequisite_failed")), parent_event_id)
+		return false
+	var equipment_ref := String(world_item.get("equipment_ref", ""))
+	_world_items.erase(world_item_id)
+	if not actor_state.equipment_refs.has(equipment_ref):
+		actor_state.equipment_refs.append(equipment_ref)
+	for hand: Variant in world_item.get("required_hands", []):
+		actor_state.hand_occupancy[String(hand)] = equipment_ref
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"world_item_retrieved", action.initiative, action.actor_id, &"",
+		{
+			"action_instance_id": action.action_instance_id,
+			"world_item_id": world_item_id,
+			"equipment_ref": equipment_ref,
+			"position_microfeet": _serialized_world_item_position(world_item.get("position_microfeet")),
+			"required_hands": (world_item.get("required_hands", []) as Array).duplicate(),
+			"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+			"ordinary_acts_spent": 1,
+		}, parent_event_id
+	)
+	return true
+
+
+func _record_world_item_retrieval_failure(
+	actor_state: CombatActorState,
+	action: CombatActionInstance,
+	world_item_id: String,
+	reason: String,
+	parent_event_id: String
+) -> void:
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"world_item_retrieval_failed", action.initiative, action.actor_id, &"",
+		{
+			"action_instance_id": action.action_instance_id,
+			"world_item_id": world_item_id,
+			"reason": reason,
+			"equipment_state_unchanged": true,
+			"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+		}, parent_event_id
+	)
+
+
+func _validate_world_item_landing(world_item: Dictionary, position_microfeet: Vector2i) -> Dictionary:
+	if not _world_item_landing_resolver.is_valid():
+		return _failure("world_item_landing_geometry_unresolved")
+	var value: Variant = _world_item_landing_resolver.call(world_item.duplicate(true), position_microfeet)
+	if typeof(value) == TYPE_DICTIONARY:
+		var result: Dictionary = value
+		if not result.get("success", false):
+			return _failure(String(result.get("reason", "world_item_landing_position_illegal")))
+		return _success()
+	if value != true:
+		return _failure("world_item_landing_position_illegal")
+	return _success()
+
+
+func _validate_world_item_retrieval_prerequisites(actor_state: CombatActorState, world_item: Dictionary) -> Dictionary:
+	if not actor_state.hand_occupancy_authoritative:
+		return _failure("retrieval_hand_occupancy_unresolved")
+	for hand: Variant in world_item.get("required_hands", []):
+		if not String(actor_state.hand_occupancy.get(String(hand), "")).is_empty():
+			return _failure("retrieval_required_hand_occupied")
+	if not _world_item_pickup_resolver.is_valid():
+		return _failure("world_item_pickup_reach_unresolved")
+	var value: Variant = _world_item_pickup_resolver.call(actor_state.actor_id, world_item.duplicate(true))
+	if typeof(value) == TYPE_DICTIONARY:
+		var result: Dictionary = value
+		if not result.get("success", false):
+			return _failure(String(result.get("reason", "world_item_out_of_pickup_reach")))
+		return _success()
+	if value != true:
+		return _failure("world_item_out_of_pickup_reach")
+	return _success()
+
+
+func _serialized_world_item_position(value: Variant) -> Variant:
+	if value == null:
+		return null
+	var position: Vector2i = value
+	return [position.x, position.y]
 
 
 func _consume_held_material(
@@ -2870,6 +3160,9 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 		return
 	var definition: CombatAttackDefinition = _attack_definitions[String(attack.attack_definition_id)]
 	var final_legality := _evaluate_final_attack_legality(attack, definition)
+	if final_legality.get("success", false) \
+	and _thrown_weapon_context_by_attack_id.has(attack.attack_instance_id):
+		final_legality = _release_committed_thrown_weapon(attack, parent_event_id)
 	if not final_legality["success"]:
 		attack.status = CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED
 		attack.resolved_at_us = clock.get_elapsed_us()
@@ -2977,6 +3270,62 @@ func _resolve_single_linked_attack_accuracy(action: CombatActionInstance, attack
 		_finalize_deferred_critical_consequences(attack)
 
 
+func _release_committed_thrown_weapon(attack: CombatAttackInstance, parent_event_id: String) -> Dictionary:
+	if not _thrown_weapon_context_by_attack_id.has(attack.attack_instance_id):
+		return _failure("thrown_weapon_context_unresolved")
+	var context: Dictionary = _thrown_weapon_context_by_attack_id[attack.attack_instance_id]
+	if bool(context.get("released", false)):
+		return _failure("thrown_weapon_already_released")
+	var actor_state := get_actor_state(attack.attacker_id)
+	if actor_state == null:
+		return _failure("unknown_attacker")
+	var equipment_ref := String(context.get("equipment_ref", ""))
+	if equipment_ref.is_empty() or not actor_state.equipment_refs.has(equipment_ref):
+		return _failure("weapon_not_equipped_at_release")
+	var world_item_id := String(context.get("world_item_id", ""))
+	if world_item_id.is_empty() or _world_items.has(world_item_id):
+		return _failure("thrown_weapon_world_item_conflict")
+	for hand: Variant in context.get("required_hands", []):
+		if String(actor_state.hand_occupancy.get(String(hand), "")) != equipment_ref:
+			return _failure("weapon_not_in_required_hand_at_release")
+	actor_state.equipment_refs.erase(equipment_ref)
+	for hand: Variant in actor_state.hand_occupancy.keys():
+		if String(actor_state.hand_occupancy[hand]) == equipment_ref:
+			actor_state.hand_occupancy[hand] = ""
+	actor_state.revision += 1
+	var world_item := {
+		"world_item_id": world_item_id,
+		"equipment_ref": equipment_ref,
+		"owner_actor_id": String(context.get("owner_actor_id", String(attack.attacker_id))),
+		"source_actor_id": String(attack.attacker_id),
+		"source_attack_instance_id": attack.attack_instance_id,
+		"state": "pending_landing",
+		"position_microfeet": null,
+		"required_hands": (context.get("required_hands", []) as Array).duplicate(),
+		"strength_requirement": int(context.get("strength_requirement", -1)),
+		"landing_outcome": "",
+		"landing_source_ref": "",
+		"revision": 1,
+	}
+	_world_items[world_item_id] = world_item
+	context["released"] = true
+	_thrown_weapon_context_by_attack_id[attack.attack_instance_id] = context
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"thrown_weapon_released", _get_actor_initiative(String(attack.attacker_id)),
+		attack.attacker_id, attack.target_id,
+		{
+			"attack_instance_id": attack.attack_instance_id,
+			"world_item_id": world_item_id,
+			"equipment_ref": equipment_ref,
+			"owner_actor_id": world_item["owner_actor_id"],
+			"state": "pending_landing",
+			"hand_occupancy_after": actor_state.hand_occupancy.duplicate(true),
+		}, parent_event_id
+	)
+	return _success({"world_item_id": world_item_id})
+
+
 func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: CombatAttackDefinition) -> Dictionary:
 	var attacker_state: CombatActorState = _actor_states.get(String(attack.attacker_id))
 	var target_state: CombatActorState = _actor_states.get(String(attack.target_id))
@@ -2988,9 +3337,9 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 		return _failure("attacker_not_eligible_at_resolution")
 	if target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
 		return _failure("target_not_eligible_at_resolution")
-	if not attacker_state.equipment_refs.has(String(attack.weapon_ref)):
+	if definition.requires_equipped_weapon and not attacker_state.equipment_refs.has(String(attack.weapon_ref)):
 		return _failure("weapon_not_equipped_at_resolution")
-	if attacker_state.hand_occupancy_authoritative \
+	if definition.requires_hand_occupancy and attacker_state.hand_occupancy_authoritative \
 	and not attacker_state.hand_occupancy.values().has(String(attack.weapon_ref)):
 		return _failure("weapon_not_in_hand_at_resolution")
 	attack.final_attacker_position_microfeet = attacker_state.position_microfeet
