@@ -18,6 +18,7 @@ func run() -> Array[String]:
 	_test_location_protection_and_weapon_block()
 	_test_throw_retrieval_and_unarmed_gates()
 	_test_deterministic_thrown_landing()
+	_test_spear_geometry_resolvers_release_simulation()
 	_test_existing_fixture_definitions_remain_valid()
 	_test_wave_five_remains_inactive()
 	return _failures
@@ -306,9 +307,12 @@ func _run_throw_retrieval_unarmed_transaction(seed_value: int) -> Dictionary:
 	var landing_position := Vector2i(1_000_000, 0)
 	var battlefield := ArenaBattlefield.create_open(Rect2i(-20_000_000, -20_000_000, 60_000_000, 40_000_000))
 	Fixture.configure_spear_landing_geometry(simulation, battlefield)
+	var pickup_simulation_reference: WeakRef = weakref(simulation)
 	simulation.set_world_item_pickup_resolver(func(actor_id: StringName, item: Dictionary) -> Dictionary:
+		var active_simulation: CombatSimulation = pickup_simulation_reference.get_ref()
 		return {
-			"success": simulation.get_actor_state(actor_id).position_microfeet == item.get("position_microfeet"),
+			"success": active_simulation != null \
+				and active_simulation.get_actor_state(actor_id).position_microfeet == item.get("position_microfeet"),
 			"reason": "world_item_out_of_pickup_reach",
 		}
 	)
@@ -524,10 +528,14 @@ func _make_automatic_landing_simulation(
 	simulation.register_defense_profile(target.actor_id, _make_no_defense_profile(&"task35e_fix1_no_defense"))
 	simulation.register_damage_protection_profile(target.actor_id, CombatDamageProtectionProfile.new(&"task35e_fix1_protection"))
 	Fixture.configure_spear_landing_geometry(simulation, battlefield)
+	var line_of_sight_simulation_reference: WeakRef = weakref(simulation)
 	simulation.set_attack_final_line_of_sight_resolver(func(attacker_id: StringName, target_id: StringName) -> bool:
+		var active_simulation: CombatSimulation = line_of_sight_simulation_reference.get_ref()
+		if active_simulation == null:
+			return false
 		return battlefield.has_line_of_sight(
-			simulation.get_actor_state(attacker_id).position_microfeet,
-			simulation.get_actor_state(target_id).position_microfeet
+			active_simulation.get_actor_state(attacker_id).position_microfeet,
+			active_simulation.get_actor_state(target_id).position_microfeet
 		)
 	)
 	simulation.begin_combat()
@@ -544,8 +552,11 @@ func _retrieve_landed_spear(
 	var item_before := simulation.get_world_item(world_item_id)
 	if String(item_before.get("state", "")) != "dropped":
 		return false
+	var pickup_simulation_reference: WeakRef = weakref(simulation)
 	simulation.set_world_item_pickup_resolver(func(actor_id: StringName, item: Dictionary) -> bool:
-		return simulation.get_actor_state(actor_id).position_microfeet.distance_to(item["position_microfeet"]) <= 1_000_000.0
+		var active_simulation: CombatSimulation = pickup_simulation_reference.get_ref()
+		return active_simulation != null \
+			and active_simulation.get_actor_state(actor_id).position_microfeet.distance_to(item["position_microfeet"]) <= 1_000_000.0
 	)
 	simulation.apply_authoritative_position(boss_id, pickup_position, 0, simulation.clock.get_elapsed_us())
 	var started := simulation.start_world_item_retrieval_action(
@@ -669,6 +680,24 @@ func _verify_throw_miss_defense_and_boundaries() -> Dictionary:
 			and _retrieve_landed_spear(simulation, fixture["boss_id"], world_item_id, Vector2i(9_000_000, 0), "blocked")
 		break
 	return {"success": defense_verified and thrown != null}
+
+
+func _test_spear_geometry_resolvers_release_simulation() -> void:
+	for iteration in range(3):
+		var simulation_reference := _make_configured_simulation_weak_reference(iteration)
+		_expect_true(
+			simulation_reference.get_ref() == null,
+			"Spear geometry callbacks must not retain a discarded CombatSimulation instance."
+		)
+
+
+func _make_configured_simulation_weak_reference(seed_offset: int) -> WeakRef:
+	var simulation := CombatSimulation.new(200 + seed_offset)
+	Fixture.configure_spear_landing_geometry(
+		simulation,
+		ArenaBattlefield.create_open(Rect2i(-5_000_000, -5_000_000, 10_000_000, 10_000_000))
+	)
+	return weakref(simulation)
 
 
 func _make_throw_boundary_simulation(
