@@ -1,0 +1,99 @@
+[gd_resource type="Resource" script_class="CombatCharacterDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_character_definition_resource.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+definition_id = &"prime_v3_rare_human_warrior_boss"
+display_name = "Rare Human Warrior"
+actor_kind = &"prime_v3_rare_human_warrior_boss_foundation"
+size_category = &"medium"
+race_name = "Human"
+class_names = PackedStringArray("Warrior")
+level = -1
+attributes = {
+"app": 15,
+"dex": 14,
+"end": 4,
+"int": 8,
+"luk": 13,
+"man": 12,
+"spd": 15,
+"sr": 5,
+"str": 18,
+"wis": 10,
+"wit": 19
+}
+combat_stats = {
+"acc": 12,
+"at": 2,
+"bm": 10,
+"dp": 4,
+"dt": 10,
+"hpb": 5,
+"hpm": 200,
+"init": 10,
+"kp": 0,
+"miur": 1,
+"mns_mrf": 8,
+"mr": 12,
+"msl": 9,
+"mwc": 525,
+"nal": 1,
+"physical_soak": 2,
+"rcl": 16,
+"s_number": 26,
+"sb": 4,
+"scm": 0,
+"ss": 9,
+"tb": 1,
+"tof": 2
+}
+resource_maxima = {
+"ap": 12,
+"mana": 24
+}
+ability_allowances = {}
+ability_access = {
+"exact_ability_ids_verified": false,
+"field": "combat",
+"printed_levels": [1, 2, 3]
+}
+proficiencies = {
+"alertness": {"check_formula": "WIT -4", "investments": 3},
+"ambidextrous": {"automatic": true},
+"balance": {"check_formula": "DEX -1", "investments": 1},
+"camping": {"check_formula": "END -1", "investments": 2},
+"direction_sense": {"automatic": true},
+"land_riding": {"check_formula": "END -2", "investments": 1},
+"leaping": {"check_formula": "STR -2 / SPD -2", "investments": 1},
+"running": {"check_formula": "END -2", "investments": 1},
+"spell_recognition": {"check_formula": "WIS -4", "investments": 1},
+"swimming": {"check_formula": "DEX -2 / END -3", "investments": 1},
+"throw": {"check_formula": "DEX -2", "investments": 2},
+"time_sense": {"automatic": true}
+}
+defensive_capabilities = {
+"dodge": true,
+"physical_soak": true,
+"shield_block": false,
+"weapon_block": true
+}
+running_profile = {
+"roll_bonus": 0,
+"running_skill_investment": 1,
+"skill_check_modifier": 0
+}
+source_refs = PackedStringArray("assets/Rare Human Warrior (Boss).doc, official revised two-page owner source", "PRIME-V3 pp. 95-98, Medium Human size", "Arena Combat Specification v1.24 and Roadmap v1.25 controlling Task 35C boundary")
+field_sources = {
+"ability_access": "Official boss sheet: Home Spell Field / Abilities Combat; owner states levels 1-3 subject to exact-access validation",
+"attributes": "Official boss sheet page-two attribute grid",
+"combat_stats": "Official boss sheet page-two derived-stat grid; racial NAL uses the explicit owner correction",
+"equipment": "Official boss sheet: enchanted Boar Spear and Scale mail; exact armor locations remain unresolved",
+"nal": "Owner correction: effective racial NAL +1 replaces the omitted page-two grid value 0 and remains separate from armor TAL",
+"proficiencies": "Official boss sheet Inventory and Proficiencies table",
+"resource_maxima": "Official boss sheet: Mana Max 24 and AP 12",
+"running_profile": "Official boss sheet: Running END -2, one investment; grid SCM 0 and no listed RB",
+"size_category": "Official boss sheet physical description explicitly identifies a Medium-sized Human"
+}
+unresolved_fields = PackedStringArray("ability_access.exact_combat_abilities_and_prerequisites", "combat_stats.rb")

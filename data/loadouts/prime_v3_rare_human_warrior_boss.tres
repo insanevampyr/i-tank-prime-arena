@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="CombatLoadoutDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_loadout_definition_resource.gd" id="1_loadout"]
+
+[resource]
+script = ExtResource("1_loadout")
+definition_id = &"prime_v3_rare_human_warrior_boss"
+display_name = "Rare Human Warrior Boss Source Loadout"
+primary_weapon_ref = &"prime_v3_rare_human_warrior_boar_spear"
+secondary_weapon_ref = &""
+shield_ref = &""
+armor_refs = PackedStringArray()
+inventory_records = {
+"backpack": {"quantity": 1, "source_backed": true},
+"good_ration": {"quantity": 2, "source_backed": true},
+"health_potion": {"effect_dice_count": 1, "effect_die_sides": 10, "effect_fixed_bonus": 2, "effect_resource": "hpc", "gameplay_supported": false, "quantity": 2, "source_backed": true},
+"lantern_and_oils": {"quantity": 2, "source_backed": true},
+"rope": {"quantity": 1, "source_backed": true},
+"scale_mail": {"equipped": true, "equipped_location_refs": [], "quantity": 1, "source_backed": true},
+"water": {"quantity": 2, "source_backed": true}
+}
+unresolved_fields = PackedStringArray("equipment.scale_mail_equipped_locations", "inventory.health_potion_use_action_and_consumption_timing")
+source_refs = PackedStringArray("assets/Rare Human Warrior (Boss).doc, official revised equipment and inventory tables", "PRIME-V3 pp. 127-128 and 135, BOR SPEAR and Hard Studded/Scale charts", "Task 35C: source inventory only; potion use and exact equipped armor locations remain unavailable")

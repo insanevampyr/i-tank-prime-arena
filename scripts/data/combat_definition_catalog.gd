@@ -33,6 +33,18 @@ const VAELIS_CHARACTER_PATH := "res://data/characters/vaelis_thorn.tres"
 const SHORT_SWORD_PATH := "res://data/equipment/weapons/prime_v3_short_sword.tres"
 const SHORT_WAND_PATH := "res://data/equipment/weapons/prime_v3_short_wand.tres"
 const VAELIS_LOADOUT_PATH := "res://data/loadouts/vaelis_thorn_short_sword_wand.tres"
+const RARE_HUMAN_WARRIOR_CHARACTER_PATH := "res://data/characters/prime_v3_rare_human_warrior_boss.tres"
+const RARE_HUMAN_WARRIOR_BOAR_SPEAR_PATH := "res://data/equipment/weapons/prime_v3_rare_human_warrior_boar_spear.tres"
+const RARE_HUMAN_WARRIOR_LOADOUT_PATH := "res://data/loadouts/prime_v3_rare_human_warrior_boss.tres"
+const SCALE_MAIL_ARMOR_PATHS := [
+	"res://data/equipment/armor/prime_v3_scale_mail_torso.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_head.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_arms.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_legs.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_elbows.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_knees.tres",
+	"res://data/equipment/armor/prime_v3_scale_mail_hands.tres",
+]
 
 var characters: Dictionary = {}
 var weapons: Dictionary = {}
@@ -74,6 +86,11 @@ static func load_default_fixture_catalog() -> CombatDefinitionCatalog:
 	catalog.register_weapon(load(SHORT_SWORD_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_weapon(load(SHORT_WAND_PATH) as CombatWeaponDefinitionResource)
 	catalog.register_loadout(load(VAELIS_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
+	catalog.register_character(load(RARE_HUMAN_WARRIOR_CHARACTER_PATH) as CombatCharacterDefinitionResource)
+	catalog.register_weapon(load(RARE_HUMAN_WARRIOR_BOAR_SPEAR_PATH) as CombatWeaponDefinitionResource)
+	for armor_path: String in SCALE_MAIL_ARMOR_PATHS:
+		catalog.register_armor(load(armor_path) as CombatArmorDefinitionResource)
+	catalog.register_loadout(load(RARE_HUMAN_WARRIOR_LOADOUT_PATH) as CombatLoadoutDefinitionResource)
 	return catalog
 
 

@@ -12,6 +12,8 @@ extends Resource
 @export var combat_stats: Dictionary = {}
 @export var resource_maxima: Dictionary = {}
 @export var ability_allowances: Dictionary = {}
+@export var ability_access: Dictionary = {}
+@export var proficiencies: Dictionary = {}
 @export var defensive_capabilities: Dictionary = {}
 @export var running_profile: Dictionary = {}
 @export var source_refs: PackedStringArray = PackedStringArray()
@@ -46,6 +48,9 @@ func validate_definition() -> Array[Dictionary]:
 		or int(profile.get("repurchase_count", 0)) < 0 \
 		or int(profile.get("bonus_daily_uses", 0)) < 0:
 			issues.append(_issue("invalid", "malformed_ability_allowance", {"ability_id": String(ability_id)}))
+	for proficiency_id: Variant in proficiencies:
+		if typeof(proficiencies[proficiency_id]) != TYPE_DICTIONARY:
+			issues.append(_issue("invalid", "malformed_proficiency_record", {"proficiency_id": String(proficiency_id)}))
 	for field_name: String in ["running_skill_investment", "skill_check_modifier", "roll_bonus"]:
 		_validate_integer_field(issues, running_profile, field_name, "running_profile", true)
 	if source_refs.is_empty():
@@ -88,6 +93,8 @@ func to_dictionary() -> Dictionary:
 		"combat_stats": combat_stats.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),
 		"ability_allowances": ability_allowances.duplicate(true),
+		"ability_access": ability_access.duplicate(true),
+		"proficiencies": proficiencies.duplicate(true),
 		"defensive_capabilities": defensive_capabilities.duplicate(true),
 		"running_profile": running_profile.duplicate(true),
 		"source_refs": Array(source_refs),

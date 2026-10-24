@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="CombatWeaponDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_weapon_definition_resource.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+definition_id = &"prime_v3_rare_human_warrior_boar_spear"
+display_name = "Enchanted Boar Spear"
+damage_dice_count = 3
+damage_die_sides = 10
+fixed_damage_bonus = 8
+strength_bonus_eligible = true
+damage_types = PackedStringArray("slashing", "piercing")
+reach_microfeet = 6000000
+strength_requirement = 15
+one_hand_strength_requirement = 30
+base_hands_required = 2
+block_target = 6
+required_acts = 1
+strikes_per_act = 1
+critical_success_max_natural = 1
+approach_attack_eligible = false
+ducking_policy = &"unresolved"
+combat_ready = false
+blocked_capabilities = PackedStringArray("enchantment_damage_interaction_unresolved", "thrown_spear_delivery_not_implemented", "boss_attack_policy_not_approved")
+enchantment_bonus = 5
+enchantment_damage_policy = &"unresolved_do_not_apply_separately"
+throw_range_formula = &"one_square_per_thrower_strength"
+source_refs = PackedStringArray("assets/Rare Human Warrior (Boss).doc: slash or pierce 3d10+8(+SB), +5 enchant, 30% weapon Block, one square/STR throw", "PRIME-V3 pp. 127-128, BOR SPEAR: STR 15, 6-foot reach, two hands below STR 30", "Task 35C gate: printed +8 is stored once; separate +5 is not added again without an approved enchantment rule")

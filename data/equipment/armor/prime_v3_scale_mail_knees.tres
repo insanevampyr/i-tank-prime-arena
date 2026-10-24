@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="CombatArmorDefinitionResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/combat_armor_definition_resource.gd" id="1_armor"]
+
+[resource]
+script = ExtResource("1_armor")
+definition_id = &"prime_v3_scale_mail_knees"
+display_name = "Scale Mail Knee Armor"
+armor_slot = &"knees"
+covered_locations = PackedStringArray("knee")
+tal_by_damage_type = {"piercing": 1, "slashing": 1}
+strength_requirement = 3
+mr_penalty = 0
+dt_penalty = 0
+projectile_dodge_penalty = 0
+source_refs = PackedStringArray("PRIME-V3 p. 135, Hard Studded/Scale knees", "Task 27 owner-confirmed knee armor slot")

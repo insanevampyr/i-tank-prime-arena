@@ -2,6 +2,9 @@ class_name CombatWeaponDefinitionResource
 extends Resource
 
 const INVALID_HAND_REQUIREMENT := -1
+const ENCHANTMENT_NONE := &"none"
+const ENCHANTMENT_UNRESOLVED_DO_NOT_APPLY_SEPARATELY := &"unresolved_do_not_apply_separately"
+const ENCHANTMENT_INCLUDED_IN_PRINTED_DAMAGE := &"included_in_printed_damage"
 
 @export var definition_id: StringName
 @export var display_name: String
@@ -22,6 +25,9 @@ const INVALID_HAND_REQUIREMENT := -1
 @export var ducking_policy: StringName = &"unresolved"
 @export var combat_ready: bool = true
 @export var blocked_capabilities: PackedStringArray = PackedStringArray()
+@export var enchantment_bonus: int = 0
+@export var enchantment_damage_policy: StringName = ENCHANTMENT_NONE
+@export var throw_range_formula: StringName = &""
 @export var source_refs: PackedStringArray = PackedStringArray()
 
 
@@ -66,6 +72,10 @@ func validate_definition() -> Array[Dictionary]:
 			issues.append(_issue("invalid", "weapon_not_combat_ready_without_reason"))
 		else:
 			issues.append(_issue("not_yet_implemented", "weapon_not_combat_ready", {"blocked_capabilities": Array(blocked_capabilities)}))
+	if enchantment_bonus < 0:
+		issues.append(_issue("invalid", "invalid_weapon_enchantment_bonus"))
+	if not [ENCHANTMENT_NONE, ENCHANTMENT_UNRESOLVED_DO_NOT_APPLY_SEPARATELY, ENCHANTMENT_INCLUDED_IN_PRINTED_DAMAGE].has(enchantment_damage_policy):
+		issues.append(_issue("invalid", "invalid_weapon_enchantment_damage_policy"))
 	if source_refs.is_empty():
 		issues.append(_issue("requires_source_verification", "weapon_source_missing"))
 	return issues
@@ -177,6 +187,9 @@ func to_dictionary() -> Dictionary:
 		"critical_success_max_natural": critical_success_max_natural,
 		"approach_attack_eligible": approach_attack_eligible, "ducking_policy": String(ducking_policy),
 		"combat_ready": combat_ready, "blocked_capabilities": Array(blocked_capabilities),
+		"enchantment_bonus": enchantment_bonus,
+		"enchantment_damage_policy": String(enchantment_damage_policy),
+		"throw_range_formula": String(throw_range_formula),
 		"source_refs": Array(source_refs),
 	}
 
