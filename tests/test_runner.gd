@@ -54,7 +54,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
-		{"name": "Task 35C Rare Human Warrior boss foundation", "instance": RareHumanWarriorFoundationTests.new()},
+		{"name": "Task 35C-35D Rare Human Warrior equipment and defenses", "instance": RareHumanWarriorFoundationTests.new()},
 		{"name": "Task 34B Vaelis Force magic and NACs", "instance": VaelisForceMagicTests.new()},
 		{"name": "Task 34 playable character selection", "instance": PlayableCharacterSelectionTests.new()},
 		{"name": "Task 33B Wave 4 swarmer tactics", "instance": WaveFourSwarmerTacticsTests.new()},

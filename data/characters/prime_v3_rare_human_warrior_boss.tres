@@ -89,7 +89,7 @@ field_sources = {
 "ability_access": "Official boss sheet: Home Spell Field / Abilities Combat; owner states levels 1-3 subject to exact-access validation",
 "attributes": "Official boss sheet page-two attribute grid",
 "combat_stats": "Official boss sheet page-two derived-stat grid; racial NAL uses the explicit owner correction",
-"equipment": "Official boss sheet: enchanted Boar Spear and Scale mail; exact armor locations remain unresolved",
+"equipment": "Official boss sheet: enchanted Boar Spear and Scale mail; Task 35D owner ruling equips the complete seven-location Scale-mail set",
 "nal": "Owner correction: effective racial NAL +1 replaces the omitted page-two grid value 0 and remains separate from armor TAL",
 "proficiencies": "Official boss sheet Inventory and Proficiencies table",
 "resource_maxima": "Official boss sheet: Mana Max 24 and AP 12",
