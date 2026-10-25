@@ -47,6 +47,7 @@ const PlayableCharacterSelectionTests = preload("res://tests/test_playable_chara
 const VaelisForceMagicTests = preload("res://tests/test_vaelis_force_magic.gd")
 const RareHumanWarriorFoundationTests = preload("res://tests/test_rare_human_warrior_foundation.gd")
 const Task35GRareHumanWarriorPotionsAndCombatTests = preload("res://tests/test_task_35g_rare_human_warrior_potions_and_combat.gd")
+const Task35HRareHumanWarriorBossAITests = preload("res://tests/test_task_35h_rare_human_warrior_boss_ai.gd")
 
 
 func _initialize() -> void:
@@ -55,6 +56,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 35H Rare Human Warrior authoritative boss AI", "instance": Task35HRareHumanWarriorBossAITests.new()},
 		{"name": "Task 35G Rare Human Warrior potions and Combat abilities", "instance": Task35GRareHumanWarriorPotionsAndCombatTests.new()},
 		{"name": "Task 35C-35D Rare Human Warrior equipment and defenses", "instance": RareHumanWarriorFoundationTests.new()},
 		{"name": "Task 34B Vaelis Force magic and NACs", "instance": VaelisForceMagicTests.new()},

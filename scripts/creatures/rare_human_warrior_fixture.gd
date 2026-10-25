@@ -43,7 +43,7 @@ static func instantiate_foundation_actor(
 		display_name
 	)
 	result["encounter_ready"] = false
-	result["activation_gate"] = "wave_5_boss_ai_unimplemented"
+	result["activation_gate"] = "wave_5_encounter_activation_not_authorized"
 	return result
 
 
@@ -275,8 +275,8 @@ static func make_damage_protection_profile(actor_id: StringName = ACTOR_ID) -> C
 static func get_activation_status() -> Dictionary:
 	return {
 		"encounter_ready": false,
-		"reason": "wave_5_boss_ai_unimplemented",
+		"reason": "wave_5_encounter_activation_not_authorized",
 		"unresolved": PackedStringArray([
-			"boss_tactical_ai",
+			"wave_5_encounter_activation",
 		]),
 	}
