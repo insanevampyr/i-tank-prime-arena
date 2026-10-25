@@ -43,6 +43,7 @@ var _world_items: Dictionary = {}
 var _thrown_weapon_context_by_attack_id: Dictionary = {}
 var _resolved_events: Array = []
 var _arena_wave_state: Dictionary = {}
+var _retired_actor_ids: Dictionary = {}
 var _combat_started: bool = false
 var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
@@ -449,6 +450,17 @@ func get_world_item(world_item_id: String) -> Dictionary:
 	return (_world_items[world_item_id] as Dictionary).duplicate(true)
 
 
+func get_world_items_snapshot() -> Array[Dictionary]:
+	var snapshots: Array[Dictionary] = []
+	var item_ids: Array = _world_items.keys()
+	item_ids.sort()
+	for item_id: String in item_ids:
+		var item: Dictionary = (_world_items[item_id] as Dictionary).duplicate(true)
+		item["position_microfeet"] = _serialized_world_item_position(item.get("position_microfeet"))
+		snapshots.append(item)
+	return snapshots
+
+
 func record_tactical_decision(actor_id: StringName, target_id: StringName, payload: Dictionary) -> CombatEvent:
 	return _record_resolved_event(
 		clock.get_elapsed_us(), &"tactical_action_selected", _get_actor_initiative(String(actor_id)),
@@ -546,6 +558,159 @@ func begin_combat() -> Dictionary:
 		{"opening_order": opening_order}
 	)
 	return _success({"opening_order": opening_order})
+
+
+func register_arriving_wave_combatants(registrations: Array[Dictionary]) -> Dictionary:
+	if not _combat_started:
+		return _failure("combat_not_started")
+	if registrations.is_empty():
+		return _failure("wave_registration_empty")
+	var seen_actor_ids := {}
+	var seen_attack_ids := {}
+	for registration: Dictionary in registrations:
+		var actor: CombatActorDefinition = registration.get("actor")
+		var defense: CombatDefenseProfile = registration.get("defense_profile")
+		var protection: CombatDamageProtectionProfile = registration.get("protection_profile")
+		var attack: CombatAttackDefinition = registration.get("attack_definition")
+		if actor == null or defense == null or protection == null or attack == null:
+			return _failure("wave_registration_incomplete")
+		var actor_key := String(actor.actor_id)
+		var attack_key := String(attack.attack_definition_id)
+		if actor_key.is_empty() or seen_actor_ids.has(actor_key) or _actor_definitions.has(actor_key):
+			return _failure("duplicate_actor_id")
+		if actor.get_combat_stat("init") == null or actor.get_combat_stat("at") == null:
+			return _failure("unresolved_arriving_actor_timing")
+		if attack.requires_equipped_weapon and not actor.equipment_refs.has(String(attack.weapon_ref)):
+			return _failure("weapon_not_equipped")
+		if seen_attack_ids.has(attack_key) and seen_attack_ids[attack_key] != attack.to_dictionary():
+			return _failure("conflicting_attack_definition")
+		if _attack_definitions.has(attack_key) and (_attack_definitions[attack_key] as CombatAttackDefinition).to_dictionary() != attack.to_dictionary():
+			return _failure("conflicting_attack_definition")
+		var assignments: Dictionary = registration.get("hand_occupancy", {})
+		if not assignments.is_empty():
+			var hand_validation := _validate_arriving_hand_occupancy(actor, assignments)
+			if not hand_validation.get("success", false):
+				return hand_validation
+		seen_actor_ids[actor_key] = true
+		seen_attack_ids[attack_key] = attack.to_dictionary()
+
+	var arriving_ids := PackedStringArray()
+	for registration: Dictionary in registrations:
+		var actor: CombatActorDefinition = registration["actor"]
+		var defense: CombatDefenseProfile = registration["defense_profile"]
+		var protection: CombatDamageProtectionProfile = registration["protection_profile"]
+		var attack: CombatAttackDefinition = registration["attack_definition"]
+		var actor_key := String(actor.actor_id)
+		var attack_key := String(attack.attack_definition_id)
+		var state := CombatActorState.new(actor)
+		var assignments: Dictionary = registration.get("hand_occupancy", {})
+		if not assignments.is_empty():
+			state.hand_occupancy = {"left": String(assignments.get("left", "")), "right": String(assignments.get("right", ""))}
+			state.hand_occupancy_authoritative = true
+		_actor_definitions[actor_key] = actor
+		_actor_states[actor_key] = state
+		_defense_profiles[actor_key] = defense
+		_damage_protection_profiles[actor_key] = protection
+		_attack_definitions[attack_key] = attack
+		_critical_reaction_definitions[actor_key] = {
+			"attack_definition_id": attack_key,
+			"authoritative_line_of_sight": true,
+		}
+		_retired_actor_ids.erase(actor_key)
+		arriving_ids.append(actor_key)
+		_record_resolved_event(clock.get_elapsed_us(), &"actor_registered", _get_actor_initiative(actor_key), actor.actor_id, &"", {"actor_id": actor_key, "actor_kind": String(actor.actor_kind), "wave_arrival": true})
+		_record_resolved_event(clock.get_elapsed_us(), &"defense_profile_registered", _get_actor_initiative(actor_key), actor.actor_id, &"", {"actor_id": actor_key, "profile_id": String(defense.profile_id), "wave_arrival": true})
+		_record_resolved_event(clock.get_elapsed_us(), &"damage_protection_profile_registered", _get_actor_initiative(actor_key), actor.actor_id, &"", {"actor_id": actor_key, "profile_id": String(protection.profile_id), "wave_arrival": true})
+		_record_resolved_event(clock.get_elapsed_us(), &"critical_reaction_attack_registered", _get_actor_initiative(actor_key), actor.actor_id, &"", {"attack_definition_id": attack_key, "authoritative_line_of_sight": true, "wave_arrival": true})
+		if state.hand_occupancy_authoritative:
+			_record_resolved_event(clock.get_elapsed_us(), &"actor_hand_occupancy_configured", _get_actor_initiative(actor_key), actor.actor_id, &"", {"hand_occupancy": state.hand_occupancy.duplicate(true), "wave_arrival": true})
+
+	var opening_order: Array = []
+	for actor_key: String in arriving_ids:
+		var actor: CombatActorDefinition = _actor_definitions[actor_key]
+		var state: CombatActorState = _actor_states[actor_key]
+		state.opening_initiative_roll = roll_int(1, 10)
+		state.opening_initiative_rng_draw_index = random.get_draw_count()
+		state.opening_initiative_total = int(state.opening_initiative_roll) + int(actor.get_combat_stat("init"))
+		state.opening_order_rank = 0
+		state.action_timing_anchor_us = clock.get_elapsed_us()
+		state.action_timing_cursor_us = clock.get_elapsed_us()
+		state.revision += 1
+	var ordered_ids: Array = Array(arriving_ids)
+	ordered_ids.sort_custom(_opening_actor_precedes)
+	for rank in range(ordered_ids.size()):
+		var actor_key: String = ordered_ids[rank]
+		var actor: CombatActorDefinition = _actor_definitions[actor_key]
+		var state: CombatActorState = _actor_states[actor_key]
+		state.opening_order_rank = rank
+		var entry := {
+			"actor_id": actor_key,
+			"natural_d10": state.opening_initiative_roll,
+			"rng_draw_index": state.opening_initiative_rng_draw_index,
+			"base_init": int(actor.get_combat_stat("init")),
+			"total": state.opening_initiative_total,
+			"opening_order_rank": rank,
+		}
+		opening_order.append(entry)
+		_record_resolved_event(clock.get_elapsed_us(), &"wave_arrival_initiative_rolled", int(actor.get_combat_stat("init")), actor.actor_id, &"", entry)
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"wave_combatants_registered", 0, &"", &"", {"actor_ids": Array(arriving_ids), "opening_order": opening_order})
+	return _success({"actor_ids": Array(arriving_ids), "opening_order": opening_order})
+
+
+func retire_wave_combatants(actor_ids: PackedStringArray) -> Dictionary:
+	if not _combat_started:
+		return _failure("combat_not_started")
+	var ordered := actor_ids.duplicate()
+	ordered.sort()
+	var retirement_set := {}
+	for actor_id: String in ordered:
+		if not _actor_states.has(actor_id):
+			return _failure("unknown_actor")
+		if actor_id == "player":
+			return _failure("player_cannot_be_retired")
+		retirement_set[actor_id] = true
+	var actions_to_interrupt: Array[String] = []
+	for action_key: String in _actions:
+		var action: CombatActionInstance = _actions[action_key]
+		if action.is_terminal():
+			continue
+		var retirement_affects_action := retirement_set.has(String(action.actor_id))
+		if not retirement_affects_action:
+			for attack_instance_id: String in _get_linked_attack_instance_ids(action.action_instance_id):
+				var attack: CombatAttackInstance = _attacks.get(attack_instance_id)
+				if attack != null and retirement_set.has(String(attack.target_id)):
+					retirement_affects_action = true
+					break
+		if retirement_affects_action:
+			actions_to_interrupt.append(action.action_instance_id)
+	actions_to_interrupt.sort()
+	for action_instance_id: String in actions_to_interrupt:
+		var action: CombatActionInstance = _actions[action_instance_id]
+		var interruption := _create_event(clock.get_elapsed_us(), &"action_interrupt_due", action.initiative, &"", action.actor_id, "", PackedStringArray(), {"action_instance_id": action.action_instance_id, "reason": "wave_combatant_retired"}, {})
+		_resolved_events.append(interruption)
+		_resolve_action_interrupt_due(interruption)
+	for actor_id: String in ordered:
+		_retired_actor_ids[actor_id] = true
+	var canceled_event_ids := event_queue.cancel_actor_events(ordered)
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), &"wave_combatants_retired", 0, &"", &"", {"actor_ids": Array(ordered), "canceled_pending_event_ids": Array(canceled_event_ids)})
+	return _success({"actor_ids": Array(ordered), "canceled_pending_event_ids": Array(canceled_event_ids)})
+
+
+func is_actor_retired(actor_id: StringName) -> bool:
+	return _retired_actor_ids.has(String(actor_id))
+
+
+func _validate_arriving_hand_occupancy(actor: CombatActorDefinition, assignments: Dictionary) -> Dictionary:
+	for hand: String in ["left", "right"]:
+		var equipment_ref := String(assignments.get(hand, ""))
+		if not equipment_ref.is_empty() and not actor.equipment_refs.has(equipment_ref):
+			return _failure("equipment_not_available")
+	for key: Variant in assignments:
+		if not ["left", "right"].has(String(key)):
+			return _failure("invalid_hand")
+	return _success()
 
 
 func register_actor(definition: CombatActorDefinition) -> Dictionary:
@@ -685,6 +850,8 @@ func start_action(
 		return _failure("duplicate_request")
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
+	if _retired_actor_ids.has(actor_key):
+		return _failure("actor_retired")
 	if definition == null:
 		return _failure("invalid_action_definition")
 	var actor_definition: CombatActorDefinition = _actor_definitions[actor_key]
@@ -1051,6 +1218,8 @@ func start_nac_projectile_special(
 	var target_definition := get_actor_definition(target_id)
 	if actor_state == null or actor_definition == null:
 		return _failure("unknown_actor")
+	if _retired_actor_ids.has(String(actor_id)):
+		return _failure("actor_retired")
 	if target_state == null or target_definition == null:
 		return _failure("unknown_target")
 	if actor_id == target_id:
@@ -1192,6 +1361,10 @@ func start_physical_attack(
 		return _failure("unknown_attacker")
 	if not _actor_states.has(target_key):
 		return _failure("unknown_target")
+	if _retired_actor_ids.has(attacker_key):
+		return _failure("attacker_retired")
+	if _retired_actor_ids.has(target_key):
+		return _failure("target_retired")
 	if attacker_key == target_key:
 		return _failure("self_target_not_allowed")
 	var attacker_state: CombatActorState = _actor_states[attacker_key]
@@ -2513,6 +2686,8 @@ func get_state_snapshot() -> Dictionary:
 		special_damage_definition_snapshots.append((_verified_special_damage_definitions[special_key] as Dictionary).duplicate(true))
 	var processed_midnight_ids: Array = _processed_midnight_ids.keys()
 	processed_midnight_ids.sort()
+	var retired_actor_ids: Array = _retired_actor_ids.keys()
+	retired_actor_ids.sort()
 	var world_item_snapshots: Array = []
 	var world_item_keys: Array = _world_items.keys()
 	world_item_keys.sort()
@@ -2543,6 +2718,7 @@ func get_state_snapshot() -> Dictionary:
 		"next_critical_sequence": _next_critical_sequence,
 		"arena_wave_state": _arena_wave_state.duplicate(true),
 		"processed_midnight_ids": processed_midnight_ids,
+		"retired_actor_ids": retired_actor_ids,
 		"combat_started": _combat_started,
 		"opening_sequence_complete": _opening_sequence_complete,
 		"current_opening_rank": _current_opening_rank,

@@ -42,6 +42,7 @@ const GARGOYLE_STATE_DIVING := "diving"
 const GARGOYLE_STATE_STRIKING := "striking"
 const GARGOYLE_STATE_WITHDRAWING := "withdrawing"
 const GARGOYLE_STATE_BLOCKED := "blocked_recovery"
+const INVALID_TRANSITION_POSITION := Vector2i(2_147_483_647, 2_147_483_647)
 
 var simulation: CombatSimulation
 
@@ -841,15 +842,15 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_gargoyle_last_tactical_signatures.clear()
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
-	if _is_wave_one_goblin_encounter:
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS:
 		return initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-	if _is_wave_two_spadoodle_encounter:
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES:
 		return initialize_wave_two_spadoodles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-	if _is_wave_three_skelly_hades_encounter:
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES:
 		return initialize_wave_three_skelly_hades(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-	if _is_wave_four_gargoyle_encounter:
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES:
 		return initialize_wave_four_gargoyles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
-	if _is_wave_five_boss_encounter:
+	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR:
 		return initialize_wave_five_rare_human_warrior(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
@@ -908,10 +909,17 @@ func cycle_target(direction: int) -> Dictionary:
 
 func get_targetable_enemy_ids() -> PackedStringArray:
 	var candidates := PackedStringArray()
+	var active_wave_ids := PackedStringArray()
+	if _arena_wave_state_machine != null:
+		active_wave_ids = _arena_wave_state_machine.get_active_enemy_ids()
 	for actor_snapshot: Dictionary in simulation.get_state_snapshot().get("actors", []):
 		var state: Dictionary = actor_snapshot.get("state", {})
 		var actor_id := String(state.get("actor_id", ""))
 		if actor_id.is_empty() or actor_id == String(Fixture.PLAYER_ID):
+			continue
+		if _arena_wave_state_machine != null and not active_wave_ids.has(actor_id):
+			continue
+		if simulation.is_actor_retired(StringName(actor_id)):
 			continue
 		var current_hpc: Variant = state.get("current_hpc")
 		if current_hpc == null or int(current_hpc) <= 0:
@@ -1617,26 +1625,232 @@ func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
 		return _failure("wave_advance_already_committed")
 	if _arena_wave_state_machine.get_state() != ArenaWaveStateMachine.STATE_BETWEEN_WAVE_DOWNTIME:
 		return _failure("wave_downtime_not_active")
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
+		return _failure("player_not_eligible_for_next_wave")
+	var retiring_actor_ids := _wave_enemy_actor_ids()
+	var retirement := simulation.retire_wave_combatants(retiring_actor_ids)
+	if not retirement.get("success", false):
+		return retirement
+	for actor_id: String in retiring_actor_ids:
+		_active_attack_ids_by_actor.erase(actor_id)
 	var advance := _arena_wave_state_machine.advance_from_between_wave_downtime(_roll_wave_quantity, trigger)
 	if not advance.get("success", false):
 		return advance
-	_downtime_advance_committed = true
 	_publish_wave_transition(advance)
 	if _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE:
+		_downtime_advance_committed = true
 		_encounter_state = ENCOUNTER_PLAYER_VICTORY
 		_opponent_behavior_status = "wave_circuit_complete"
 	else:
-		# Creature spawning for a continuous next-wave session remains an explicit
-		# integration step. The authoritative circuit has advanced exactly once.
-		_encounter_state = ENCOUNTER_WAVE_TRANSITION_BLOCKED
-		_opponent_behavior_status = "next_wave_integration_pending"
+		var integration := _register_and_activate_transitioned_wave()
+		if not integration.get("success", false):
+			_downtime_advance_committed = true
+			_encounter_state = ENCOUNTER_WAVE_TRANSITION_BLOCKED
+			_opponent_behavior_status = "next_wave_integration_failed_%s" % String(integration.get("reason", "unknown"))
+			return integration
+		_downtime_advance_committed = true
+		_downtime_elapsed_ms = 0
+		_encounter_active = true
+		_encounter_state = ENCOUNTER_RUNNING
+		_opponent_behavior_status = "wave_arrival_active"
+		if _opponent_behavior_enabled:
+			_run_opponent_behavior()
 	return {
 		"success": true,
 		"advanced": true,
 		"trigger": trigger,
 		"next_wave_id": _arena_wave_state_machine.get_current_wave_id(),
 		"wave_state": _arena_wave_state_machine.get_state(),
+		"active_enemy_ids": Array(_arena_wave_state_machine.get_active_enemy_ids()),
 	}
+
+
+func _register_and_activate_transitioned_wave() -> Dictionary:
+	var wave_id := _arena_wave_state_machine.get_current_wave_id()
+	var registrations: Array[Dictionary] = []
+	var enemy_ids := PackedStringArray()
+	var preferred_positions: Array[Vector2i] = []
+	var attacks_by_actor := {}
+	_set_active_wave_kind(wave_id)
+	match wave_id:
+		"wave_2":
+			var count := _arena_wave_state_machine.get_resolved_enemy_count()
+			preferred_positions = _make_wave_two_spadoodle_positions(_initial_opponent_position_microfeet, count)
+			for index in range(count):
+				var actor_id := _spadoodle_actor_id(index)
+				var actor := CommonSpadoodleFixture.make_actor(actor_id, "Common Spadoodle %d" % (index + 1))
+				var attack := CommonSpadoodleFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+				var validation := CommonSpadoodleFixture.validate_actor(actor, attack)
+				if not validation.get("success", false):
+					return _failure(String(validation.get("reason", "spadoodle_fixture_invalid")))
+				registrations.append(_wave_registration(actor, CommonSpadoodleFixture.make_defense_profile(actor_id), CommonSpadoodleFixture.make_damage_protection_profile(actor_id), attack))
+				enemy_ids.append(String(actor_id))
+				attacks_by_actor[String(actor_id)] = attack
+			_spadoodle_actor_ids = enemy_ids.duplicate()
+			set_wave_creature_integration_available(CommonSpadoodleFixture.CREATURE_ID, true)
+		"wave_3":
+			var skelly_count := 0
+			var hades_count := 0
+			for entry: Dictionary in _arena_wave_state_machine.get_resolved_roster():
+				if String(entry.get("creature_id", "")) == String(CommonSkellyFixture.CREATURE_ID):
+					skelly_count = int(entry.get("resolved_count", 0))
+				elif String(entry.get("creature_id", "")) == String(HadesCombatFollowerFixture.CREATURE_ID):
+					hades_count = int(entry.get("resolved_count", 0))
+			if skelly_count < 1 or skelly_count > 2 or hades_count != 1:
+				return _failure("wave_three_roster_invalid")
+			preferred_positions = _make_wave_three_positions(_initial_opponent_position_microfeet, skelly_count)
+			for index in range(skelly_count):
+				var actor_id := _skelly_actor_id(index)
+				var actor := CommonSkellyFixture.make_actor(actor_id, "Common Skelly %d" % (index + 1))
+				var attack := CommonSkellyFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+				var validation := CommonSkellyFixture.validate_actor(actor, attack)
+				if not validation.get("success", false):
+					return _failure(String(validation.get("reason", "skelly_fixture_invalid")))
+				registrations.append(_wave_registration(actor, CommonSkellyFixture.make_defense_profile(actor_id), CommonSkellyFixture.make_damage_protection_profile(actor_id), attack))
+				enemy_ids.append(String(actor_id))
+				attacks_by_actor[String(actor_id)] = attack
+			_skelly_actor_ids = enemy_ids.duplicate()
+			var hades_id := _hades_follower_actor_id()
+			var hades_actor := HadesCombatFollowerFixture.make_actor(hades_id, "Uncommon Hades Combat Follower")
+			var hades_attack := HadesCombatFollowerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+			var hades_validation := HadesCombatFollowerFixture.validate_actor(hades_actor, hades_attack)
+			if not hades_validation.get("success", false):
+				return _failure(String(hades_validation.get("reason", "hades_follower_fixture_invalid")))
+			registrations.append(_wave_registration(hades_actor, HadesCombatFollowerFixture.make_defense_profile(hades_id), HadesCombatFollowerFixture.make_damage_protection_profile(hades_id), hades_attack, {"left": "", "right": String(HadesCombatFollowerFixture.WEAPON_REF)}))
+			enemy_ids.append(String(hades_id))
+			attacks_by_actor[String(hades_id)] = hades_attack
+			_hades_follower_actor_ids = PackedStringArray([String(hades_id)])
+			set_wave_creature_integration_available(CommonSkellyFixture.CREATURE_ID, true)
+			set_wave_creature_integration_available(HadesCombatFollowerFixture.CREATURE_ID, true)
+		"wave_4":
+			var count := _arena_wave_state_machine.get_resolved_enemy_count()
+			preferred_positions = _make_wave_four_gargoyle_positions(_initial_opponent_position_microfeet, count)
+			for index in range(count):
+				var actor_id := _gargoyle_actor_id(index)
+				var actor := MiniGargoyleSwarmerFixture.make_actor(actor_id, "Uncommon Mini Gargoyle Swarmer %d" % (index + 1))
+				var attack := MiniGargoyleSwarmerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
+				var validation := MiniGargoyleSwarmerFixture.validate_actor(actor, attack)
+				if not validation.get("success", false):
+					return _failure(String(validation.get("reason", "gargoyle_fixture_invalid")))
+				registrations.append(_wave_registration(actor, MiniGargoyleSwarmerFixture.make_defense_profile(actor_id), MiniGargoyleSwarmerFixture.make_damage_protection_profile(actor_id), attack))
+				enemy_ids.append(String(actor_id))
+				attacks_by_actor[String(actor_id)] = attack
+			_gargoyle_actor_ids = enemy_ids.duplicate()
+			set_wave_creature_integration_available(MiniGargoyleSwarmerFixture.CREATURE_ID, true)
+		"wave_5":
+			if _arena_wave_state_machine.get_resolved_enemy_count() != 1:
+				return _failure("wave_five_roster_invalid")
+			var boss_result := RareHumanWarriorFixture.instantiate_foundation_actor()
+			if not boss_result.get("success", false):
+				return _failure(String(boss_result.get("reason", "rare_human_warrior_fixture_invalid")))
+			var actor: CombatActorDefinition = boss_result.get("actor")
+			var attack := RareHumanWarriorFixture.make_melee_attack_definition(HitLocations.get_same_size_attack_profile())
+			var protection := RareHumanWarriorFixture.make_damage_protection_profile(RareHumanWarriorFixture.ACTOR_ID)
+			if actor == null or attack == null or protection == null:
+				return _failure("rare_human_warrior_combat_definition_incomplete")
+			registrations.append(_wave_registration(actor, RareHumanWarriorFixture.make_defense_profile(RareHumanWarriorFixture.ACTOR_ID), protection, attack, {"left": String(RareHumanWarriorFixture.WEAPON_REF), "right": String(RareHumanWarriorFixture.WEAPON_REF)}))
+			enemy_ids.append(String(RareHumanWarriorFixture.ACTOR_ID))
+			attacks_by_actor[String(RareHumanWarriorFixture.ACTOR_ID)] = attack
+			preferred_positions = [_initial_opponent_position_microfeet]
+			_rare_human_warrior_actor_ids = enemy_ids.duplicate()
+			set_wave_creature_integration_available(&"rare_human_warrior", true)
+		_:
+			return _failure("unsupported_wave_transition")
+	if registrations.size() != enemy_ids.size() or preferred_positions.size() != enemy_ids.size():
+		return _failure("wave_transition_plan_incomplete")
+	var spawn_result := _resolve_transition_spawn_positions(enemy_ids, preferred_positions)
+	if not spawn_result.get("success", false):
+		return spawn_result
+	var registration_result := simulation.register_arriving_wave_combatants(registrations)
+	if not registration_result.get("success", false):
+		return registration_result
+	var positions: Array = spawn_result["positions"]
+	for index in range(enemy_ids.size()):
+		var position_result := simulation.apply_authoritative_spatial_position(StringName(enemy_ids[index]), positions[index], 0, 180_000 + index * 90_000)
+		if not position_result.get("success", false):
+			return position_result
+	for actor_id: String in enemy_ids:
+		_attack_definitions_by_actor[actor_id] = attacks_by_actor[actor_id]
+	if wave_id == "wave_5":
+		simulation.set_world_item_pickup_resolver(_resolve_world_item_pickup)
+		RareHumanWarriorFixture.configure_spear_landing_geometry(simulation, _battlefield)
+		_rare_human_warrior_ai = RareHumanWarriorBossAI.new(simulation, _battlefield, RareHumanWarriorFixture.ACTOR_ID, Fixture.PLAYER_ID)
+	var activation := activate_current_wave(enemy_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = StringName(enemy_ids[0])
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialize_wave_enemy_navigation_state()
+	return {"success": true, "actor_ids": Array(enemy_ids), "opening_order": registration_result.get("opening_order", [])}
+
+
+func _wave_registration(actor: CombatActorDefinition, defense: CombatDefenseProfile, protection: CombatDamageProtectionProfile, attack: CombatAttackDefinition, hand_occupancy: Dictionary = {}) -> Dictionary:
+	return {
+		"actor": actor,
+		"defense_profile": defense,
+		"protection_profile": protection,
+		"attack_definition": attack,
+		"hand_occupancy": hand_occupancy.duplicate(true),
+	}
+
+
+func _set_active_wave_kind(wave_id: String) -> void:
+	_is_wave_one_goblin_encounter = wave_id == "wave_1"
+	_is_wave_two_spadoodle_encounter = wave_id == "wave_2"
+	_is_wave_three_skelly_hades_encounter = wave_id == "wave_3"
+	_is_wave_four_gargoyle_encounter = wave_id == "wave_4"
+	_is_wave_five_boss_encounter = wave_id == "wave_5"
+	if not _is_wave_one_goblin_encounter:
+		_goblin_actor_ids = PackedStringArray()
+	if not _is_wave_two_spadoodle_encounter:
+		_spadoodle_actor_ids = PackedStringArray()
+	if not _is_wave_three_skelly_hades_encounter:
+		_skelly_actor_ids = PackedStringArray()
+		_hades_follower_actor_ids = PackedStringArray()
+	if not _is_wave_four_gargoyle_encounter:
+		_gargoyle_actor_ids = PackedStringArray()
+	if not _is_wave_five_boss_encounter:
+		_rare_human_warrior_actor_ids = PackedStringArray()
+		_rare_human_warrior_ai = null
+
+
+func _resolve_transition_spawn_positions(actor_ids: PackedStringArray, preferred: Array[Vector2i]) -> Dictionary:
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		return _failure("player_state_unavailable")
+	var occupancy := {String(Fixture.PLAYER_ID): player_state.position_microfeet}
+	var positions: Array[Vector2i] = []
+	for index in range(actor_ids.size()):
+		var actor_id := StringName(actor_ids[index])
+		var candidate := preferred[index]
+		if not _battlefield.is_position_legal(actor_id, candidate, occupancy).get("legal", false):
+			candidate = _find_transition_spawn_position(actor_id, occupancy)
+		if candidate == INVALID_TRANSITION_POSITION:
+			return _failure("wave_spawn_positions_unavailable")
+		positions.append(candidate)
+		occupancy[String(actor_id)] = candidate
+	return {"success": true, "positions": positions}
+
+
+func _find_transition_spawn_position(actor_id: StringName, occupancy: Dictionary) -> Vector2i:
+	var bounds := _battlefield.bounds_microfeet
+	var step := 2 * MICROFEET_PER_FOOT
+	var start_x := bounds.position.x + MICROFEET_PER_FOOT
+	var start_y := bounds.position.y + MICROFEET_PER_FOOT
+	var end_x := bounds.end.x - MICROFEET_PER_FOOT
+	var end_y := bounds.end.y - MICROFEET_PER_FOOT
+	var y := start_y
+	while y <= end_y:
+		var x := start_x
+		while x <= end_x:
+			var candidate := Vector2i(x, y)
+			if _battlefield.is_position_legal(actor_id, candidate, occupancy).get("legal", false):
+				return candidate
+			x += step
+		y += step
+	return INVALID_TRANSITION_POSITION
 
 
 func _request_actor_attack(attacker_id: StringName, target_id: StringName, input_source: String, target_location: StringName = &"torso") -> Dictionary:

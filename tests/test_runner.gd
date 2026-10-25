@@ -49,6 +49,7 @@ const RareHumanWarriorFoundationTests = preload("res://tests/test_rare_human_war
 const Task35GRareHumanWarriorPotionsAndCombatTests = preload("res://tests/test_task_35g_rare_human_warrior_potions_and_combat.gd")
 const Task35HRareHumanWarriorBossAITests = preload("res://tests/test_task_35h_rare_human_warrior_boss_ai.gd")
 const Task35IWaveFiveTestModeTests = preload("res://tests/test_task_35i_wave_five_test_mode.gd")
+const Task35JPersistentWavesAndSpearMarkerTests = preload("res://tests/test_task_35j_persistent_waves_and_spear_marker.gd")
 
 
 func _initialize() -> void:
@@ -57,6 +58,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 35J persistent waves and dropped-spear marker", "instance": Task35JPersistentWavesAndSpearMarkerTests.new()},
 		{"name": "Task 35I Wave 5 encounter and developer Test Mode", "instance": Task35IWaveFiveTestModeTests.new()},
 		{"name": "Task 35H Rare Human Warrior authoritative boss AI", "instance": Task35HRareHumanWarriorBossAITests.new()},
 		{"name": "Task 35G Rare Human Warrior potions and Combat abilities", "instance": Task35GRareHumanWarriorPotionsAndCombatTests.new()},

@@ -10,6 +10,7 @@ const EncounterTranscript = preload("res://scripts/ui/arena_encounter_transcript
 const LogExporter = preload("res://scripts/ui/arena_log_exporter.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
+const RareHumanWarriorFixture = preload("res://scripts/creatures/rare_human_warrior_fixture.gd")
 
 const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
@@ -93,6 +94,7 @@ var _developer_test_mode: bool = false
 var _encounter_selector_index: int = 0
 var _player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 var _goblin_visuals: Dictionary = {}
+var _world_item_markers: Dictionary = {}
 var _player_facing_marker: Polygon2D
 var _opponent_facing_marker: Polygon2D
 var _world_presentation_size := Vector2.ZERO
@@ -306,6 +308,9 @@ func set_world_presentation_pixels_per_foot(pixels_per_foot: float, presentation
 	for visual: Variant in _goblin_visuals.values():
 		if is_instance_valid(visual):
 			(visual as Node2D).scale = actor_scale
+	for marker: Variant in _world_item_markers.values():
+		if is_instance_valid(marker):
+			(marker as Node2D).scale = actor_scale
 	var player_state := _session.get_actor_state(Fixture.PLAYER_ID) if _session != null else null
 	if player_state != null:
 		_player.apply_authoritative_combat_position(_microfeet_to_feet(player_state.position_microfeet))
@@ -755,11 +760,11 @@ func _on_encounter_button_pressed() -> void:
 		_last_ui_message = "Encounter started. Opening Initiative is authoritative." if start_result.get("success", false) else "Start blocked: %s" % _friendly_reason(String(start_result.get("reason", "rejected")))
 	elif _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		var advance_result := _session.request_next_wave()
-		_last_ui_message = (
-			"Advanced to %s; encounter integration is pending." % String(advance_result.get("next_wave_id", "next wave"))
-			if advance_result.get("success", false)
-			else "Next Wave blocked: %s" % _friendly_reason(String(advance_result.get("reason", "rejected")))
-		)
+		if advance_result.get("success", false):
+			_last_ui_message = "Advanced to %s in the continuing authoritative combat session." % String(advance_result.get("next_wave_id", "next wave"))
+			_rebuild_encounter_visuals()
+		else:
+			_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(String(advance_result.get("reason", "rejected")))
 	else:
 		_reset_encounter()
 	_update_presentation()
@@ -1174,6 +1179,7 @@ func _refresh_non_player_actor_positions() -> void:
 			if altitude_label != null:
 				altitude_label.visible = goblin_visual.visible and goblin_state.elevation_microfeet > 0
 				altitude_label.text = format_altitude_indicator(goblin_state.elevation_microfeet)
+	_refresh_world_item_markers()
 
 
 func _rebuild_encounter_visuals() -> void:
@@ -1247,7 +1253,70 @@ func _rebuild_encounter_visuals() -> void:
 		# its authored children (normal mode now initializes Wave 1 immediately).
 		add_child(visual)
 		_goblin_visuals[actor_id] = visual
+	_refresh_world_item_markers()
 	_update_facing_indicators()
+
+
+func _refresh_world_item_markers() -> void:
+	if _session == null:
+		return
+	var active_ids := {}
+	for item: Dictionary in _session.simulation.get_world_items_snapshot():
+		if String(item.get("state", "")) != "dropped" \
+		or String(item.get("equipment_ref", "")) != String(RareHumanWarriorFixture.WEAPON_REF):
+			continue
+		var world_item_id := String(item.get("world_item_id", ""))
+		var serialized_position: Variant = item.get("position_microfeet")
+		if world_item_id.is_empty() or not (serialized_position is Array) or serialized_position.size() != 2:
+			continue
+		active_ids[world_item_id] = true
+		var marker := _world_item_markers.get(world_item_id) as Node2D
+		if marker == null:
+			marker = _create_dropped_spear_marker(world_item_id)
+			add_child(marker)
+			_world_item_markers[world_item_id] = marker
+		marker.position = _microfeet_to_pixels(Vector2i(int(serialized_position[0]), int(serialized_position[1])))
+		marker.scale = Vector2.ONE * (_player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
+		marker.visible = true
+	for item_id: Variant in _world_item_markers.keys():
+		if active_ids.has(String(item_id)):
+			continue
+		var stale := _world_item_markers[item_id] as Node2D
+		if is_instance_valid(stale):
+			stale.queue_free()
+		_world_item_markers.erase(item_id)
+
+
+func _create_dropped_spear_marker(world_item_id: String) -> Node2D:
+	var marker := Node2D.new()
+	marker.name = "DroppedBoarSpear_%s" % world_item_id.validate_node_name()
+	var outline := Line2D.new()
+	outline.name = "Outline"
+	outline.points = PackedVector2Array([Vector2(-11, 3), Vector2(11, -3)])
+	outline.width = 7.0
+	outline.default_color = Color("#1A1714")
+	marker.add_child(outline)
+	var shaft := Line2D.new()
+	shaft.name = "Shaft"
+	shaft.points = PackedVector2Array([Vector2(-11, 3), Vector2(11, -3)])
+	shaft.width = 3.0
+	shaft.default_color = Color("#8A6645")
+	marker.add_child(shaft)
+	var head := Polygon2D.new()
+	head.name = "Head"
+	head.polygon = PackedVector2Array([Vector2(11, -3), Vector2(5, -7), Vector2(7, 1)])
+	head.color = Color("#A9AFB4")
+	marker.add_child(head)
+	return marker
+
+
+func get_dropped_spear_marker_count_for_testing() -> int:
+	return _world_item_markers.size()
+
+
+func get_dropped_spear_marker_position_for_testing(world_item_id: String) -> Variant:
+	var marker := _world_item_markers.get(world_item_id) as Node2D
+	return null if marker == null else marker.position
 
 
 func _get_enemy_visual(actor_id: StringName) -> Node2D:
@@ -1285,6 +1354,7 @@ func _update_presentation() -> void:
 	var opponent_state := _session.get_actor_state(selected_target_id if selected_target_id != &"" else Fixture.OPPONENT_ID)
 	if player_state == null:
 		return
+	_refresh_world_item_markers()
 	match _session.get_encounter_state():
 		ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY:
 			_last_ui_message = "VICTORY: the opponent fixture is defeated. Press RESET."

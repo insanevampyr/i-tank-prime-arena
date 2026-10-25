@@ -194,8 +194,8 @@ func _test_normal_next_wave_preserves_resources_and_reports_spawn_gate() -> void
 	var advance := session.request_next_wave()
 	_expect_true(advance.get("success", false), "The legal NEXT WAVE action must authorize one state-machine advancement.")
 	_expect_equal(session.get_arena_wave_state().get("current_wave_id"), "wave_2", "Normal progression must select Wave 2 in sequence.")
-	_expect_equal(session.get_encounter_state(), Session.ENCOUNTER_WAVE_TRANSITION_BLOCKED, "Until a combat-safe actor-registration seam exists, normal progression must explicitly block rather than reset the simulation.")
-	_expect_equal(player.to_dictionary(), before, "The blocked spawn seam must not restore or discard player resources.")
+	_expect_equal(session.get_encounter_state(), Session.ENCOUNTER_RUNNING, "The combat-safe registration seam must activate Wave 2 in the same simulation.")
+	_expect_equal(player.to_dictionary(), before, "Persistent Wave 2 registration must not restore or discard player resources.")
 
 
 func _test_wave_one_frame_partition_snapshot_convergence() -> void:

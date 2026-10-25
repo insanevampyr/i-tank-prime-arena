@@ -55,6 +55,22 @@ func cancel_action_events(action_instance_id: String) -> PackedStringArray:
 	return canceled
 
 
+func cancel_actor_events(actor_ids: PackedStringArray) -> PackedStringArray:
+	var actor_set := {}
+	for actor_id: String in actor_ids:
+		actor_set[actor_id] = true
+	var canceled := PackedStringArray()
+	var retained: Array = []
+	for event: CombatEvent in _events:
+		if actor_set.has(String(event.source_actor_id)) or actor_set.has(String(event.target_actor_id)):
+			canceled.append(event.event_id)
+			_event_ids.erase(event.event_id)
+		else:
+			retained.append(event)
+	_events = retained
+	return canceled
+
+
 func drain() -> Array:
 	var ordered_events: Array = _events.duplicate()
 	_events.clear()
