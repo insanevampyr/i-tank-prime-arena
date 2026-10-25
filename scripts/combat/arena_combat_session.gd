@@ -11,6 +11,8 @@ const CommonSpadoodleFixture = preload("res://scripts/creatures/common_spadoodle
 const CommonSkellyFixture = preload("res://scripts/creatures/common_skelly_fixture.gd")
 const HadesCombatFollowerFixture = preload("res://scripts/creatures/hades_combat_follower_fixture.gd")
 const MiniGargoyleSwarmerFixture = preload("res://scripts/creatures/mini_gargoyle_swarmer_fixture.gd")
+const RareHumanWarriorFixture = preload("res://scripts/creatures/rare_human_warrior_fixture.gd")
+const RareHumanWarriorBossAI = preload("res://scripts/creatures/rare_human_warrior_boss_ai.gd")
 const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
 
 const DEFAULT_SEED := 1
@@ -90,6 +92,9 @@ var _skelly_actor_ids := PackedStringArray()
 var _hades_follower_actor_ids := PackedStringArray()
 var _is_wave_four_gargoyle_encounter: bool = false
 var _gargoyle_actor_ids := PackedStringArray()
+var _is_wave_five_boss_encounter: bool = false
+var _rare_human_warrior_actor_ids := PackedStringArray()
+var _rare_human_warrior_ai: RareHumanWarriorBossAI
 var _goblin_paths: Dictionary = {}
 var _goblin_path_targets: Dictionary = {}
 var _goblin_path_target_actor_ids: Dictionary = {}
@@ -192,6 +197,7 @@ func initialize_wave_one_goblins(
 	_is_wave_two_spadoodle_encounter = false
 	_is_wave_three_skelly_hades_encounter = false
 	_is_wave_four_gargoyle_encounter = false
+	_is_wave_five_boss_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_goblin_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -307,6 +313,7 @@ func initialize_wave_two_spadoodles(
 	_is_wave_two_spadoodle_encounter = true
 	_is_wave_three_skelly_hades_encounter = false
 	_is_wave_four_gargoyle_encounter = false
+	_is_wave_five_boss_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_spadoodle_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -402,6 +409,7 @@ func initialize_wave_three_skelly_hades(
 	_is_wave_two_spadoodle_encounter = false
 	_is_wave_three_skelly_hades_encounter = true
 	_is_wave_four_gargoyle_encounter = false
+	_is_wave_five_boss_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_enemy_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -455,6 +463,8 @@ func initialize_wave_three_skelly_hades(
 
 	_hades_follower_actor_ids = PackedStringArray()
 	_gargoyle_actor_ids = PackedStringArray()
+	_rare_human_warrior_actor_ids = PackedStringArray()
+	_rare_human_warrior_ai = null
 	var hades_id := _hades_follower_actor_id()
 	var hades_actor := HadesCombatFollowerFixture.make_actor(hades_id, "Uncommon Hades Combat Follower")
 	var hades_attack := HadesCombatFollowerFixture.make_attack_definition(HitLocations.get_same_size_attack_profile())
@@ -534,6 +544,7 @@ func initialize_wave_four_gargoyles(
 	_is_wave_two_spadoodle_encounter = false
 	_is_wave_three_skelly_hades_encounter = false
 	_is_wave_four_gargoyle_encounter = true
+	_is_wave_five_boss_encounter = false
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = first_gargoyle_position_microfeet
 	_arena_wave_state_machine = ArenaWaveStateMachine.new()
@@ -609,6 +620,107 @@ func initialize_wave_four_gargoyles(
 		"resolved_gargoyle_count": gargoyle_count,
 		"environment": {"time_of_day": "night", "maximum_altitude_microfeet": _battlefield.maximum_altitude_microfeet, "wall_height_microfeet": 8_000_000},
 		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES),
+	}
+
+
+func initialize_wave_five_rare_human_warrior(
+	player_position_microfeet: Vector2i,
+	boss_position_microfeet: Vector2i,
+	start_active: bool = true
+) -> Dictionary:
+	if _initialized:
+		return _failure("encounter_already_initialized")
+	_is_wave_one_goblin_encounter = false
+	_is_wave_two_spadoodle_encounter = false
+	_is_wave_three_skelly_hades_encounter = false
+	_is_wave_four_gargoyle_encounter = false
+	_is_wave_five_boss_encounter = true
+	_initial_player_position_microfeet = player_position_microfeet
+	_initial_opponent_position_microfeet = boss_position_microfeet
+	_arena_wave_state_machine = ArenaWaveStateMachine.new()
+	var wave_initialization := _arena_wave_state_machine.initialize_at_wave(&"wave_5", _roll_wave_quantity)
+	if not wave_initialization.get("success", false):
+		return _failure(String(wave_initialization.get("reason", "wave_initialization_failed")))
+	if _arena_wave_state_machine.get_resolved_enemy_count() != 1:
+		return _failure("wave_five_roster_invalid")
+	var occupancy := {
+		String(Fixture.PLAYER_ID): player_position_microfeet,
+		String(RareHumanWarriorFixture.ACTOR_ID): boss_position_microfeet,
+	}
+	if not _battlefield.is_position_legal(Fixture.PLAYER_ID, player_position_microfeet, occupancy).get("legal", false):
+		return _failure("player_spawn_position_illegal")
+	if not _battlefield.is_position_legal(RareHumanWarriorFixture.ACTOR_ID, boss_position_microfeet, occupancy).get("legal", false):
+		return _failure("rare_human_warrior_spawn_position_illegal")
+
+	var player_registration := _register_selected_player()
+	if not player_registration.get("success", false):
+		return player_registration
+	var boss_result := RareHumanWarriorFixture.instantiate_foundation_actor()
+	if not boss_result.get("success", false):
+		return _failure(String(boss_result.get("reason", "rare_human_warrior_fixture_invalid")))
+	var boss_actor: CombatActorDefinition = boss_result.get("actor")
+	var boss_attack := RareHumanWarriorFixture.make_melee_attack_definition(HitLocations.get_same_size_attack_profile())
+	var boss_protection := RareHumanWarriorFixture.make_damage_protection_profile(RareHumanWarriorFixture.ACTOR_ID)
+	if boss_actor == null or boss_attack == null or boss_protection == null:
+		return _failure("rare_human_warrior_combat_definition_incomplete")
+	var boss_registration := _register_wave_combatant(
+		boss_actor,
+		RareHumanWarriorFixture.make_defense_profile(RareHumanWarriorFixture.ACTOR_ID),
+		boss_protection,
+		boss_attack
+	)
+	if not boss_registration.get("success", false):
+		return boss_registration
+	var hand_configuration := simulation.configure_actor_hand_occupancy(
+		RareHumanWarriorFixture.ACTOR_ID,
+		{"left": String(RareHumanWarriorFixture.WEAPON_REF), "right": String(RareHumanWarriorFixture.WEAPON_REF)}
+	)
+	if not hand_configuration.get("success", false):
+		return _failure(String(hand_configuration.get("reason", "rare_human_warrior_hand_configuration_failed")))
+	_attack_definitions_by_actor[String(RareHumanWarriorFixture.ACTOR_ID)] = boss_attack
+	_rare_human_warrior_actor_ids = PackedStringArray([String(RareHumanWarriorFixture.ACTOR_ID)])
+
+	var player_position_result := simulation.apply_authoritative_position(Fixture.PLAYER_ID, player_position_microfeet, 0)
+	if not player_position_result.get("success", false):
+		return player_position_result
+	var boss_position_result := simulation.apply_authoritative_position(RareHumanWarriorFixture.ACTOR_ID, boss_position_microfeet, 180_000)
+	if not boss_position_result.get("success", false):
+		return boss_position_result
+	var opening_result := simulation.begin_combat()
+	if not opening_result.get("success", false):
+		return opening_result
+	simulation.set_attack_final_line_of_sight_resolver(_resolve_attack_final_line_of_sight)
+	simulation.set_rage_knockback_resolver(_resolve_rage_knockback)
+	simulation.set_special_touch_resolver(_resolve_special_touch)
+	simulation.set_gatherable_material_resolver(_resolve_gatherable_material)
+	simulation.set_world_item_pickup_resolver(_resolve_world_item_pickup)
+	RareHumanWarriorFixture.configure_spear_landing_geometry(simulation, _battlefield)
+	_publish_wave_transition(wave_initialization)
+	set_wave_creature_integration_available(&"rare_human_warrior", true)
+	var activation := activate_current_wave(_rare_human_warrior_actor_ids)
+	if not activation.get("success", false):
+		return activation
+	_selected_target_id = RareHumanWarriorFixture.ACTOR_ID
+	_selected_target_location = &"torso"
+	_next_location_8_is_knee = true
+	_initialized = true
+	_encounter_active = start_active
+	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
+	_opponent_behavior_status = "wave_five_boss_idle" if _opponent_behavior_enabled else "disabled"
+	_rare_human_warrior_ai = RareHumanWarriorBossAI.new(
+		simulation, _battlefield, RareHumanWarriorFixture.ACTOR_ID, Fixture.PLAYER_ID
+	)
+	_goblin_last_movement_us = simulation.clock.get_elapsed_us()
+	_resolved_event_history_generation += 1
+	_last_error = ""
+	if _opponent_behavior_enabled and _encounter_active:
+		_run_opponent_behavior()
+	return {
+		"success": true,
+		"opening_order": opening_result.get("opening_order", []),
+		"rare_human_warrior_actor_ids": Array(_rare_human_warrior_actor_ids),
+		"resolved_rare_human_warrior_count": 1,
+		"encounter_fixture_id": String(Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR),
 	}
 
 
@@ -706,6 +818,9 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_spadoodle_actor_ids = PackedStringArray()
 	_skelly_actor_ids = PackedStringArray()
 	_hades_follower_actor_ids = PackedStringArray()
+	_gargoyle_actor_ids = PackedStringArray()
+	_rare_human_warrior_actor_ids = PackedStringArray()
+	_rare_human_warrior_ai = null
 	_goblin_paths.clear()
 	_goblin_path_targets.clear()
 	_goblin_path_target_actor_ids.clear()
@@ -734,6 +849,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 		return initialize_wave_three_skelly_hades(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	if _is_wave_four_gargoyle_encounter:
 		return initialize_wave_four_gargoyles(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+	if _is_wave_five_boss_encounter:
+		return initialize_wave_five_rare_human_warrior(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 
 
@@ -1079,7 +1196,10 @@ func advance_by(delta_us: int) -> void:
 		simulation.advance_to(step_timestamp_us)
 		if step_timestamp_us == movement_tick_us:
 			if _is_playable_wave_encounter():
-				if _is_wave_four_gargoyle_encounter:
+				if _is_wave_five_boss_encounter:
+					if _rare_human_warrior_ai != null:
+						_rare_human_warrior_ai.advance_movement(step_timestamp_us - _goblin_last_movement_us)
+				elif _is_wave_four_gargoyle_encounter:
 					_advance_gargoyle_flight(step_timestamp_us - _goblin_last_movement_us)
 				else:
 					_advance_goblin_movement(step_timestamp_us - _goblin_last_movement_us)
@@ -1226,6 +1346,8 @@ func get_encounter_display_name() -> String:
 		return "WAVE 3: %d COMMON SKELLY + 1 HADES FOLLOWER" % _skelly_actor_ids.size()
 	if _is_wave_four_gargoyle_encounter:
 		return "WAVE 4 NIGHT: %d MINI GARGOYLE SWARMERS" % _gargoyle_actor_ids.size()
+	if _is_wave_five_boss_encounter:
+		return "WAVE 5: RARE HUMAN WARRIOR"
 	return "MEDIUM vs SYNTHETIC SMALL" if _encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "MEDIUM vs MEDIUM"
 
 
@@ -1441,6 +1563,9 @@ func get_state_snapshot() -> Dictionary:
 	snapshot["gargoyle_tactical_states"] = _sorted_dictionary_copy(_gargoyle_tactical_states)
 	snapshot["gargoyle_lane_offsets"] = _sorted_dictionary_copy(_gargoyle_lane_offsets)
 	snapshot["gargoyle_failed_approach_counts"] = _sorted_dictionary_copy(_gargoyle_failed_approach_counts)
+	snapshot["rare_human_warrior_ai"] = (
+		{} if _rare_human_warrior_ai == null else _rare_human_warrior_ai.get_diagnostics()
+	)
 	return snapshot
 
 
@@ -1617,6 +1742,15 @@ func _resolve_gatherable_material(actor_id: StringName, material_id: StringName,
 	return bool(fact.get("available", false)) and String(fact.get("surface_id", "")) == surface_id
 
 
+func _resolve_world_item_pickup(actor_id: StringName, item: Dictionary) -> bool:
+	var actor_state := simulation.get_actor_state(actor_id)
+	var item_position: Variant = item.get("position_microfeet")
+	if actor_state == null or not (item_position is Vector2i):
+		return false
+	return actor_state.position_microfeet.distance_to(item_position) <= float(MICROFEET_PER_FOOT) \
+		and _battlefield.has_line_of_sight(actor_state.position_microfeet, item_position)
+
+
 func _resolve_rage_knockback(attacker_id: StringName, target_id: StringName, distance_microfeet: int) -> Dictionary:
 	var attacker_state := simulation.get_actor_state(attacker_id)
 	var target_state := simulation.get_actor_state(target_id)
@@ -1648,7 +1782,10 @@ func _run_opponent_behavior() -> void:
 		_opponent_behavior_status = "stopped"
 		return
 	if _is_playable_wave_encounter():
-		_run_goblin_wave_behavior()
+		if _is_wave_five_boss_encounter:
+			_run_rare_human_warrior_behavior()
+		else:
+			_run_goblin_wave_behavior()
 		return
 	var opponent_state := simulation.get_actor_state(Fixture.OPPONENT_ID)
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
@@ -1769,6 +1906,17 @@ func _run_goblin_wave_behavior() -> void:
 	statuses.sort()
 	var wave_prefix := "wave_four " if _is_wave_four_gargoyle_encounter else ("wave_three " if _is_wave_three_skelly_hades_encounter else ("spadoodle_wave " if _is_wave_two_spadoodle_encounter else "goblin_wave "))
 	_opponent_behavior_status = wave_prefix + ", ".join(PackedStringArray(statuses))
+
+
+func _run_rare_human_warrior_behavior() -> void:
+	if _rare_human_warrior_ai == null:
+		_opponent_behavior_status = "wave_five_boss_ai_unavailable"
+		return
+	var result := _rare_human_warrior_ai.evaluate_and_submit()
+	var selected_action := String(result.get("selected_action", "idle"))
+	_opponent_behavior_status = "wave_five_boss_%s" % selected_action
+	if result.get("action_started", false) and ["spear_melee", "throw_spear", "unarmed_attack"].has(selected_action):
+		_try_automatic_force_bolt_against(RareHumanWarriorFixture.ACTOR_ID)
 
 
 func _run_gargoyle_tactical_selection(actor_id: StringName, target_id: StringName) -> Dictionary:
@@ -2472,7 +2620,9 @@ func _make_dodge_environment(attack: CombatAttackInstance) -> CombatDodgeEnviron
 		# half-MR Dodge allowance down to whole feet.
 		@warning_ignore("integer_division")
 		maximum_dodge_feet = defender_mr / 8
-	var attack_definition := _get_attack_definition_for_actor(attack.attacker_id)
+	var attack_definition := simulation.get_attack_definition(attack.attack_definition_id)
+	if attack_definition == null:
+		attack_definition = _get_attack_definition_for_actor(attack.attacker_id)
 	var maximum_attack_range := (
 		VaelisForce.FORCE_BOLT_RANGE_MICROFEET
 		if attack.is_special_attack and attack.special_id == VaelisForce.FORCE_BOLT_ID
@@ -2666,10 +2816,12 @@ func _make_wave_three_positions(first_position: Vector2i, skelly_count: int) -> 
 
 
 func _is_playable_wave_encounter() -> bool:
-	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter or _is_wave_three_skelly_hades_encounter or _is_wave_four_gargoyle_encounter
+	return _is_wave_one_goblin_encounter or _is_wave_two_spadoodle_encounter or _is_wave_three_skelly_hades_encounter or _is_wave_four_gargoyle_encounter or _is_wave_five_boss_encounter
 
 
 func _wave_enemy_actor_ids() -> PackedStringArray:
+	if _is_wave_five_boss_encounter:
+		return _rare_human_warrior_actor_ids
 	if _is_wave_four_gargoyle_encounter:
 		return _gargoyle_actor_ids
 	if _is_wave_three_skelly_hades_encounter:

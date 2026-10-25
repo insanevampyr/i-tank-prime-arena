@@ -78,7 +78,7 @@ func _test_selector_and_seeded_wave_stability() -> void:
 	_expect_true(controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS).get("success", false), "Vaelis must be selectable before START.")
 	controller.press_encounter_control_for_testing()
 	var transcript := controller.get_transcript_text_for_testing()
-	_expect_true(transcript.contains("Fixture: medium_guard_vs_medium_guard"), "Transcript must report the actual selected encounter fixture without the historical Guard-only label.")
+	_expect_true(transcript.contains("Fixture: wave_1_common_goblins"), "Transcript must report the Task 35I normal Wave 1 fixture rather than the historical Guard-duel default.")
 	_expect_true(transcript.contains("Player: Vaelis Thorn (vaelis_thorn)"), "Transcript must identify the selected player character.")
 	_expect_true(transcript.contains("Loadout: vaelis_thorn_short_sword_wand"), "Transcript must identify Vaelis's actual loadout.")
 	_expect_true(transcript.contains("prime_v3_short_sword") and transcript.contains("prime_v3_short_wand"), "Transcript loadout evidence must list both equipped Vaelis weapons.")

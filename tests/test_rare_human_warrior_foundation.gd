@@ -137,7 +137,7 @@ func _test_loadout_inventory_and_unresolved_boundaries() -> void:
 	var validation := catalog.validate_character_loadout(Fixture.CHARACTER_DEFINITION_ID, Fixture.LOADOUT_DEFINITION_ID)
 	_expect_true(validation.get("success", false), "Known boss data must be structurally valid even while source gates remain.")
 	_expect_equal(validation.get("status"), "requires_source_verification", "The boss foundation must fail closed for encounter activation rather than fabricate missing rules.")
-	_expect_true(not Fixture.get_activation_status().get("encounter_ready", true), "Wave 5 activation must remain explicitly disabled.")
+	_expect_true(Fixture.get_activation_status().get("encounter_ready", false), "Task 35I must authorize the completed boss fixture for Wave 5 without changing its source data.")
 
 
 func _test_deterministic_independent_actor_instances() -> void:
@@ -165,7 +165,7 @@ func _test_deterministic_independent_actor_instances() -> void:
 	first_state.resources["mana"] = 0
 	_expect_equal(second_state.current_hpc, 200, "One boss instance's mutable HPC must not leak to another.")
 	_expect_equal(second_state.resources.get("mana"), 24, "One boss instance's mutable resources must not leak to another.")
-	_expect_true(not bool(first_result.get("encounter_ready", true)) and not bool(second_result.get("encounter_ready", true)), "Data actors must not accidentally enable Wave 5.")
+	_expect_true(bool(first_result.get("encounter_ready", false)) and bool(second_result.get("encounter_ready", false)), "Independent boss actors must retain Task 35I Wave 5 authorization.")
 
 
 func _test_authoritative_spear_damage_and_sync() -> void:
@@ -287,7 +287,7 @@ func _test_throw_retrieval_and_unarmed_gates() -> void:
 	_expect_true(miss_and_defense.get("success", false), "Thrown miss, successful defense, range and LOS boundaries must remain deterministic and source-safe.")
 	var unresolved: PackedStringArray = Fixture.get_activation_status().get("unresolved", PackedStringArray())
 	_expect_true(not unresolved.has("automatic_boar_spear_miss_block_hit_landing_position_policy"), "The designer-approved deterministic landing rule must replace the former source gate.")
-	_expect_true(not Fixture.get_activation_status().get("encounter_ready", true), "Equipment completion must not activate Wave 5.")
+	_expect_true(Fixture.get_activation_status().get("encounter_ready", false), "Task 35I must remove only the former encounter-activation gate.")
 
 
 func _run_throw_retrieval_unarmed_transaction(seed_value: int) -> Dictionary:

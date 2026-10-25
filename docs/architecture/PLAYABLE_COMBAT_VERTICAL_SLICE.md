@@ -68,3 +68,11 @@ While READY, cycle the encounter selector to `WAVE 3`, optionally choose an auth
 - Backfire and Dwarvestek/Grentek remain blocked behind their existing verification gates.
 - Defeat is displayed and further targeting/attacks are rejected. No death flow, loot, EXP, progression, respawn, or match result is invented.
 - This fixture is not Phase 1 production-character acceptance. Aren/Garrick and production item imports still require independent source audits.
+
+## Task 35I Wave 5 and Test Mode controls
+
+The default Arena now opens in `NORMAL / WAVE 1`. While READY, the encounter selector cycles through temporary `TEST MODE / WAVE 1` to `WAVE 5`, followed by the Guard and Synthetic Small regression fixtures. Select the player and seed, choose a wave, then press START. RESET reconstructs the chosen temporary run from its verified fixture; after RESET the selector can choose another wave. The same visible controls are used in desktop and Web builds, with no console command or URL parameter.
+
+Wave 5 presents one red-brown `W` Rare Human Warrior with authoritative HPC and facing. His committed Task 35H controller may use spear melee, the verified throw/drop/retrieval path, one-strike unarmed fallback, potions and Combat 1-3 actions according to current authoritative state. All movement, timing, targeting, defenses, damage, effects, inventory and RNG remain in the existing combat engine. FULL LOG retains the detailed tactical and world-item evidence; a dropped-spear battlefield marker is not yet available.
+
+Normal NEXT WAVE still preserves resources and advances the five-wave state machine once, but subsequent creature registration is blocked after combat has begun. The UI reports that boundary and does not silently rebuild or heal the player. Direct Test Mode launch of all five waves is playable; uninterrupted normal Wave 1-to-5 spawning remains deferred until the simulation has a persistence-safe between-wave actor registration contract.

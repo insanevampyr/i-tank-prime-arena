@@ -243,7 +243,7 @@ offset_bottom = 72.0
 mouse_default_cursor_shape = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 13
-text = "DUEL M/M"
+text = "NORMAL\nWAVE 1"
 
 [node name="AttackReadiness" type="Control" parent="HUD/UI"]
 layout_mode = 0

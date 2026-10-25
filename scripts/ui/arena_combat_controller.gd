@@ -88,7 +88,9 @@ var _nac_budget_input: SpinBox
 var _last_attack_readiness: Dictionary = {}
 var _last_run_readiness: Dictionary = {}
 var _web_copy_pending := false
-var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_MEDIUM_GUARDS
+var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+var _developer_test_mode: bool = false
+var _encounter_selector_index: int = 0
 var _player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 var _goblin_visuals: Dictionary = {}
 var _player_facing_marker: Polygon2D
@@ -317,7 +319,25 @@ func press_encounter_control_for_testing() -> void:
 
 
 func select_encounter_fixture_for_testing(encounter_fixture_id: StringName) -> Dictionary:
+	_developer_test_mode = true
+	_encounter_selector_index = _selector_index_for_fixture(encounter_fixture_id, true)
 	return _select_encounter_fixture(encounter_fixture_id)
+
+
+func select_test_wave_for_testing(wave_number: int) -> Dictionary:
+	if wave_number < 1 or wave_number > 5:
+		return {"success": false, "reason": "unsupported_test_wave"}
+	_developer_test_mode = true
+	_encounter_selector_index = wave_number
+	return _select_encounter_fixture(_wave_fixture_for_number(wave_number))
+
+
+func get_test_mode_state_for_testing() -> Dictionary:
+	return {
+		"enabled": _developer_test_mode,
+		"selector_index": _encounter_selector_index,
+		"fixture_id": String(_encounter_fixture_id),
+	}
 
 
 func select_player_character_for_testing(player_character_id: StringName) -> Dictionary:
@@ -746,17 +766,51 @@ func _on_encounter_button_pressed() -> void:
 
 
 func _on_encounter_selector_pressed() -> void:
-	var cycle := [
-		Fixture.ENCOUNTER_MEDIUM_GUARDS,
-		Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD,
-		Fixture.ENCOUNTER_WAVE_ONE_GOBLINS,
-		Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES,
-		Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES,
-		Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES,
-	]
-	var current_index := cycle.find(_encounter_fixture_id)
-	var next_fixture: StringName = cycle[posmod(current_index + 1, cycle.size())]
-	_select_encounter_fixture(next_fixture)
+	var previous_index := _encounter_selector_index
+	var previous_test_mode := _developer_test_mode
+	_encounter_selector_index = posmod(_encounter_selector_index + 1, 8)
+	_developer_test_mode = _encounter_selector_index != 0
+	var fixture := (
+		_wave_fixture_for_number(_encounter_selector_index)
+		if _encounter_selector_index >= 1 and _encounter_selector_index <= 5
+		else (
+			Fixture.ENCOUNTER_MEDIUM_GUARDS
+			if _encounter_selector_index == 6
+			else (Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD if _encounter_selector_index == 7 else Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
+		)
+	)
+	var result := _select_encounter_fixture(fixture)
+	if not result.get("success", false):
+		_encounter_selector_index = previous_index
+		_developer_test_mode = previous_test_mode
+
+
+static func _wave_fixture_for_number(wave_number: int) -> StringName:
+	match wave_number:
+		1:
+			return Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+		2:
+			return Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES
+		3:
+			return Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES
+		4:
+			return Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES
+		5:
+			return Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR
+	return Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+
+
+static func _selector_index_for_fixture(encounter_fixture_id: StringName, test_mode: bool) -> int:
+	if not test_mode and encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS:
+		return 0
+	for wave_number in range(1, 6):
+		if encounter_fixture_id == _wave_fixture_for_number(wave_number):
+			return wave_number
+	if encounter_fixture_id == Fixture.ENCOUNTER_MEDIUM_GUARDS:
+		return 6
+	if encounter_fixture_id == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD:
+		return 7
+	return 0
 
 
 func _on_character_selector_pressed() -> void:
@@ -845,7 +899,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
-	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES].has(encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES, Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR].has(encounter_fixture_id):
 		return {"success": false, "reason": "unsupported_encounter_fixture"}
 	_encounter_fixture_id = encounter_fixture_id
 	_player.reset_for_encounter(_initial_player_position_feet)
@@ -880,6 +934,8 @@ func _prepare_encounter_fixture() -> Dictionary:
 		setup = _session.initialize_wave_three_skelly_hades(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES:
 		setup = _session.initialize_wave_four_gargoyles(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
+	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR:
+		setup = _session.initialize_wave_five_rare_human_warrior(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	else:
 		setup = _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	if not setup.get("success", false):
@@ -896,7 +952,7 @@ func _prepare_encounter_fixture() -> Dictionary:
 				else (
 					"Wave 2 Common Spadoodles ready. The seeded Arena 1d3 count is authoritative."
 					if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES
-					else ("Wave 3 ready: authoritative 1d2 Common Skelly plus one Hades Combat Follower." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("Wave 4 night encounter ready: authoritative 1d4 Mini Gargoyle Swarmers." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else "Verified Prime V3 Guard fixture ready."))
+					else ("Wave 3 ready: authoritative 1d2 Common Skelly plus one Hades Combat Follower." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("Wave 4 night encounter ready: authoritative 1d4 Mini Gargoyle Swarmers." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else ("Wave 5 boss ready: one Rare Human Warrior." if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR else "Verified Prime V3 Guard fixture ready.")))
 				)
 		)
 	)
@@ -1125,7 +1181,7 @@ func _rebuild_encounter_visuals() -> void:
 		if is_instance_valid(visual):
 			(visual as Node).queue_free()
 	_goblin_visuals.clear()
-	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES].has(_encounter_fixture_id):
+	if not [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES, Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR].has(_encounter_fixture_id):
 		_opponent.visible = true
 		return
 	_opponent.visible = false
@@ -1138,11 +1194,12 @@ func _rebuild_encounter_visuals() -> void:
 		var is_skelly := String(actor_id).begins_with("wave_3_common_skelly_")
 		var is_hades_follower := String(actor_id).begins_with("wave_3_hades_combat_follower_")
 		var is_gargoyle := String(actor_id).begins_with("wave_4_mini_gargoyle_swarmer_")
-		visual.name = ("MiniGargoyle_%s" if is_gargoyle else ("HadesFollower_%s" if is_hades_follower else ("CommonSkelly_%s" if is_skelly else ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s")))) % actor_id
+		var is_rare_human_warrior := String(actor_id) == "wave_5_rare_human_warrior_1"
+		visual.name = ("RareHumanWarrior_%s" if is_rare_human_warrior else ("MiniGargoyle_%s" if is_gargoyle else ("HadesFollower_%s" if is_hades_follower else ("CommonSkelly_%s" if is_skelly else ("CommonSpadoodle_%s" if is_spadoodle else "CommonGoblin_%s"))))) % actor_id
 		visual.position = _microfeet_to_pixels(state.position_microfeet)
 		var body := Polygon2D.new()
 		body.polygon = PackedVector2Array([Vector2(-13, -13), Vector2(13, -13), Vector2(13, 13), Vector2(-13, 13)])
-		body.color = Color("#5B687D" if is_gargoyle else ("#552A72" if is_hades_follower else ("#D8D1B8" if is_skelly else ("#9B7A3C" if is_spadoodle else "#32864A"))))
+		body.color = Color("#8B3F32" if is_rare_human_warrior else ("#5B687D" if is_gargoyle else ("#552A72" if is_hades_follower else ("#D8D1B8" if is_skelly else ("#9B7A3C" if is_spadoodle else "#32864A")))))
 		visual.add_child(body)
 		var glyph := Label.new()
 		glyph.name = "Glyph"
@@ -1153,7 +1210,7 @@ func _rebuild_encounter_visuals() -> void:
 		glyph.add_theme_font_size_override("font_size", 18)
 		glyph.add_theme_color_override("font_color", Color("#191919" if is_skelly else "#FFFFFF"))
 		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		glyph.text = "M" if is_gargoyle else ("H" if is_hades_follower else ("K" if is_skelly else ("S" if is_spadoodle else "G")))
+		glyph.text = "W" if is_rare_human_warrior else ("M" if is_gargoyle else ("H" if is_hades_follower else ("K" if is_skelly else ("S" if is_spadoodle else "G"))))
 		visual.add_child(glyph)
 		var facing_marker := Polygon2D.new()
 		facing_marker.name = "FacingMarker"
@@ -1185,7 +1242,10 @@ func _rebuild_encounter_visuals() -> void:
 			altitude_label.text = format_altitude_indicator(state.elevation_microfeet)
 			visual.add_child(altitude_label)
 		visual.scale = Vector2.ONE * (_player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
-		get_parent().add_child(visual)
+		# Keep runtime encounter tokens owned by the controller. This is safe during
+		# the controller's own _ready() even while the Arena root is still adding
+		# its authored children (normal mode now initializes Wave 1 immediately).
+		add_child(visual)
 		_goblin_visuals[actor_id] = visual
 	_update_facing_indicators()
 
@@ -1307,8 +1367,13 @@ func _update_presentation() -> void:
 		_encounter_button.disabled = false
 	if _encounter_selector != null:
 		_encounter_selector.text = (
-			"WAVE 1" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
-				else ("WAVE 2" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES else ("WAVE 3" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES else ("WAVE 4" if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES else ("DUEL M/S*" if _session.get_encounter_fixture_id() == Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD else "DUEL M/M"))))
+			"NORMAL\nWAVE 1"
+			if not _developer_test_mode
+			else (
+				"TEST MODE\nWAVE %d" % _encounter_selector_index
+				if _encounter_selector_index >= 1 and _encounter_selector_index <= 5
+				else ("TEST FIXTURE\nSMALL" if _encounter_selector_index == 7 else "TEST FIXTURE\nGUARD")
+			)
 		)
 		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	if _character_selector != null:
@@ -1425,6 +1490,8 @@ static func compact_actor_name(actor_id: StringName) -> String:
 		return "HADES FOLLOWER"
 	if raw.begins_with("wave_4_mini_gargoyle_swarmer_"):
 		return "GARGOYLE %d" % int(raw.trim_prefix("wave_4_mini_gargoyle_swarmer_"))
+	if raw == "wave_5_rare_human_warrior_1":
+		return "RARE HUMAN WARRIOR"
 	var display := raw.replace("_", " ").to_upper()
 	return display if display.length() <= 20 else display.substr(0, 17) + "..."
 
@@ -1441,6 +1508,8 @@ static func _compact_wave_actor_label(actor_id: StringName) -> String:
 		return "H"
 	if name.begins_with("GARGOYLE "):
 		return name.replace("GARGOYLE ", "M")
+	if name == "RARE HUMAN WARRIOR":
+		return "W"
 	return name
 
 
@@ -1596,7 +1665,7 @@ func _update_actor_label_layout() -> void:
 		return
 	_anchor_actor_health_label(_player, _player_hpc_label)
 	_anchor_actor_health_label(_opponent, _opponent_hpc_label)
-	if [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES].has(_encounter_fixture_id):
+	if [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES, Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES, Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES, Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR].has(_encounter_fixture_id):
 		_layout_goblin_hpc_labels()
 
 

@@ -74,6 +74,8 @@ func _test_hpc_display_retains_definition_hpm() -> void:
 		return
 	tree.root.add_child(scene)
 	var controller: ArenaCombatController = scene.get_node("CombatController")
+	var fixture_result := controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_MEDIUM_GUARDS)
+	_expect_true(fixture_result.get("success", false), "The Task 31D legacy HPC fixture must explicitly select the Guard duel.")
 	var session := controller.get_combat_session_for_testing()
 	var opponent_state := session.get_actor_state(Fixture.OPPONENT_ID)
 	opponent_state.current_hpc = 37

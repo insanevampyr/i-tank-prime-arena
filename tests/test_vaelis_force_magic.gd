@@ -501,6 +501,9 @@ func _controller_fixture(seed_value: int, player_character_id: StringName = Fixt
 	if not controller.set_seed_text_for_testing(str(seed_value)).get("success", false):
 		scene.free()
 		return {}
+	if not controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_MEDIUM_GUARDS).get("success", false):
+		scene.free()
+		return {}
 	if player_character_id != Fixture.PLAYER_CHARACTER_GUARD \
 	and not controller.select_player_character_for_testing(player_character_id).get("success", false):
 		scene.free()

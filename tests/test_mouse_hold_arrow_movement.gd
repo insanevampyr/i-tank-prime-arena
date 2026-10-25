@@ -205,6 +205,9 @@ func _make_ready_scene() -> Node:
 		scene.free()
 		return null
 	tree.root.add_child(scene)
+	var controller: ArenaCombatController = scene.get_node("CombatController")
+	var fixture_result := controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_MEDIUM_GUARDS)
+	_expect_true(fixture_result.get("success", false), "The Task 31N legacy input fixture must explicitly select the Guard duel.")
 	return scene
 
 

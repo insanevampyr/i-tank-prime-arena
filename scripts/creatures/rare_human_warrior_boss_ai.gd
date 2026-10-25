@@ -186,7 +186,7 @@ func advance_movement(delta_us: int) -> Dictionary:
 	var movement := _simulation.apply_authoritative_position(
 		_boss_id,
 		resolved_position,
-		ArenaCombatSession.facing_millidegrees_for_displacement(
+		_facing_millidegrees_for_displacement(
 			resolved_position - boss_state.position_microfeet, boss_state.facing_millidegrees
 		),
 		int(resolved["movement_cost_microfeet"])
@@ -546,6 +546,12 @@ func _record_decision(selected_action: String, evidence: Dictionary) -> void:
 func _within_reach(start: Vector2i, finish: Vector2i, reach: int) -> bool:
 	var offset := finish - start
 	return offset.length_squared() <= reach * reach
+
+
+static func _facing_millidegrees_for_displacement(displacement: Vector2i, fallback_facing: int) -> int:
+	if displacement == Vector2i.ZERO:
+		return posmod(fallback_facing, 360_000)
+	return posmod(roundi(rad_to_deg(Vector2(displacement).angle()) * 1000.0), 360_000)
 
 
 func _clear_path() -> void:

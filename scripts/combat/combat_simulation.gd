@@ -2333,6 +2333,10 @@ func get_action_definition(action_definition_id: StringName) -> CombatActionDefi
 	return _action_definitions.get(String(action_definition_id)) as CombatActionDefinition
 
 
+func get_attack_definition(attack_definition_id: StringName) -> CombatAttackDefinition:
+	return _attack_definitions.get(String(attack_definition_id)) as CombatAttackDefinition
+
+
 func get_attack(attack_instance_id: String) -> CombatAttackInstance:
 	return _attacks.get(attack_instance_id) as CombatAttackInstance
 
@@ -2395,7 +2399,10 @@ func record_arena_wave_event(event_type: StringName, payload: Dictionary = {}) -
 
 
 func set_arena_wave_state_snapshot(wave_state: Dictionary) -> void:
-	_arena_wave_state = wave_state.duplicate(true)
+	var next_snapshot := wave_state.duplicate(true)
+	if _arena_wave_state == next_snapshot:
+		return
+	_arena_wave_state = next_snapshot
 	_state_revision += 1
 
 
