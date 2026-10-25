@@ -53,8 +53,9 @@ func _test_source_character_definition() -> void:
 	_expect_equal(character.running_profile.get("running_skill_investment"), 1, "The source-listed single Running investment must remain distinct from automatic three-investment proficiency.")
 	_expect_equal(character.proficiencies.get("throw", {}).get("investments"), 2, "The boss's source-listed Throw investments must be retained.")
 	_expect_equal(character.proficiencies.get("alertness", {}).get("investments"), 3, "The boss's source-listed Alertness investments must be retained.")
-	_expect_equal(character.ability_access.get("printed_levels"), [1, 2, 3], "Combat ability levels 1-3 must be recorded without inventing exact abilities.")
-	_expect_true(character.unresolved_fields.has("ability_access.exact_combat_abilities_and_prerequisites"), "Exact Combat ability access must remain an explicit validation gate.")
+	_expect_equal(character.ability_access.get("printed_levels"), [1, 2, 3], "Combat ability levels 1-3 must remain source-linked.")
+	_expect_true(character.ability_access.get("exact_ability_ids_verified", false), "Task 35G must resolve sequential Combat 1-3 access from the Prime field table.")
+	_expect_true(not character.unresolved_fields.has("ability_access.exact_combat_abilities_and_prerequisites"), "Resolved Combat Ability access must remove the former source gate.")
 	_expect_true(character.unresolved_fields.has("combat_stats.rb"), "The blank source RB field must remain unresolved rather than fabricated.")
 
 
@@ -130,7 +131,8 @@ func _test_loadout_inventory_and_unresolved_boundaries() -> void:
 	var potion: Dictionary = loadout.inventory_records.get("health_potion", {})
 	_expect_equal(potion.get("quantity"), 2, "The source inventory must retain exactly two Health Potions.")
 	_expect_true(potion.get("effect_dice_count") == 1 and potion.get("effect_die_sides") == 10 and potion.get("effect_fixed_bonus") == 2 and potion.get("effect_resource") == "hpc", "Each potion record must preserve the printed 1d10+2 HPC effect.")
-	_expect_equal(potion.get("gameplay_supported"), false, "Potion-use gameplay must remain unavailable in this data-only task.")
+	_expect_equal(potion.get("gameplay_supported"), true, "Task 35G must enable source-verified potion gameplay.")
+	_expect_true(potion.get("use_acts") == 1 and potion.get("consumption_point") == "successful_action_completion", "Potion data must expose the one-Act completion boundary.")
 	_expect_true(not loadout.unresolved_fields.has("equipment.scale_mail_equipped_locations"), "The owner-approved complete Scale-mail ruling must remove the old location gate.")
 	var validation := catalog.validate_character_loadout(Fixture.CHARACTER_DEFINITION_ID, Fixture.LOADOUT_DEFINITION_ID)
 	_expect_true(validation.get("success", false), "Known boss data must be structurally valid even while source gates remain.")

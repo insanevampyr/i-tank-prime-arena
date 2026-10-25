@@ -6,6 +6,7 @@ var current_hpc: Variant = null
 var resources: Dictionary = {}
 var ability_daily_maxima: Dictionary = {}
 var ability_daily_remaining: Dictionary = {}
+var inventory_quantities: Dictionary = {}
 var timed_stat_effects: Dictionary = {}
 var pending_called_shot: Dictionary = {}
 var hand_occupancy: Dictionary = {"left": "", "right": ""}
@@ -48,6 +49,9 @@ func _init(definition: CombatActorDefinition) -> void:
 		if maximum != null:
 			ability_daily_maxima[String(ability_id)] = int(maximum)
 			ability_daily_remaining[String(ability_id)] = int(maximum)
+	for inventory_id: Variant in definition.inventory_records:
+		var record: Dictionary = definition.inventory_records[inventory_id]
+		inventory_quantities[String(inventory_id)] = int(record.get("quantity", 0))
 	equipment_refs = definition.equipment_refs.duplicate()
 	var mr_value: Variant = definition.get_combat_stat("mr")
 	if mr_value != null:
@@ -61,6 +65,7 @@ func to_dictionary() -> Dictionary:
 		"resources": resources.duplicate(true),
 		"ability_daily_maxima": ability_daily_maxima.duplicate(true),
 		"ability_daily_remaining": ability_daily_remaining.duplicate(true),
+		"inventory_quantities": inventory_quantities.duplicate(true),
 		"timed_stat_effects": timed_stat_effects.duplicate(true),
 		"pending_called_shot": pending_called_shot.duplicate(true),
 		"hand_occupancy": hand_occupancy.duplicate(true),

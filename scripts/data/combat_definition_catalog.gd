@@ -145,7 +145,12 @@ func instantiate_actor(character_id: StringName, loadout_id: StringName, actor_i
 		return validation
 	var character: CombatCharacterDefinitionResource = characters[String(character_id)]
 	var loadout_definition: CombatLoadoutDefinitionResource = loadouts[String(loadout_id)]
-	var actor: Variant = character.instantiate_actor(actor_id, display_name, loadout_definition.equipment_refs())
+	var actor: Variant = character.instantiate_actor(
+		actor_id,
+		display_name,
+		loadout_definition.equipment_refs(),
+		loadout_definition.inventory_records
+	)
 	if actor == null:
 		return _validation_result([_issue("invalid", "character_instantiation_failed")])
 	var actor_equipment_validation := validate_actor_equipment(actor as CombatActorDefinition)

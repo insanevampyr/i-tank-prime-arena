@@ -60,7 +60,12 @@ func validate_definition() -> Array[Dictionary]:
 	return issues
 
 
-func instantiate_actor(actor_id: StringName, instance_display_name: String, equipment_refs: PackedStringArray) -> Variant:
+func instantiate_actor(
+	actor_id: StringName,
+	instance_display_name: String,
+	equipment_refs: PackedStringArray,
+	inventory_records: Dictionary = {}
+) -> Variant:
 	for issue: Dictionary in validate_definition():
 		if issue["status"] == "invalid":
 			return null
@@ -76,7 +81,8 @@ func instantiate_actor(actor_id: StringName, instance_display_name: String, equi
 		field_sources,
 		unresolved_fields,
 		size_category,
-		ability_allowances
+		ability_allowances,
+		inventory_records
 	)
 
 

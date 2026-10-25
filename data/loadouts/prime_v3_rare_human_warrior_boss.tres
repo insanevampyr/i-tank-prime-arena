@@ -13,11 +13,11 @@ armor_refs = PackedStringArray("prime_v3_scale_mail_torso", "prime_v3_scale_mail
 inventory_records = {
 "backpack": {"quantity": 1, "source_backed": true},
 "good_ration": {"quantity": 2, "source_backed": true},
-"health_potion": {"effect_dice_count": 1, "effect_die_sides": 10, "effect_fixed_bonus": 2, "effect_resource": "hpc", "gameplay_supported": false, "quantity": 2, "source_backed": true},
+"health_potion": {"effect_dice_count": 1, "effect_die_sides": 10, "effect_fixed_bonus": 2, "effect_resource": "hpc", "gameplay_supported": true, "quantity": 2, "source_backed": true, "use_acts": 1, "consumption_point": "successful_action_completion", "requires_free_hand": true},
 "lantern_and_oils": {"quantity": 2, "source_backed": true},
 "rope": {"quantity": 1, "source_backed": true},
 "scale_mail": {"equipped": true, "equipped_location_refs": ["prime_v3_scale_mail_torso", "prime_v3_scale_mail_head", "prime_v3_scale_mail_arms", "prime_v3_scale_mail_legs", "prime_v3_scale_mail_elbows", "prime_v3_scale_mail_knees", "prime_v3_scale_mail_hands"], "quantity": 1, "source_backed": true},
 "water": {"quantity": 2, "source_backed": true}
 }
-unresolved_fields = PackedStringArray("inventory.health_potion_use_action_and_consumption_timing")
+unresolved_fields = PackedStringArray()
 source_refs = PackedStringArray("assets/Rare Human Warrior (Boss).doc, official revised equipment and inventory tables", "PRIME-V3 pp. 127-128 and 135, BOR SPEAR and Hard Studded/Scale charts", "Task 35D owner ruling: complete seven-location Scale-mail loadout from head through feet")

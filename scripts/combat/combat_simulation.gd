@@ -983,6 +983,47 @@ func start_verified_special_action(
 	return result
 
 
+func start_verified_consumable_healing_action(
+	actor_id: StringName,
+	definition: CombatActionDefinition,
+	request_id: String
+) -> Dictionary:
+	if definition == null:
+		return _failure("invalid_action_definition")
+	var consumable: Variant = definition.extension_metadata.get("verified_consumable")
+	if typeof(consumable) != TYPE_DICTIONARY:
+		return _failure("verified_consumable_unresolved")
+	var consumable_definition: Dictionary = consumable
+	if String(consumable_definition.get("kind", "")) != "healing" \
+	or String(consumable_definition.get("inventory_id", "")).is_empty() \
+	or int(consumable_definition.get("dice_count", 0)) <= 0 \
+	or int(consumable_definition.get("die_sides", 0)) <= 0:
+		return _failure("verified_consumable_invalid")
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
+		return _failure("actor_not_eligible")
+	var inventory_id := String(consumable_definition["inventory_id"])
+	if int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
+		return _failure("consumable_unavailable")
+	if bool(consumable_definition.get("requires_free_hand", false)):
+		if not actor_state.hand_occupancy_authoritative:
+			return _failure("consumable_hand_occupancy_unresolved")
+		if not _actor_has_free_hand(actor_state):
+			return _failure("consumable_free_hand_required")
+	var result := start_action(actor_id, definition, request_id)
+	if not result.get("success", false):
+		return result
+	var action := get_action(String(result["action_instance_id"]))
+	action.execution_context = {
+		"inventory_id": inventory_id,
+		"requires_free_hand": bool(consumable_definition.get("requires_free_hand", false)),
+	}
+	action.revision += 1
+	return result
+
+
 func start_nac_projectile_special(
 	actor_id: StringName,
 	target_id: StringName,
@@ -2482,7 +2523,7 @@ func get_state_snapshot() -> Dictionary:
 		})
 
 	return {
-		"schema_version": 11,
+		"schema_version": 12,
 		"timestamp_us": clock.get_elapsed_us(),
 		"round_index": clock.get_round_index(),
 		"state_revision": _state_revision,
@@ -2690,6 +2731,13 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		completion_prerequisites_satisfied = _apply_equipped_hand_item(actor_state, action, completed.event_id)
 	if definition.extension_metadata.has("retrieve_world_item"):
 		completion_prerequisites_satisfied = _apply_retrieved_world_item(actor_state, action, completed.event_id)
+	if definition.extension_metadata.has("verified_consumable"):
+		completion_prerequisites_satisfied = _apply_verified_consumable_healing(
+			actor_state,
+			action,
+			definition.extension_metadata["verified_consumable"],
+			completed.event_id
+		)
 	var required_material := String(special.get("requires_material", ""))
 	if completion_prerequisites_satisfied and not required_material.is_empty():
 		completion_prerequisites_satisfied = _consume_held_material(actor_state, action, required_material, completed.event_id)
@@ -3126,6 +3174,74 @@ func _apply_verified_healing(action: CombatActionInstance, special: Dictionary, 
 			"hpc_max": hpc_max,
 		}, parent_event_id
 	)
+
+
+func _apply_verified_consumable_healing(
+	actor_state: CombatActorState,
+	action: CombatActionInstance,
+	consumable: Dictionary,
+	parent_event_id: String
+) -> bool:
+	var inventory_id := String(consumable.get("inventory_id", ""))
+	var failure_reason := ""
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
+		failure_reason = "actor_no_longer_eligible"
+	elif int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
+		failure_reason = "consumable_unavailable_at_completion"
+	elif bool(consumable.get("requires_free_hand", false)) and not _actor_has_free_hand(actor_state):
+		failure_reason = "consumable_free_hand_lost"
+	if not failure_reason.is_empty():
+		_record_resolved_event(
+			clock.get_elapsed_us(), &"consumable_completion_failed", action.initiative,
+			action.actor_id, action.actor_id,
+			{
+				"action_instance_id": action.action_instance_id,
+				"inventory_id": inventory_id,
+				"reason": failure_reason,
+				"quantity_after": int(actor_state.inventory_quantities.get(inventory_id, 0)),
+			}, parent_event_id
+		)
+		return false
+	var quantity_before := int(actor_state.inventory_quantities[inventory_id])
+	actor_state.inventory_quantities[inventory_id] = quantity_before - 1
+	var rolls: Array[int] = []
+	var draw_indices: Array[int] = []
+	var rolled_total := 0
+	for _index in range(int(consumable.get("dice_count", 0))):
+		var value := roll_int(1, int(consumable.get("die_sides", 0)))
+		rolls.append(value)
+		draw_indices.append(random.get_draw_count())
+		rolled_total += value
+	var amount := rolled_total + int(consumable.get("flat_bonus", 0))
+	var actor_definition := get_actor_definition(action.actor_id)
+	var hpc_before := int(actor_state.current_hpc)
+	var hpc_max := int(actor_definition.get_combat_stat("hpm"))
+	actor_state.current_hpc = mini(hpc_before + amount, hpc_max)
+	actor_state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(
+		clock.get_elapsed_us(), &"consumable_healing_resolved", action.initiative,
+		action.actor_id, action.actor_id,
+		{
+			"action_instance_id": action.action_instance_id,
+			"inventory_id": inventory_id,
+			"quantity_before": quantity_before,
+			"quantity_after": int(actor_state.inventory_quantities[inventory_id]),
+			"rolls": rolls,
+			"rng_draw_indices": draw_indices,
+			"flat_bonus": int(consumable.get("flat_bonus", 0)),
+			"rolled_healing": amount,
+			"hpc_before": hpc_before,
+			"hpc_after": int(actor_state.current_hpc),
+			"hpc_max": hpc_max,
+		}, parent_event_id
+	)
+	return true
+
+
+func _actor_has_free_hand(actor_state: CombatActorState) -> bool:
+	return String(actor_state.hand_occupancy.get("left", "")).is_empty() \
+		or String(actor_state.hand_occupancy.get("right", "")).is_empty()
 
 
 func _apply_timed_stat_effect(

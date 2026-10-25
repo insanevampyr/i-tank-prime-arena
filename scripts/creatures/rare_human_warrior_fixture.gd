@@ -9,7 +9,17 @@ const ATTACK_DEFINITION_ID := &"prime_v3_rare_human_warrior_boar_spear_melee"
 const THROWN_ATTACK_DEFINITION_ID := &"prime_v3_rare_human_warrior_boar_spear_thrown"
 const UNARMED_ATTACK_DEFINITION_ID := &"prime_v3_rare_human_warrior_unarmed_strike"
 const UNARMED_WEAPON_REF := &"prime_v3_human_unarmed_strike"
+const HEALTH_POTION_ACTION_ID := &"prime_v3_rare_human_warrior_drink_health_potion"
+const HEALTH_POTION_INVENTORY_ID := &"health_potion"
+const CALLED_SHOT_ACTION_ID := &"prime_v3_rare_human_warrior_called_shot"
+const REJUVENATING_MIST_ACTION_ID := &"prime_v3_rare_human_warrior_rejuvenating_mist"
+const RAGE_ACTION_ID := &"prime_v3_rare_human_warrior_rage"
+const DEFENSIVE_BUFF_ACTION_ID := &"prime_v3_rare_human_warrior_defensive_buff"
+const RAGE_EFFECT_ID := &"rare_human_warrior_combat_rage"
+const DEFENSIVE_BUFF_EFFECT_ID := &"rare_human_warrior_combat_defensive_buff"
 const THROW_RANGE_MICROFEET := 18_000_000
+const COMBAT_EFFECT_DURATION_US := 120_000_000
+const ABILITY_FALLBACK_AP_COST := 1
 const SCALE_ARMOR_REFS := [
 	"prime_v3_scale_mail_torso",
 	"prime_v3_scale_mail_head",
@@ -33,8 +43,88 @@ static func instantiate_foundation_actor(
 		display_name
 	)
 	result["encounter_ready"] = false
-	result["activation_gate"] = "wave_5_boss_rules_unresolved"
+	result["activation_gate"] = "wave_5_boss_ai_unimplemented"
 	return result
+
+
+static func make_health_potion_action_definition() -> CombatActionDefinition:
+	return CombatActionDefinition.new(
+		HEALTH_POTION_ACTION_ID,
+		1,
+		true,
+		true,
+		{},
+		{
+			"verified_consumable": {
+				"kind": "healing",
+				"inventory_id": String(HEALTH_POTION_INVENTORY_ID),
+				"dice_count": 1,
+				"die_sides": 10,
+				"flat_bonus": 2,
+				"requires_free_hand": true,
+			},
+		},
+		PackedStringArray([
+			"Official boss sheet: exactly two Health Potions, each +1d10+2 HPC",
+			"PRIME-V3 p. 20: drinking a potion is one ordinary Act",
+			"PRIME-V3 p. 120: Health Potion restores 1d10+2 HPC",
+		])
+	)
+
+
+static func make_called_shot_action_definition() -> CombatActionDefinition:
+	return CombatActionDefinition.new(
+		CALLED_SHOT_ACTION_ID, 1, true, true, {},
+		{
+			"ability_use": {"ability_id": String(CALLED_SHOT_ACTION_ID), "fallback_ap_cost": ABILITY_FALLBACK_AP_COST},
+			"verified_special": {"kind": "called_shot", "target_mode": "other"},
+		},
+		PackedStringArray(["PRIME-V3 p. 236: Combat 1 Called Shot uses the first Act to select a location; all attacks in the next Act require no ACC roll"])
+	)
+
+
+static func make_rejuvenating_mist_action_definition() -> CombatActionDefinition:
+	return CombatActionDefinition.new(
+		REJUVENATING_MIST_ACTION_ID, 1, true, true, {},
+		{
+			"ability_use": {"ability_id": String(REJUVENATING_MIST_ACTION_ID), "fallback_ap_cost": ABILITY_FALLBACK_AP_COST},
+			"verified_special": {"kind": "healing", "target_mode": "self_or_touch", "dice_count": 2, "die_sides": 6, "flat_bonus": 2},
+		},
+		PackedStringArray(["PRIME-V3 p. 236: Combat 2 Rejuvenating Mist restores 2d6+2 HPC to self or a touched target"])
+	)
+
+
+static func make_rage_action_definition() -> CombatActionDefinition:
+	return CombatActionDefinition.new(
+		RAGE_ACTION_ID, 2, true, true, {},
+		{
+			"ability_use": {"ability_id": String(RAGE_ACTION_ID), "fallback_ap_cost": ABILITY_FALLBACK_AP_COST},
+			"timed_stat_effect": {
+				"effect_id": String(RAGE_EFFECT_ID),
+				"duration_us": COMBAT_EFFECT_DURATION_US,
+				"stat_modifiers": {"sb": 2, "nal": -2, "dt": -1, "dp": -1},
+				"successful_hit_knockback_microfeet": 2_000_000,
+			},
+			"verified_special": {"kind": "timed_stat_effect", "target_mode": "self"},
+		},
+		PackedStringArray(["PRIME-V3 p. 236: Combat 3 Rage takes two Acts; +2 SB, -2 NAL, -1 DT and -1 DP for two minutes"])
+	)
+
+
+static func make_defensive_buff_action_definition() -> CombatActionDefinition:
+	return CombatActionDefinition.new(
+		DEFENSIVE_BUFF_ACTION_ID, 2, true, true, {},
+		{
+			"ability_use": {"ability_id": String(DEFENSIVE_BUFF_ACTION_ID), "fallback_ap_cost": ABILITY_FALLBACK_AP_COST},
+			"verified_special": {"kind": "timed_stat_effect", "target_mode": "self_or_touch", "requires_material": "dirt"},
+			"timed_stat_effect": {
+				"effect_id": String(DEFENSIVE_BUFF_EFFECT_ID),
+				"duration_us": COMBAT_EFFECT_DURATION_US,
+				"stat_modifiers": {"nal": 2},
+			},
+		},
+		PackedStringArray(["PRIME-V3 p. 236: Combat 3 Defensive Buff requires dirt, takes two Acts and grants nonstacking +2 NAL for two minutes"])
+	)
 
 
 static func make_melee_attack_definition(targeting_profile: Dictionary) -> CombatAttackDefinition:
@@ -185,9 +275,8 @@ static func make_damage_protection_profile(actor_id: StringName = ACTOR_ID) -> C
 static func get_activation_status() -> Dictionary:
 	return {
 		"encounter_ready": false,
-		"reason": "wave_5_boss_rules_unresolved",
+		"reason": "wave_5_boss_ai_unimplemented",
 		"unresolved": PackedStringArray([
-			"exact_combat_abilities_and_prerequisites",
-			"health_potion_use_action_and_consumption_timing",
+			"boss_tactical_ai",
 		]),
 	}

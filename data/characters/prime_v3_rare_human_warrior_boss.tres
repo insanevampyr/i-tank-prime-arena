@@ -53,11 +53,18 @@ resource_maxima = {
 "ap": 12,
 "mana": 24
 }
-ability_allowances = {}
+ability_allowances = {
+"prime_v3_rare_human_warrior_called_shot": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_rare_human_warrior_defensive_buff": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_rare_human_warrior_rage": {"base_daily_uses": 2, "repurchase_count": 0},
+"prime_v3_rare_human_warrior_rejuvenating_mist": {"base_daily_uses": 3, "repurchase_count": 0}
+}
 ability_access = {
-"exact_ability_ids_verified": false,
+"activation_mode": "ability",
+"exact_ability_ids_verified": true,
 "field": "combat",
-"printed_levels": [1, 2, 3]
+"printed_levels": [1, 2, 3],
+"verified_ability_ids": ["prime_v3_rare_human_warrior_called_shot", "prime_v3_rare_human_warrior_rejuvenating_mist", "prime_v3_rare_human_warrior_rage", "prime_v3_rare_human_warrior_defensive_buff"]
 }
 proficiencies = {
 "alertness": {"check_formula": "WIT -4", "investments": 3},
@@ -86,7 +93,7 @@ running_profile = {
 }
 source_refs = PackedStringArray("assets/Rare Human Warrior (Boss).doc, official revised two-page owner source", "PRIME-V3 pp. 95-98, Medium Human size", "Arena Combat Specification v1.24 and Roadmap v1.25 controlling Task 35C boundary")
 field_sources = {
-"ability_access": "Official boss sheet: Home Spell Field / Abilities Combat; owner states levels 1-3 subject to exact-access validation",
+"ability_access": "Official boss sheet: Combat 1-3; PRIME-V3 pp. 229-230 and 236: sequential Ability-field access supplies Called Shot, Rejuvenating Mist, Rage and Defensive Buff with their printed daily allowances",
 "attributes": "Official boss sheet page-two attribute grid",
 "combat_stats": "Official boss sheet page-two derived-stat grid; racial NAL uses the explicit owner correction",
 "equipment": "Official boss sheet: enchanted Boar Spear and Scale mail; Task 35D owner ruling equips the complete seven-location Scale-mail set",
@@ -96,4 +103,4 @@ field_sources = {
 "running_profile": "Official boss sheet: Running END -2, one investment; grid SCM 0 and no listed RB",
 "size_category": "Official boss sheet physical description explicitly identifies a Medium-sized Human"
 }
-unresolved_fields = PackedStringArray("ability_access.exact_combat_abilities_and_prerequisites", "combat_stats.rb")
+unresolved_fields = PackedStringArray("combat_stats.rb")

@@ -18,6 +18,7 @@ var combat_stats: Dictionary
 var equipment_stat_modifiers: Dictionary
 var resource_maxima: Dictionary
 var ability_allowances: Dictionary
+var inventory_records: Dictionary
 var equipment_refs: PackedStringArray
 var defensive_capabilities: Dictionary
 var field_sources: Dictionary
@@ -36,7 +37,8 @@ func _init(
 	p_field_sources: Dictionary = {},
 	p_unresolved_fields: PackedStringArray = PackedStringArray(),
 	p_size_category: StringName = &"",
-	p_ability_allowances: Dictionary = {}
+	p_ability_allowances: Dictionary = {},
+	p_inventory_records: Dictionary = {}
 ) -> void:
 	assert(not String(p_actor_id).is_empty(), "Combat actors require a stable identifier.")
 	assert(not String(p_actor_kind).is_empty(), "Combat actors require a stable kind.")
@@ -50,6 +52,7 @@ func _init(
 	equipment_stat_modifiers = {"mr": 0, "dt": 0, "dp": 0}
 	resource_maxima = p_resource_maxima.duplicate(true)
 	ability_allowances = p_ability_allowances.duplicate(true)
+	inventory_records = p_inventory_records.duplicate(true)
 	equipment_refs = p_equipment_refs.duplicate()
 	defensive_capabilities = p_defensive_capabilities.duplicate(true)
 	field_sources = p_field_sources.duplicate(true)
@@ -96,6 +99,7 @@ func to_dictionary() -> Dictionary:
 		"equipment_stat_modifiers": equipment_stat_modifiers.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),
 		"ability_allowances": ability_allowances.duplicate(true),
+		"inventory_records": inventory_records.duplicate(true),
 		"equipment_refs": Array(equipment_refs),
 		"defensive_capabilities": defensive_capabilities.duplicate(true),
 		"field_sources": field_sources.duplicate(true),
@@ -135,6 +139,10 @@ func _validate_known_values() -> void:
 		assert(int(profile.get("base_daily_uses", 0)) > 0, "Ability base daily uses must be positive.")
 		assert(int(profile.get("repurchase_count", 0)) >= 0, "Ability repurchase counts cannot be negative.")
 		assert(int(profile.get("bonus_daily_uses", 0)) >= 0, "Ability bonus daily uses cannot be negative.")
+	for inventory_id: Variant in inventory_records:
+		var record: Variant = inventory_records[inventory_id]
+		assert(typeof(record) == TYPE_DICTIONARY, "Inventory records must be dictionaries.")
+		assert(int((record as Dictionary).get("quantity", 0)) > 0, "Inventory quantities must be positive.")
 	if combat_stats.has("hpm"):
 		assert(combat_stats["hpm"] >= 0, "HPM cannot be negative.")
 	if combat_stats.has("at"):

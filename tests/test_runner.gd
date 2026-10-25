@@ -46,6 +46,7 @@ const WaveFourSwarmerTacticsTests = preload("res://tests/test_wave_four_swarmer_
 const PlayableCharacterSelectionTests = preload("res://tests/test_playable_character_selection.gd")
 const VaelisForceMagicTests = preload("res://tests/test_vaelis_force_magic.gd")
 const RareHumanWarriorFoundationTests = preload("res://tests/test_rare_human_warrior_foundation.gd")
+const Task35GRareHumanWarriorPotionsAndCombatTests = preload("res://tests/test_task_35g_rare_human_warrior_potions_and_combat.gd")
 
 
 func _initialize() -> void:
@@ -54,6 +55,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name": "Task 35G Rare Human Warrior potions and Combat abilities", "instance": Task35GRareHumanWarriorPotionsAndCombatTests.new()},
 		{"name": "Task 35C-35D Rare Human Warrior equipment and defenses", "instance": RareHumanWarriorFoundationTests.new()},
 		{"name": "Task 34B Vaelis Force magic and NACs", "instance": VaelisForceMagicTests.new()},
 		{"name": "Task 34 playable character selection", "instance": PlayableCharacterSelectionTests.new()},
