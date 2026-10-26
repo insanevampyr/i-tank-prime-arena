@@ -1961,8 +1961,17 @@ func _resolve_world_item_pickup(actor_id: StringName, item: Dictionary) -> bool:
 	var item_position: Variant = item.get("position_microfeet")
 	if actor_state == null or not (item_position is Vector2i):
 		return false
-	return actor_state.position_microfeet.distance_to(item_position) <= float(MICROFEET_PER_FOOT) \
-		and _battlefield.has_line_of_sight(actor_state.position_microfeet, item_position)
+	if actor_state.position_microfeet.distance_to(item_position) > float(MICROFEET_PER_FOOT):
+		return false
+	# A projectile may legally rest on a wall face. Combat LOS treats touching
+	# that face as obstructed, but pickup requires reachable physical contact,
+	# not sight through the obstacle. Resolve motion toward the exact item and
+	# accept only when collision leaves the actor inside the verified reach.
+	var contact := _battlefield.resolve_motion(
+		actor_id, actor_state.position_microfeet, item_position, _actor_occupancy()
+	)
+	return contact.get("success", false) \
+		and (contact.get("position_microfeet", actor_state.position_microfeet) as Vector2i).distance_to(item_position) <= float(MICROFEET_PER_FOOT)
 
 
 func _resolve_rage_knockback(attacker_id: StringName, target_id: StringName, distance_microfeet: int) -> Dictionary:

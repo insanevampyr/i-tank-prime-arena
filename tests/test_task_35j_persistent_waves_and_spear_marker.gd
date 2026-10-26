@@ -199,7 +199,10 @@ func _test_dropped_spear_marker_is_presentation_only() -> void:
 		var expected_pixels := Vector2(float(position[0]), float(position[1])) / 1_000_000.0 * 24.0
 		_expect_equal(controller.get_dropped_spear_marker_position_for_testing(item_id), expected_pixels, "The marker must use the exact authoritative landing coordinate.")
 		_expect_equal(session.simulation.get_state_snapshot(), before, "Rendering the marker must not mutate simulation state or RNG.")
-		session.simulation.apply_authoritative_position(BossFixture.ACTOR_ID, Vector2i(int(position[0]), int(position[1])), 0, 0)
+		# Retrieval requires a collision-legal adjacent position; the spear may
+		# share its landing coordinate with the impact target, but the boss may not.
+		var legal_pickup_position := Vector2i(int(position[0]) + 1_000_000, int(position[1]))
+		session.simulation.apply_authoritative_position(BossFixture.ACTOR_ID, legal_pickup_position, 0, 0)
 		session.advance_by(1)
 		session.advance_by(2_500_000)
 		controller.update_presentation_for_testing()

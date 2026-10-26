@@ -19,6 +19,7 @@ func run() -> Array[String]:
 	_test_test_mode_selector_and_fresh_reset()
 	_test_wave_five_boss_foundation_and_ai()
 	_test_live_boss_healing_and_combat_ability_selection()
+	_test_seed_one_guard_wall_pursuit_and_attack_legality()
 	_test_live_throw_landing_retrieval_and_fallback_boundary()
 	_test_wave_five_victory_and_player_defeat()
 	_test_normal_next_wave_preserves_resources_and_reports_spawn_gate()
@@ -127,6 +128,39 @@ func _test_live_boss_healing_and_combat_ability_selection() -> void:
 	if rage_setup.get("success", false):
 		_expect_true(rage.start_encounter().get("success", false), "The live Rage decision fixture must start.")
 		_expect_true(rage.get_opponent_behavior_status().contains("rage"), "A legal offensive setup outside reach must allow the boss AI to choose verified Rage.")
+
+
+func _test_seed_one_guard_wall_pursuit_and_attack_legality() -> void:
+	var session := Session.new(1, null, Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR, Fixture.PLAYER_CHARACTER_GUARD)
+	session.configure_battlefield(Battlefield.create_task16_test_arena())
+	session.set_opponent_behavior_enabled(false)
+	var setup := session.initialize_wave_five_rare_human_warrior(
+		Vector2i(33_000_000, 12_000_000), Vector2i(14_000_000, 12_000_000), false
+	)
+	_expect_true(setup.get("success", false), "Seed 1 Wave 5 Guard wall-pursuit fixture must initialize.")
+	if not setup.get("success", false):
+		return
+	var boss := session.get_actor_state(BossFixture.ACTOR_ID)
+	for ability_id: String in boss.ability_daily_remaining.keys():
+		boss.ability_daily_remaining[ability_id] = 0
+	boss.resources["ap"] = 0
+	_expect_true(session.start_encounter().get("success", false), "Seed 1 wall-pursuit fixture must enter active combat.")
+	session.set_opponent_behavior_enabled(true)
+	var declarations_before_movement := 0
+	for event: CombatEvent in session.get_resolved_events():
+		if event.event_type == &"physical_attack_declared" and event.source_actor_id == BossFixture.ACTOR_ID:
+			declarations_before_movement += 1
+	_expect_equal(declarations_before_movement, 0, "The boss must not declare a spear attack through the central wall before navigating around it.")
+	session.advance_by(30_000_000)
+	var accuracy_events := 0
+	for event: CombatEvent in session.get_resolved_events():
+		if event.event_type == &"actor_position_changed" and event.source_actor_id == BossFixture.ACTOR_ID:
+			var position: Array = event.payload.get("position_microfeet", [])
+			if position.size() == 2:
+				_expect_true(not (int(position[0]) > 28_500_000 and int(position[0]) < 31_500_000 and int(position[1]) > 7_500_000 and int(position[1]) < 20_500_000), "Seed 1 pursuit must never move the boss through the central wall.")
+		elif event.event_type == &"physical_attack_accuracy_resolved" and event.source_actor_id == BossFixture.ACTOR_ID:
+			accuracy_events += 1
+	_expect_true(accuracy_events > 0, "Seed 1 boss pursuit must reach a legal final-effect position and resolve authoritative ACC.")
 
 
 func _test_live_throw_landing_retrieval_and_fallback_boundary() -> void:

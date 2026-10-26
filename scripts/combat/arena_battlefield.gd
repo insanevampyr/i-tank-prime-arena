@@ -479,10 +479,36 @@ func find_path_to_attack_position(
 	attack_range_microfeet: int,
 	occupancy: Dictionary
 ) -> Dictionary:
-	if _within_reach_and_visible(start_microfeet, target_microfeet, attack_range_microfeet):
+	return _find_path_to_position(
+		mover_id, start_microfeet, target_microfeet, attack_range_microfeet, occupancy, true
+	)
+
+
+func find_path_to_reach_position(
+	mover_id: StringName,
+	start_microfeet: Vector2i,
+	target_microfeet: Vector2i,
+	reach_microfeet: int,
+	occupancy: Dictionary
+) -> Dictionary:
+	return _find_path_to_position(
+		mover_id, start_microfeet, target_microfeet, reach_microfeet, occupancy, false
+	)
+
+
+func _find_path_to_position(
+	mover_id: StringName,
+	start_microfeet: Vector2i,
+	target_microfeet: Vector2i,
+	reach_microfeet: int,
+	occupancy: Dictionary,
+	require_target_visibility: bool
+) -> Dictionary:
+	if _within_reach(start_microfeet, target_microfeet, reach_microfeet) \
+	and (not require_target_visibility or has_line_of_sight(start_microfeet, target_microfeet)):
 		return {"success": true, "waypoints": [], "reason": "already_in_range"}
 	var attack_positions := _legal_attack_position_candidates(
-		mover_id, start_microfeet, target_microfeet, attack_range_microfeet, occupancy
+		mover_id, start_microfeet, target_microfeet, reach_microfeet, occupancy, require_target_visibility
 	)
 	if attack_positions.is_empty():
 		return {"success": false, "reason": "no_legal_attack_position", "waypoints": []}
@@ -533,7 +559,8 @@ func _legal_attack_position_candidates(
 	start_microfeet: Vector2i,
 	target_microfeet: Vector2i,
 	attack_range_microfeet: int,
-	occupancy: Dictionary
+	occupancy: Dictionary,
+	require_target_visibility: bool = true
 ) -> Array[Vector2i]:
 	var directions: Array[Vector2i] = [Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN]
 	var candidates: Array[Dictionary] = []
@@ -541,7 +568,9 @@ func _legal_attack_position_candidates(
 		var position := target_microfeet + directions[direction_index] * attack_range_microfeet
 		if not is_position_legal(mover_id, position, occupancy).get("legal", false):
 			continue
-		if not _within_reach_and_visible(position, target_microfeet, attack_range_microfeet):
+		if not _within_reach(position, target_microfeet, attack_range_microfeet):
+			continue
+		if require_target_visibility and not has_line_of_sight(position, target_microfeet):
 			continue
 		var offset := position - start_microfeet
 		candidates.append({
@@ -626,9 +655,13 @@ func _nearest_legal_navigation_node(actor_id: StringName, position_microfeet: Ve
 
 
 func _within_reach_and_visible(position: Vector2i, target: Vector2i, attack_range_microfeet: int) -> bool:
-	var offset := target - position
-	return offset.length_squared() <= attack_range_microfeet * attack_range_microfeet \
+	return _within_reach(position, target, attack_range_microfeet) \
 		and has_line_of_sight(position, target)
+
+
+func _within_reach(position: Vector2i, target: Vector2i, reach_microfeet: int) -> bool:
+	var offset := target - position
+	return offset.length_squared() <= reach_microfeet * reach_microfeet
 
 
 func _furthest_legal_on_segment(

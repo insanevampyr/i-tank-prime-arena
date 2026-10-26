@@ -12,6 +12,9 @@ func run() -> Array[String]:
 	_test_melee_throw_and_retain_decisions()
 	_test_retrieval_unarmed_and_block_boundary()
 	_test_obstacle_pathfinding_and_moving_target()
+	_test_both_central_wall_endpoint_routes()
+	_test_wall_intercepted_spear_recovery()
+	_test_obstructed_throw_and_unreachable_spear_fallback()
 	_test_potion_and_combat_ability_decisions()
 	_test_interruptions_defeat_and_decision_spam()
 	_test_replay_and_two_client_convergence()
@@ -95,8 +98,113 @@ func _test_obstacle_pathfinding_and_moving_target() -> void:
 	var final_position := simulation.get_actor_state(setup["boss_id"]).position_microfeet
 	_expect_true(final_position != starting_position, "The boss must spend legal MR pursuing a target behind the central wall.")
 	_expect_true(not _inside_central_wall(final_position), "Obstacle-aware pursuit must never place the boss inside the solid wall.")
+	var target_position := simulation.get_actor_state(setup["target_id"]).position_microfeet
+	_expect_true(
+		battlefield.is_attack_position_legal(final_position, target_position, 6_000_000),
+		"Obstacle-aware pursuit must finish within legal six-foot spear reach and line of sight."
+	)
 	_expect_true(ai.get_diagnostics().get("path_rebuild_count", 0) > 0, "Pursuit must reuse the existing deterministic battlefield pathfinder.")
 	_expect_true(ai.get_diagnostics().get("path_rebuild_count", 0) < 20, "A moving target must not cause exhaustive route rebuilding every behavior tick.")
+
+
+func _test_both_central_wall_endpoint_routes() -> void:
+	for route: Dictionary in [
+		{"name": "north", "boss": Vector2i(27_000_000, 10_000_000), "target": Vector2i(33_000_000, 10_000_000)},
+		{"name": "south", "boss": Vector2i(27_000_000, 18_000_000), "target": Vector2i(33_000_000, 18_000_000)},
+	]:
+		var battlefield := ArenaBattlefield.create_task16_test_arena()
+		var setup := _make_fixture(35_820 + (0 if route["name"] == "north" else 1), route["target"], true, route["boss"], battlefield)
+		var simulation: CombatSimulation = setup["simulation"]
+		var ai: RareHumanWarriorBossAI = setup["ai"]
+		_exhaust_abilities(simulation, setup["boss_id"])
+		for _tick in range(120):
+			simulation.advance_to(simulation.clock.get_elapsed_us() + 250_000)
+			ai.advance_movement(250_000)
+			var boss_position := simulation.get_actor_state(setup["boss_id"]).position_microfeet
+			if battlefield.is_attack_position_legal(boss_position, route["target"], 6_000_000):
+				break
+		var final_position := simulation.get_actor_state(setup["boss_id"]).position_microfeet
+		_expect_true(battlefield.is_attack_position_legal(final_position, route["target"], 6_000_000), "The boss must navigate around the %s wall endpoint into legal spear reach." % route["name"])
+		_expect_true(not _inside_central_wall(final_position), "The %s route must never cross the wall interior." % route["name"])
+
+
+func _test_wall_intercepted_spear_recovery() -> void:
+	var battlefield := ArenaBattlefield.create_task16_test_arena()
+	var setup := _make_fixture(
+		35_815, Vector2i(27_000_000, 12_000_000), true,
+		Vector2i(14_000_000, 12_000_000), battlefield
+	)
+	var simulation: CombatSimulation = setup["simulation"]
+	var ai: RareHumanWarriorBossAI = setup["ai"]
+	_exhaust_abilities(simulation, setup["boss_id"])
+	var thrown := ai.evaluate_and_submit()
+	_expect_equal(thrown.get("selected_action"), "throw_spear", "The setup must declare an initially unobstructed legal throw.")
+	simulation.apply_authoritative_position(setup["target_id"], Vector2i(33_000_000, 12_000_000), 0, 0)
+	_terminalize_attack(simulation, thrown)
+	var attack := simulation.get_attack(String(thrown.get("attack_instance_id", "")))
+	_expect_true(attack != null and attack.status == CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED, "A target moving behind the wall before effect resolution must fail final legality before ACC.")
+	_expect_true(attack != null and attack.natural_roll == null, "An obstructed final throw must consume no ACC roll.")
+	var landed := _owned_spear_item(simulation, setup["boss_id"])
+	_expect_equal(landed.get("state"), "dropped", "A target moving behind the wall must leave the released spear at an authoritative contact position.")
+	_expect_equal(landed.get("position_microfeet"), Vector2i(29_000_000, 12_000_000), "The wall-intercepted spear must land at the west face of the central wall.")
+	for _tick in range(250):
+		simulation.advance_to(simulation.clock.get_elapsed_us() + 100_000)
+		ai.advance_movement(100_000)
+		ai.evaluate_and_submit()
+		if _owned_spear_item(simulation, setup["boss_id"]).is_empty():
+			break
+	_expect_true(_owned_spear_item(simulation, setup["boss_id"]).is_empty(), "The boss must navigate to and complete legal retrieval of a spear resting against the wall face.")
+	_expect_true(simulation.get_actor_state(setup["boss_id"]).equipment_refs.has(String(Fixture.WEAPON_REF)), "Wall-contact retrieval must restore the unique spear without duplication.")
+
+
+func _test_obstructed_throw_and_unreachable_spear_fallback() -> void:
+	var obstructed := _make_fixture(
+		35_816, Vector2i(33_000_000, 12_000_000), true,
+		Vector2i(14_000_000, 12_000_000), ArenaBattlefield.create_task16_test_arena()
+	)
+	_exhaust_abilities(obstructed["simulation"], obstructed["boss_id"])
+	var blocked_decision: Dictionary = obstructed["ai"].evaluate_and_submit()
+	_expect_equal(blocked_decision.get("selected_action"), "approach_spear_melee", "A wall-obstructed target must not permit spear melee or a thrown declaration through solid geometry.")
+	_expect_true(not blocked_decision.get("action_started", true), "An obstructed throw must not enter the authoritative action queue.")
+
+	var battlefield := _sealed_test_battlefield()
+	var setup := _make_fixture(
+		35_817, Vector2i(39_000_000, 5_000_000), true,
+		Vector2i(22_000_000, 5_000_000), battlefield
+	)
+	var simulation: CombatSimulation = setup["simulation"]
+	var ai: RareHumanWarriorBossAI = setup["ai"]
+	_exhaust_abilities(simulation, setup["boss_id"])
+	var thrown := ai.evaluate_and_submit()
+	_expect_equal(thrown.get("selected_action"), "throw_spear", "The sealed fixture must first establish a legal unobstructed throw on one side of its wall.")
+	_terminalize_attack(simulation, thrown)
+	_expect_true(not _owned_spear_item(simulation, setup["boss_id"]).is_empty(), "The sealed fixture must retain one authoritative dropped spear.")
+	simulation.apply_authoritative_position(setup["boss_id"], Vector2i(18_000_000, 5_000_000), 180_000, 0)
+	simulation.apply_authoritative_position(setup["target_id"], Vector2i(12_000_000, 5_000_000), 0, 0)
+	var boss_state := simulation.get_actor_state(setup["boss_id"])
+	boss_state.current_hpc = 194
+	var initial := ai.evaluate_and_submit()
+	_expect_equal(initial.get("selected_action"), "approach_spear", "The boss may make one deterministic recovery attempt before the unreachable route is known.")
+	var blocked_move := ai.advance_movement(100_000)
+	_expect_true(not blocked_move.get("success", true), "A sealed wall must make the dropped spear route genuinely unreachable.")
+	var fallback := ai.evaluate_and_submit()
+	_expect_equal(fallback.get("selected_action"), "approach_unarmed", "A cached unreachable spear route must switch the boss to source-backed unarmed pursuit.")
+	_expect_true(not ["rejuvenating_mist", "health_potion", "defensive_buff"].has(String(fallback.get("selected_action", ""))), "Minor injury must not replace offensive fallback merely because the spear is unreachable.")
+	var unarmed_result := {}
+	for _tick in range(100):
+		simulation.advance_to(simulation.clock.get_elapsed_us() + 100_000)
+		ai.advance_movement(100_000)
+		unarmed_result = ai.evaluate_and_submit()
+		if unarmed_result.get("selected_action") == "unarmed_attack" and unarmed_result.get("action_started", false):
+			break
+	_expect_equal(unarmed_result.get("selected_action"), "unarmed_attack", "An unreachable spear must not prevent the boss from closing to one-foot fist reach and attacking.")
+	_expect_true(unarmed_result.get("action_started", false), "The verified one-strike Human unarmed definition must enter the ordinary action scheduler.")
+	if unarmed_result.get("action_started", false):
+		_terminalize_attack(simulation, unarmed_result)
+		var unarmed_attack := simulation.get_attack(String(unarmed_result.get("attack_instance_id", "")))
+		_expect_true(unarmed_attack != null and unarmed_attack.natural_roll != null, "The unarmed fallback must independently resolve authoritative ACC.")
+	_expect_equal(ai.get_diagnostics().get("abandoned_spear_world_item_id"), String(_owned_spear_item(simulation, setup["boss_id"]).get("world_item_id", "")), "The unchanged failed route must remain cached instead of triggering endless spear searches.")
+	_expect_true(int(ai.get_diagnostics().get("path_rebuild_count", 0)) < 10, "Unreachable recovery plus unarmed pursuit must remain bounded without exhaustive replanning.")
 
 
 func _test_potion_and_combat_ability_decisions() -> void:
@@ -338,6 +446,20 @@ func _owned_spear_item(simulation: CombatSimulation, boss_id: StringName) -> Dic
 func _inside_central_wall(position: Vector2i) -> bool:
 	return position.x > 28_500_000 and position.x < 31_500_000 \
 		and position.y > 7_500_000 and position.y < 20_500_000
+
+
+func _sealed_test_battlefield() -> ArenaBattlefield:
+	var obstacles: Array[Dictionary] = [{
+		"id": "sealed_wall",
+		"rect_microfeet": Rect2i(20_000_000, 0, 1_000_000, 10_000_000),
+		"height_microfeet": 8_000_000,
+	}]
+	return ArenaBattlefield.new(
+		Rect2i(0, 0, 40_000_000, 10_000_000),
+		obstacles,
+		ArenaBattlefield.DEFAULT_ACTOR_RADIUS_MICROFEET,
+		true
+	)
 
 
 func _event_count(simulation: CombatSimulation, event_type: StringName) -> int:

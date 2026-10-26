@@ -24,6 +24,7 @@ var _failed_path_signature: String = ""
 var _path_rebuild_count: int = 0
 var _failed_path_cache_hits: int = 0
 var _last_decision_signature: String = ""
+var _abandoned_spear_world_item_id: String = ""
 
 
 func _init(
@@ -62,6 +63,8 @@ func evaluate_and_submit() -> Dictionary:
 
 	var dropped_spear := _find_owned_spear_world_item()
 	var spear_held := _is_spear_held(boss_state)
+	if dropped_spear.is_empty():
+		_abandoned_spear_world_item_id = ""
 	var geometry := _geometry_to_target(SPEAR_REACH_MICROFEET if spear_held else UNARMED_REACH_MICROFEET)
 	var hpm := int(_simulation.get_actor_definition(_boss_id).get_combat_stat("hpm"))
 	var missing_hpc := maxi(0, hpm - int(boss_state.current_hpc))
@@ -70,12 +73,15 @@ func evaluate_and_submit() -> Dictionary:
 		var item_position: Variant = dropped_spear.get("position_microfeet")
 		if String(dropped_spear.get("state", "")) == "dropped" and item_position is Vector2i \
 		and _within_reach(boss_state.position_microfeet, item_position, PICKUP_REACH_MICROFEET):
-			return _submit_result(
+			var retrieval := _submit_result(
 				"retrieve_spear",
 				_simulation.start_world_item_retrieval_action(
 					_boss_id, String(dropped_spear.get("world_item_id", "")), _request_id("retrieve_spear")
 				)
 			)
+			if not retrieval.get("success", false):
+				_abandoned_spear_world_item_id = String(dropped_spear.get("world_item_id", ""))
+			return retrieval
 
 		var healing := _try_healing_action(boss_state, missing_hpc, geometry)
 		if not healing.is_empty():
@@ -88,6 +94,8 @@ func evaluate_and_submit() -> Dictionary:
 			return support
 		if geometry.get("success", false):
 			return _submit_unarmed_attack()
+		if _is_current_spear_recovery_abandoned(dropped_spear):
+			return _decision("approach_unarmed", false, {"reason": "spear_recovery_unreachable"})
 		if String(dropped_spear.get("state", "")) == "dropped" and item_position is Vector2i:
 			return _decision("approach_spear", false, {"world_item_id": dropped_spear.get("world_item_id", "")})
 		return _decision("await_spear_landing", false)
@@ -212,6 +220,7 @@ func get_diagnostics() -> Dictionary:
 		"failed_path_cache_hits": _failed_path_cache_hits,
 		"cached_waypoint_count": _path.size(),
 		"last_decision_signature": _last_decision_signature,
+		"abandoned_spear_world_item_id": _abandoned_spear_world_item_id,
 	}
 
 
@@ -220,7 +229,7 @@ func _try_healing_action(boss_state: CombatActorState, missing_hpc: int, geometr
 		return {}
 	var target_attacking_boss := _target_has_attack_in_flight()
 	var opportunity_justified: bool = missing_hpc >= MIN_MIST_VALUE \
-		and (target_attacking_boss or not geometry.get("success", false) or missing_hpc >= 14)
+		and (target_attacking_boss or missing_hpc >= 14)
 	var mist_definition := Fixture.make_rejuvenating_mist_action_definition()
 	if opportunity_justified and _simulation.get_ability_payment_preview(_boss_id, mist_definition).get("success", false):
 		return _submit_result(
@@ -357,6 +366,8 @@ func _movement_goal() -> Dictionary:
 		if _within_reach(boss_state.position_microfeet, target_state.position_microfeet, UNARMED_REACH_MICROFEET) \
 		and _battlefield.has_line_of_sight(boss_state.position_microfeet, target_state.position_microfeet):
 			return {"success": true, "position_microfeet": target_state.position_microfeet, "reach_microfeet": UNARMED_REACH_MICROFEET, "kind": "target"}
+		if _is_current_spear_recovery_abandoned(spear):
+			return {"success": true, "position_microfeet": target_state.position_microfeet, "reach_microfeet": UNARMED_REACH_MICROFEET, "kind": "target"}
 		return {"success": true, "position_microfeet": spear["position_microfeet"], "reach_microfeet": PICKUP_REACH_MICROFEET, "kind": "world_item"}
 	return {
 		"success": true,
@@ -383,7 +394,9 @@ func _ensure_path(goal: Vector2i, reach: int, goal_kind: String) -> Dictionary:
 	if _failed_path_signature == failure_signature:
 		_failed_path_cache_hits += 1
 		return {"success": false, "reason": "unchanged_blocked_path"}
-	var result := _battlefield.find_path_to_attack_position(
+	var result := _battlefield.find_path_to_reach_position(
+		_boss_id, boss_state.position_microfeet, goal, reach, _actor_occupancy()
+	) if goal_kind == "world_item" else _battlefield.find_path_to_attack_position(
 		_boss_id, boss_state.position_microfeet, goal, reach, _actor_occupancy()
 	)
 	_path_rebuild_count += 1
@@ -395,9 +408,19 @@ func _ensure_path(goal: Vector2i, reach: int, goal_kind: String) -> Dictionary:
 		for waypoint: Vector2i in result.get("waypoints", []):
 			_path.append(waypoint)
 		_failed_path_signature = ""
+		if goal_kind == "world_item":
+			_abandoned_spear_world_item_id = ""
 	else:
 		_failed_path_signature = failure_signature
+		if goal_kind == "world_item":
+			var spear := _find_owned_spear_world_item()
+			_abandoned_spear_world_item_id = String(spear.get("world_item_id", ""))
 	return result
+
+
+func _is_current_spear_recovery_abandoned(spear: Dictionary) -> bool:
+	var world_item_id := String(spear.get("world_item_id", ""))
+	return not world_item_id.is_empty() and world_item_id == _abandoned_spear_world_item_id
 
 
 func _actor_occupancy() -> Dictionary:
