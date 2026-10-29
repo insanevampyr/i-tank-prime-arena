@@ -2,7 +2,7 @@
 
 ## Scope
 
-Task 31B introduced the configuration and authoritative lifecycle state. Tasks 31C-33B subsequently integrated independently playable Waves 1-4. Task 35B corrects the shared between-wave boundary without adding Wave 5, progression storage, rewards, or networking. The existing Guard-versus-Guard encounter remains the default playable regression fixture.
+Task 31B introduced the configuration and authoritative lifecycle state. Tasks 31C-33B subsequently integrated independently playable Waves 1-4, and Tasks 35I-35J integrated Wave 5 plus continuous transitions. Task 35B established the shared between-wave boundary. Task 36A adds temporary within-run XP, Random Drops and physical loot without permanent profiles or networking. The Guard-versus-Guard encounter remains an independent regression fixture.
 
 ## Approved roster configuration
 
@@ -44,7 +44,7 @@ Downtime performs no implicit actor mutation:
 - Solo downtime is unlimited. Multiplayer's future-compatible deadline accepts authority-owned elapsed real time; it is not derived from a client clock and does not spend combat time.
 - Advancement is idempotent: once committed, another NEXT WAVE/deadline request cannot advance again.
 
-The deprecated automatic-restoration entry point fails closed. RESET still reconstructs the selected deterministic test fixture from its starting definition; it is not a persistent character operation. Future XP, profile, inventory and save state must remain separate from temporary encounter state and are intentionally not implemented here.
+The deprecated automatic-restoration entry point fails closed. RESET still reconstructs the selected deterministic fixture from its starting definition; it is not a persistent character operation. Task 36A inventory and XP exist only inside the current normal five-wave simulation. Permanent profiles, saves and cross-run progression remain separate future work.
 
 ## Future integration seams
 
@@ -108,7 +108,7 @@ Tasks 35C-35E keep Wave 5 inactive while validating the Rare Human Warrior's sou
 
 No printed rule supplies miss/block/hit landing coordinates. Task 35E-Fix1 adds an explicit owner-approved Arena rule without changing Prime: the existing pending world item now lands from the attack's authoritative resolution position and established trajectory. Hits and physical interceptions stop at contact; misses and successful Dodges continue only to the spear's verified 18-foot maximum; solid obstacles and battlefield edges stop travel first. Coordinates stay in integer micro-feet, landing evidence remains in events/snapshots, and retrieval still requires legal movement, both hands and one completed Act.
 
-Task 35G resolves the boss's source-listed Combat 1-3 Ability field as Called Shot, Rejuvenating Mist, Rage and Defensive Buff using the already-authoritative Combat Special implementation. Their independent daily allowances and shared AP fallback are mutable actor state; Mana and SS are not used for these Ability activations. The boss's two source-listed Health Potions are also independent mutable inventory state. Drinking one is a single interruptible ordinary Act, requires a free hand, consumes one potion on successful completion, then resolves deterministic `1d10+2` healing capped at HPM 200. Interrupted incomplete drinking consumes neither item nor healing RNG. Actor inventory is included in simulation snapshot schema 12, replay evidence and synchronization digests. Wave 5 remains inactive because Task 35G does not implement or authorize boss tactical AI or encounter presentation.
+Task 35G resolves the boss's source-listed Combat 1-3 Ability field as Called Shot, Rejuvenating Mist, Rage and Defensive Buff using the already-authoritative Combat Special implementation. Their independent daily allowances and shared AP fallback are mutable actor state; Mana and SS are not used for these Ability activations. The boss's two source-listed Health Potions are also independent mutable inventory state. Task 36G-Fix1 corrects the original one-Act carried-potion shortcut: retrieval plus drinking now uses the player's shared interruptible two-Act action (five seconds at AT 2), requires legal free-hand occupancy, consumes one potion on successful completion, then resolves deterministic `1d10+2` healing capped at HPM 200. Interrupted incomplete drinking consumes neither item nor healing RNG. Actor inventory is included in simulation snapshot schema 12, replay evidence and synchronization digests. Wave 5 remained inactive at Task 35G, which did not implement or authorize boss tactical AI or encounter presentation.
 
 ## Task 33B: Wave 4 swarm behavior and legal dive attacks
 
@@ -205,3 +205,25 @@ Normal solo play now remains inside one `CombatSimulation` for Wave 1 through Wa
 Dropped Boar Spear state remains authoritative in `world_items`. Task 35J adds a presentation-only outlined spear marker at the serialized authoritative landing coordinate. It is created once while the item is `dropped`, removed on retrieval or RESET, and never participates in collision, pickup, targeting, RNG, snapshots or synchronization.
 
 Task 35K-Fix1 separates combat attack positioning from dropped-item contact positioning. A spear intercepted at a wall face no longer becomes unreachable merely because combat LOS correctly rejects the wall endpoint: deterministic pathfinding selects a collision-legal adjacent pickup position, and the existing one-Act retrieval still revalidates exact one-foot contact. If static topology supplies no recovery route, the cached failure switches the disarmed boss to its already verified one-strike Human unarmed pursuit rather than repeating `approach_spear`. Initial and final spear attack legality continue to require authoritative LOS, so a target moving behind the wall before resolution produces no ACC roll and the released spear lands at the actual obstacle contact. Lack of current attack reach alone no longer triggers minor Rejuvenating Mist use; legal emergency healing and nonstacking Defensive Buff remain available.
+
+## Task 36A: within-run rewards and ground loot
+
+NORMAL Wave 1 initializes one `ArenaRewardLedger` inside the persistent session. Qualifying damage events that cross an active enemy from positive HPC to zero or below resolve that actor's verified reward exactly once. Wave transitions reset only the current-wave XP window; cumulative earned/spent/unspent XP, collected inventory, uncollected ground records, authoritative RNG position and complete event history remain in the same `CombatSimulation` through Wave 5.
+
+Random Drops use the continuing combat RNG and publish each chart roll with its draw index. Creature possessions use separate transfer records. If the Wave 5 Boar Spear already exists as a dropped world item, defeat reuses that record rather than recreating the equipped item. The protected boss EXP/drop entry remains blocked, so Wave 5 currently provides only accepted pre-existing possessions and no fabricated XP or generated treasure.
+
+Safe downtime exposes a small read-only reward summary and one `COLLECT NEAREST LOOT` request. Authority still requires one-foot collision-reachable contact; the UI does not move the player or collect through walls. NEXT WAVE never auto-collects and never removes an uncollected item. Developer TEST MODE records suppression before reward RNG and creates no permanent reward. RESET reconstructs the selected fixture with a fresh temporary ledger and no prior world items.
+
+Reward state is added to the existing schema-12 snapshot without changing its version or removing any field. XP awards, chart outcomes, ground creation/collection and source gates are ordinary ordered `CombatEvent` records, so existing replay publication and simulated-client convergence remain the authority path. See `REWARDS_AND_ADVANCEMENT_FOUNDATION.md` for chart coverage and advancement gates.
+
+## Task 36B: bounded advancement during safe downtime
+
+NORMAL-mode downtime now exposes the authoritative XP ledger as a minimal character-advancement transaction surface. The player selects a catalog entry and explicitly confirms the purchase. The only currently executable entry is source-backed Vaelis SR 1 to 2 for 2,000 EXPC; every incomplete category exposes its exact blocker and spends nothing. Purchases do not advance the wave, consume combat time, roll RNG, restore resources, alter equipment, or discard conditions and effects.
+
+Purchased definition data, cumulative spent XP, available XP, processed request identifiers and immutable history remain in the continuing schema-12 simulation through later waves. TEST MODE rejects spending. RESET reconstructs the selected immutable fixture and fresh temporary ledger, so no advancement survives the run until the separately approved saved-character system exists.
+
+## Task 36C: inventory and equipment through downtime
+
+Collected inventory, equipped references and consumed quantities stay in the same surviving player actor state. During safe NORMAL-mode downtime, exact registered equipment can be changed through one authoritative transaction that rebuilds only verified attack, defense, protection and armor-derived modifiers. It never refills resources, clears conditions or rebuilds the player. NEXT WAVE therefore carries the accepted loadout and quantities forward.
+
+TEST MODE rejects item-management mutations and RESET restores the selected fixture's starting equipment and inventory. Abstract Random Drop categories remain visible with provenance but cannot silently gain statistics. Existing dropped Boar Spear world-item identity and combat retrieval remain separate and unchanged.

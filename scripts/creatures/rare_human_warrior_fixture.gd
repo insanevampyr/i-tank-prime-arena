@@ -48,28 +48,11 @@ static func instantiate_foundation_actor(
 
 
 static func make_health_potion_action_definition() -> CombatActionDefinition:
-	return CombatActionDefinition.new(
-		HEALTH_POTION_ACTION_ID,
-		1,
-		true,
-		true,
-		{},
-		{
-			"verified_consumable": {
-				"kind": "healing",
-				"inventory_id": String(HEALTH_POTION_INVENTORY_ID),
-				"dice_count": 1,
-				"die_sides": 10,
-				"flat_bonus": 2,
-				"requires_free_hand": true,
-			},
-		},
-		PackedStringArray([
-			"Official boss sheet: exactly two Health Potions, each +1d10+2 HPC",
-			"PRIME-V3 p. 20: drinking a potion is one ordinary Act",
-			"PRIME-V3 p. 120: Health Potion restores 1d10+2 HPC",
-		])
+	var definition := PrimeV3InventoryCatalog.make_carried_potion_action_definition(
+		String(HEALTH_POTION_INVENTORY_ID), HEALTH_POTION_ACTION_ID
 	)
+	definition.source_refs.append("Accepted boss inventory record: exactly two Health Potions, each +1d10+2 HPC")
+	return definition
 
 
 static func make_called_shot_action_definition() -> CombatActionDefinition:

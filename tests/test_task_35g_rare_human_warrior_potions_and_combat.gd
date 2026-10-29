@@ -61,7 +61,7 @@ func _test_potion_timing_consumption_healing_and_cap() -> void:
 	var action := simulation.get_action(String(started.get("action_instance_id", "")))
 	if action == null:
 		return
-	_expect_equal(action.final_effect_due_at_us - action.started_at_us, 2_500_000, "One ordinary Act at AT 2 must take exactly 2.5 seconds.")
+	_expect_equal(action.final_effect_due_at_us - action.started_at_us, 5_000_000, "Retrieval plus drinking must cost two Acts, five seconds at AT 2, for the boss too.")
 	_expect_equal(state.inventory_quantities.get(String(Fixture.HEALTH_POTION_INVENTORY_ID)), 2, "The potion must remain available until the drinking Act completes.")
 	simulation.advance_to(action.final_effect_due_at_us)
 	_expect_equal(state.inventory_quantities.get(String(Fixture.HEALTH_POTION_INVENTORY_ID)), 1, "Successful completion must consume exactly one potion.")

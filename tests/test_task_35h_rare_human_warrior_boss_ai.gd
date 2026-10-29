@@ -249,6 +249,7 @@ func _test_potion_and_combat_ability_decisions() -> void:
 	var potion_action: CombatActionInstance = potion_simulation.get_action(String(potion_result.get("action_instance_id", "")))
 	_expect_equal(potion_state.inventory_quantities.get(String(Fixture.HEALTH_POTION_INVENTORY_ID)), 2, "Potion inventory must not change before the drink action completes.")
 	if potion_action != null:
+		_expect_equal(potion_action.final_effect_due_at_us - potion_action.started_at_us, 5_000_000, "AI drinking must include the same two-Act retrieval and drinking cost as a player at AT 2.")
 		potion_simulation.advance_to(potion_action.final_effect_due_at_us)
 	_expect_equal(potion_state.inventory_quantities.get(String(Fixture.HEALTH_POTION_INVENTORY_ID)), 1, "Successful tactical drinking must consume exactly one potion on completion.")
 

@@ -11,6 +11,7 @@ size_category = &"medium"
 race_name = "Elf"
 class_names = PackedStringArray("Fighter", "Force Mage")
 level = 1
+progression_policy = {"exp_type": 8, "classes": ["Fighter", "Mage"], "class_families": {"Force Mage": "Mage"}, "resource_mode": "mana", "initial_wis": 10, "initial_expm": 0, "initial_expc": 0, "source_ref": "Supplied Vaelis classes Fighter/Mage, Mana User, WIS 10 and EXPM/EXPC 0; PRIME-V3 pp. 51, 72, 99-101; supplied HPB 1"}
 attributes = {
 "app": 14, "dex": 9, "end": 6, "int": 5, "luk": 0, "man": 0,
 "spd": 11, "str": 9, "wis": 10, "wit": 3
@@ -18,7 +19,7 @@ attributes = {
 combat_stats = {
 "acc": 9, "at": 1, "dp": 6, "dt": 3, "hpm": 9, "init": 2,
 "mr": 10, "nal": 1, "physical_soak": 3, "rb": 0, "sb": 2,
-"running_skill_investment": 3, "running_scm": 0, "ss": 9
+"running_skill_investment": 3, "running_scm": 0, "sr": 1, "ss": 9, "tb": 0, "hpb": 1
 }
 resource_maxima = {"blood": 10, "mana": 20}
 defensive_capabilities = {
@@ -35,6 +36,7 @@ field_sources = {
 "hpm": "Supplied Vaelis record; Elf base 4 plus recorded level-one HD/HPB result",
 "magic": "PRIME-V3 p. 250 Force Bolt and Force Shield; retained but unavailable in Task 34",
 "running_profile": "PRIME-V3 pp. 67, 69, 105-106; supplied three investments qualify as automatic",
+"sr_tb": "Supplied Vaelis record attributes SR 1 and TB 0; PRIME-V3 p. 102 advancement cost chart",
 "size_category": "Supplied height 5 ft 7 in; PRIME-V3 pp. 95-98 Medium range"
 }
 unresolved_fields = PackedStringArray()

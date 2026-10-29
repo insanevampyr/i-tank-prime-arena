@@ -49,6 +49,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 
 var _last_viewport_size: Vector2 = Vector2.ZERO
 var _last_display_size: Vector2 = Vector2.ZERO
+var _last_toolbar_labels: Array[String] = []
 
 
 func _ready() -> void:
@@ -61,11 +62,11 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	var display_size := Vector2(DisplayServer.window_get_size())
-	if not viewport_size.is_equal_approx(_last_viewport_size) or not display_size.is_equal_approx(_last_display_size):
+	if not viewport_size.is_equal_approx(_last_viewport_size) or not display_size.is_equal_approx(_last_display_size) or _toolbar_labels() != _last_toolbar_labels:
 		_apply_layout(viewport_size, display_size)
 
 
-static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO) -> Dictionary:
+static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO, toolbar_minimums: Dictionary = {}) -> Dictionary:
 	var safe_size := Vector2(maxf(viewport_size.x, 1.0), maxf(viewport_size.y, 1.0))
 	var safe_display_size := safe_size if display_size.is_zero_approx() else Vector2(maxf(display_size.x, 1.0), maxf(display_size.y, 1.0))
 	var canvas_scale := minf(safe_display_size.x / safe_size.x, safe_display_size.y / safe_size.y)
@@ -93,36 +94,42 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	var seed_input_rect := Rect2(seed_label_rect.end.x + seed_gap, seed_y, seed_input_width, seed_height)
 	var seed_apply_button_rect := Rect2(seed_input_rect.end.x + seed_gap, seed_y, seed_button_width, seed_height)
 	var character_selector_rect := Rect2(seed_apply_button_rect.end.x + seed_gap, seed_y, (176.0 if compact else 200.0) / canvas_scale, seed_height)
-	var encounter_button_size := Vector2((104.0 if compact else 120.0) / canvas_scale, (48.0 if compact else 52.0) / canvas_scale)
-	var encounter_button_rect := Rect2(
-		safe_size.x - margin - encounter_button_size.x,
-		title_rect.position.y,
-		encounter_button_size.x,
-		encounter_button_size.y
-	)
 	var toolbar_gap := (12.0 if compact else 16.0) / canvas_scale
-	var debug_button_size := Vector2((108.0 if compact else 124.0) / canvas_scale, encounter_button_size.y)
-	var debug_button_rect := Rect2(
-		encounter_button_rect.position.x - toolbar_gap - debug_button_size.x,
-		encounter_button_rect.position.y,
-		debug_button_size.x,
-		debug_button_size.y
-	)
-	var log_button_size := Vector2((116.0 if compact else 132.0) / canvas_scale, encounter_button_size.y)
-	var log_button_rect := Rect2(
-		debug_button_rect.position.x - toolbar_gap - log_button_size.x,
-		encounter_button_rect.position.y,
-		log_button_size.x,
-		log_button_size.y
-	)
-	var selector_button_size := Vector2((104.0 if compact else 132.0) / canvas_scale, encounter_button_size.y)
-	var selector_button_rect := Rect2(
-		log_button_rect.position.x - toolbar_gap - selector_button_size.x,
-		encounter_button_rect.position.y,
-		selector_button_size.x,
-		selector_button_size.y
-	)
-	var debug_y := seed_label_rect.end.y + ((6.0 if compact else 14.0) / canvas_scale)
+	# One minimum-aware toolbar allocation, rather than four independent fixed
+	# rectangles which Godot can silently expand into their neighbours.
+	var toolbar_keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
+	var preferred_widths := [104.0 if compact else 132.0, 116.0 if compact else 132.0, 108.0 if compact else 124.0, 104.0 if compact else 120.0]
+	var toolbar_height := (48.0 if compact else 52.0) / canvas_scale
+	var toolbar_width := toolbar_gap * 3.0
+	var widths: Array[float] = []
+	for index in range(toolbar_keys.size()):
+		var minimum: Vector2 = toolbar_minimums.get(toolbar_keys[index], Vector2.ZERO)
+		widths.append(maxf(preferred_widths[index] / canvas_scale, minimum.x))
+		toolbar_height = maxf(toolbar_height, minimum.y)
+		toolbar_width += widths[index]
+	var available_width := safe_size.x - margin * 2.0
+	var toolbar_y := title_rect.position.y
+	# Compact landscape must not spend scarce vertical space on a second row
+	# solely to reserve title width. The already-clipped title uses the remainder.
+	var title_reserve := toolbar_gap if compact and not portrait else 340.0 / canvas_scale
+	if toolbar_width + title_reserve > available_width:
+		# Narrow screens use rows below the existing seed controls.
+		toolbar_y = maxf(seed_label_rect.end.y, float(toolbar_minimums.get("inventory_bottom", 0.0))) + line_gap
+	else:
+		title_rect.size.x = available_width - toolbar_width - toolbar_gap
+	var toolbar_rects := {}
+	var row_x := margin if toolbar_width > available_width else safe_size.x - margin - toolbar_width
+	for index in range(toolbar_keys.size()):
+		if row_x > margin and row_x + widths[index] > safe_size.x - margin + 0.01:
+			row_x = margin
+			toolbar_y += toolbar_height + line_gap
+		toolbar_rects[toolbar_keys[index]] = Rect2(row_x, toolbar_y, widths[index], toolbar_height)
+		row_x += widths[index] + toolbar_gap
+	var encounter_button_rect: Rect2 = toolbar_rects.encounter_button_rect
+	var selector_button_rect: Rect2 = toolbar_rects.encounter_selector_rect
+	var debug_button_rect: Rect2 = toolbar_rects.debug_button_rect
+	var log_button_rect: Rect2 = toolbar_rects.log_button_rect
+	var debug_y := maxf(seed_label_rect.end.y, toolbar_y + toolbar_height) + ((6.0 if compact else 14.0) / canvas_scale)
 	var touch_layout := MobileTouchControlsClass.calculate_layout(safe_size, safe_display_size)
 	var debug_bottom_limit: float = touch_layout["control_top"] - (10.0 / canvas_scale)
 	var debug_width := minf(safe_size.x * 0.5, (520.0 / canvas_scale))
@@ -231,7 +238,22 @@ func _on_viewport_size_changed() -> void:
 func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO) -> void:
 	_last_viewport_size = viewport_size
 	_last_display_size = viewport_size if display_size.is_zero_approx() else display_size
-	var metrics := calculate_layout(viewport_size, display_size)
+	var scale_metrics := calculate_layout(viewport_size, display_size)
+	var scale: float = scale_metrics.canvas_scale
+	var minimums := {}
+	var inventory_button := get_node_or_null("HUD/UI/CombatInventory") as Button
+	if inventory_button != null:
+		minimums["inventory_bottom"] = inventory_button.get_rect().end.y
+	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button]
+	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
+	var font_sizes := [13.0, 13.0, 14.0, 16.0]
+	for index in range(buttons.size()):
+		var button: Button = buttons[index]
+		if button != null:
+			button.add_theme_font_size_override("font_size", maxi(1, roundi(font_sizes[index] / scale)))
+			minimums[keys[index]] = button.get_combined_minimum_size()
+	_last_toolbar_labels = _toolbar_labels()
+	var metrics := calculate_layout(viewport_size, display_size, minimums)
 	var battlefield_metrics := calculate_battlefield_presentation(viewport_size)
 	var pixels_per_foot := float(battlefield_metrics["pixels_per_foot"])
 	if _battlefield != null:
@@ -239,6 +261,8 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 		_battlefield.queue_redraw()
 	if _combat_controller != null:
 		_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot, viewport_size)
+	if _title != null:
+		_title.clip_text = true
 	_apply_control_rect(_title, metrics["title_rect"])
 	_apply_control_rect(_instructions, metrics["instructions_rect"])
 	_apply_control_rect(_seed_label, metrics["seed_label_rect"])
@@ -285,6 +309,13 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	if _developer_debug != null:
 		_developer_debug.add_theme_font_size_override("normal_font_size", metrics["debug_font_size"])
 		_developer_debug.add_theme_font_size_override("bold_font_size", metrics["debug_font_size"])
+
+
+func _toolbar_labels() -> Array[String]:
+	var labels: Array[String] = []
+	for button: Button in [_encounter_selector, _log_button, _debug_button, _encounter_button]:
+		labels.append(button.text if button != null else "")
+	return labels
 
 
 func _apply_control_rect(control: Control, rect: Rect2) -> void:

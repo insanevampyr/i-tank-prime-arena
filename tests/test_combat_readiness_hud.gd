@@ -228,7 +228,7 @@ func _test_responsive_indicator_layout() -> void:
 		_expect_true(log.position.y - run.end.y >= 16.0 / float(layout["canvas_scale"]), "Combat results must retain readable vertical separation from readiness text.")
 		_expect_true(attack.position.x >= 0.0 and attack.position.y >= 0.0 and attack.end.x <= size.x and attack.end.y <= size.y, "ATTACK indicator must remain inside the viewport.")
 		_expect_true(run.position.x >= 0.0 and run.position.y >= 0.0 and run.end.x <= size.x and run.end.y <= size.y, "RUN indicator must remain inside the viewport.")
-		_expect_true(attack.end.y <= float(layout["touch_control_top"]) and run.end.y <= float(layout["touch_control_top"]), "Readiness indicators must stay above mobile touch controls.")
+		_expect_true(attack.end.y <= float(layout["touch_control_top"]) and run.end.y <= float(layout["touch_control_top"]), "Readiness indicators must stay above mobile touch controls at %s: ATTACK bottom %.2f, RUN bottom %.2f, touch top %.2f." % [size, attack.end.y, run.end.y, float(layout["touch_control_top"])])
 
 
 func _legal_player_session() -> ArenaCombatSession:

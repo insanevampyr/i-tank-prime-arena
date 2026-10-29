@@ -61,6 +61,14 @@ func evaluate_and_submit() -> Dictionary:
 			_simulation.start_stand_action(_boss_id, _request_id("stand"))
 		)
 
+	# Restore an already-held grip through the shared engine, never by mutating hands.
+	var handling_refs := boss_state.weapon_handling.keys()
+	handling_refs.sort()
+	for ref: String in handling_refs:
+		if String(boss_state.weapon_handling[ref]) == CombatWeaponHandling.ONE_HAND_HOLD \
+		and _simulation.get_weapon_handling_preview(_boss_id, StringName(ref), "regrip").get("success", false):
+			var regrip := _simulation.request_weapon_handling(_boss_id, StringName(ref), "regrip", _request_id("regrip"))
+			if regrip.get("success", false): _record_decision("regrip_weapon", regrip)
 	var dropped_spear := _find_owned_spear_world_item()
 	var spear_held := _is_spear_held(boss_state)
 	if dropped_spear.is_empty():
@@ -241,8 +249,18 @@ func _try_healing_action(boss_state: CombatActorState, missing_hpc: int, geometr
 	var potion_count := int(boss_state.inventory_quantities.get(String(Fixture.HEALTH_POTION_INVENTORY_ID), 0))
 	var free_hand := String(boss_state.hand_occupancy.get("left", "")).is_empty() \
 		or String(boss_state.hand_occupancy.get("right", "")).is_empty()
-	if missing_hpc >= MIN_POTION_VALUE and potion_count > 0 and free_hand \
+	if missing_hpc >= MIN_POTION_VALUE and potion_count > 0 \
 	and (not target_attacking_boss or not geometry.get("success", false)):
+		if not free_hand:
+			var refs := Array(boss_state.equipment_refs)
+			refs.sort()
+			for ref: String in refs:
+				if not _simulation.get_weapon_handling_preview(_boss_id, StringName(ref), "hold_one").get("success", false): continue
+				var shifted := _simulation.request_weapon_handling(_boss_id, StringName(ref), "hold_one", _request_id("potion_hold_one"))
+				if shifted.get("success", false):
+					free_hand = true
+					break
+		if not free_hand: return {}
 		return _submit_result(
 			"health_potion",
 			_simulation.start_verified_consumable_healing_action(

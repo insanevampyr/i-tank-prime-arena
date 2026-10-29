@@ -8,6 +8,7 @@ extends Resource
 @export var race_name: String = ""
 @export var class_names: PackedStringArray = PackedStringArray()
 @export var level: int = -1
+@export var progression_policy: Dictionary = {}
 @export var attributes: Dictionary = {}
 @export var combat_stats: Dictionary = {}
 @export var resource_maxima: Dictionary = {}
@@ -69,7 +70,7 @@ func instantiate_actor(
 	for issue: Dictionary in validate_definition():
 		if issue["status"] == "invalid":
 			return null
-	return CombatActorDefinition.new(
+	var actor := CombatActorDefinition.new(
 		actor_id,
 		actor_kind,
 		instance_display_name,
@@ -82,8 +83,12 @@ func instantiate_actor(
 		unresolved_fields,
 		size_category,
 		ability_allowances,
-		inventory_records
+		inventory_records,
+		level
 	)
+	actor.progression_policy = progression_policy.duplicate(true)
+	actor.class_names = class_names.duplicate()
+	return actor
 
 
 func to_dictionary() -> Dictionary:
@@ -95,6 +100,7 @@ func to_dictionary() -> Dictionary:
 		"race_name": race_name,
 		"class_names": Array(class_names),
 		"level": level,
+		"progression_policy": progression_policy.duplicate(true),
 		"attributes": attributes.duplicate(true),
 		"combat_stats": combat_stats.duplicate(true),
 		"resource_maxima": resource_maxima.duplicate(true),

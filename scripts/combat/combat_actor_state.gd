@@ -11,6 +11,9 @@ var timed_stat_effects: Dictionary = {}
 var pending_called_shot: Dictionary = {}
 var hand_occupancy: Dictionary = {"left": "", "right": ""}
 var hand_occupancy_authoritative: bool = false
+# Sparse handling overrides; absent entries retain legacy equipped/held behavior.
+var weapon_handling: Dictionary = {}
+var progression: Dictionary = {}
 var held_materials: Dictionary = {}
 var equipment_refs: PackedStringArray = PackedStringArray()
 var conditions: PackedStringArray = PackedStringArray()
@@ -59,7 +62,7 @@ func _init(definition: CombatActorDefinition) -> void:
 
 
 func to_dictionary() -> Dictionary:
-	return {
+	var snapshot := {
 		"actor_id": String(actor_id),
 		"current_hpc": current_hpc,
 		"resources": resources.duplicate(true),
@@ -97,6 +100,10 @@ func to_dictionary() -> Dictionary:
 		"nac_automation_settings": nac_automation_settings.duplicate(true),
 		"revision": revision,
 	}
+	# Additive schema-12 extension; unchanged legacy fixtures retain exact snapshots.
+	if not weapon_handling.is_empty(): snapshot["weapon_handling"] = weapon_handling.duplicate(true)
+	if not progression.is_empty(): snapshot["progression"] = progression.duplicate(true)
+	return snapshot
 
 
 func set_position(value: Vector2i, facing: int) -> void:

@@ -11,6 +11,7 @@ const LogExporter = preload("res://scripts/ui/arena_log_exporter.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
 const RareHumanWarriorFixture = preload("res://scripts/creatures/rare_human_warrior_fixture.gd")
+const ArenaRewardLedger = preload("res://scripts/rewards/arena_reward_ledger.gd")
 
 const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
@@ -95,9 +96,25 @@ var _encounter_selector_index: int = 0
 var _player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 var _goblin_visuals: Dictionary = {}
 var _world_item_markers: Dictionary = {}
+var _loot_pick_positions: Dictionary = {}
+var _marker_refresh_key := ""
 var _player_facing_marker: Polygon2D
 var _opponent_facing_marker: Polygon2D
 var _world_presentation_size := Vector2.ZERO
+var _rewards_panel: PanelContainer
+var _rewards_label: RichTextLabel
+var _collect_loot_button: Button
+var _developer_refresh_button: Button
+var _advancement_option: OptionButton
+var _purchase_advancement_button: Button
+var _advancement_options: Array[Dictionary] = []
+var _inventory_option: OptionButton
+var _inventory_equip_button: Button
+var _inventory_use_button: Button
+var _weapon_handling_buttons: Dictionary = {}
+var _inventory_entries: Array[Dictionary] = []
+var _combat_inventory_open := false
+var _rewards_panel_context := ""
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -162,6 +179,7 @@ func _ready() -> void:
 	if _save_log_button != null and not _save_log_button.pressed.is_connected(_on_save_log_button_pressed):
 		_save_log_button.pressed.connect(_on_save_log_button_pressed)
 	_create_nac_settings_panel()
+	_create_rewards_panel()
 	_process_new_events()
 	_update_combat_movement_lock()
 	_update_presentation()
@@ -545,17 +563,18 @@ func _cancel_force_shield() -> Dictionary:
 
 
 func _handle_right_mouse_special_press(screen_position: Vector2) -> Dictionary:
+	if _mouse_special_held:
+		return {"success": false, "reason": "duplicate_mouse_press"}
+	# Track the physical press even if targeting/legality rejects the attempt.
+	# Only release/focus cleanup can admit another press; no timed debounce.
+	_mouse_special_held = true
 	if _attack_input_is_blocked_by_ui():
-		_mouse_special_held = false
 		return {"success": false, "reason": "ui_input_blocked"}
 	var selection_result := _select_target_at(screen_position, false)
 	var selection: Dictionary = selection_result.get("selection", {})
 	if not selection.get("success", false) or String(selection.get("target_id", "")).is_empty():
-		_mouse_special_held = false
 		return {"success": false, "reason": "no_target_selected"}
-	var result := _request_special(_assigned_special_id, "mouse")
-	_mouse_special_held = result.get("success", false)
-	return result
+	return _request_special(_assigned_special_id, "mouse")
 
 
 func _create_nac_settings_panel() -> void:
@@ -651,10 +670,10 @@ func _request_attack(input_source: String) -> Dictionary:
 		var at_value := 0 if action == null else action.at_at_start
 		var location_name := HitLocations.get_display_name(_session.get_selected_target_location())
 		_last_ui_message = (
-			"Approach attack started (%.3f s at AT %d). Reach 3 ft with clear line of sight before resolution."
-			% [float(duration_us) / 1_000_000.0, at_value]
+			"Approach attack started (%.3f s at AT %d). Reach %.1f ft with clear line of sight before resolution."
+			% [float(duration_us) / 1_000_000.0, at_value,float(declaration_legality.get("maximum_range_microfeet",0))/1_000_000.0]
 			if declaration_legality.get("approach_required", false)
-			else "Battle Axe action executing at %s (%.3f s at AT %d)." % [location_name, float(duration_us) / 1_000_000.0, at_value]
+			else "Physical attack executing at %s (%.3f s at AT %d)." % [location_name, float(duration_us) / 1_000_000.0, at_value]
 		)
 	else:
 		_last_ui_message = "Attack illegal: %s" % _friendly_reason(String(result.get("reason", "rejected")))
@@ -667,7 +686,6 @@ func _advance_session_with_attack_hold(delta_us: int) -> void:
 		return
 	var target_timestamp_us := _session.simulation.clock.get_elapsed_us() + delta_us
 	_try_request_held_attack()
-	_try_request_held_special()
 	var iterations := 0
 	while _session.simulation.clock.get_elapsed_us() < target_timestamp_us:
 		iterations += 1
@@ -688,7 +706,6 @@ func _advance_session_with_attack_hold(delta_us: int) -> void:
 		if _session.simulation.clock.get_elapsed_us() <= now_us:
 			break
 		_try_request_held_attack()
-		_try_request_held_special()
 	if not _session.is_encounter_active():
 		_clear_attack_hold_intent()
 
@@ -725,13 +742,6 @@ func _active_attack_hold_source() -> String:
 	return ""
 
 
-func _try_request_held_special() -> void:
-	if not _mouse_special_held or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS \
-	or _session == null or not _session.is_encounter_active() or _attack_input_is_blocked_by_ui():
-		return
-	_request_special(_assigned_special_id, "mouse_hold")
-
-
 func _attack_input_is_blocked_by_ui() -> bool:
 	if not _application_has_focus or is_transcript_visible():
 		return true
@@ -753,6 +763,10 @@ static func _is_attack_key(keycode: Key) -> bool:
 
 func _on_encounter_button_pressed() -> void:
 	_clear_attack_hold_intent()
+	# Close presentation before START/NEXT WAVE can activate enemies.
+	_combat_inventory_open = false
+	if _rewards_panel != null:
+		_rewards_panel.hide()
 	if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY:
 		_player.reset_for_encounter(_initial_player_position_feet)
 		_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
@@ -773,8 +787,8 @@ func _on_encounter_button_pressed() -> void:
 func _on_encounter_selector_pressed() -> void:
 	var previous_index := _encounter_selector_index
 	var previous_test_mode := _developer_test_mode
-	_encounter_selector_index = posmod(_encounter_selector_index + 1, 8)
-	_developer_test_mode = _encounter_selector_index != 0
+	_encounter_selector_index = posmod(_encounter_selector_index + 1, 9)
+	_developer_test_mode = _encounter_selector_index != 0 and _encounter_selector_index != 8
 	var fixture := (
 		_wave_fixture_for_number(_encounter_selector_index)
 		if _encounter_selector_index >= 1 and _encounter_selector_index <= 5
@@ -946,6 +960,12 @@ func _prepare_encounter_fixture() -> Dictionary:
 	if not setup.get("success", false):
 		_last_ui_message = "Combat fixture blocked: %s" % String(setup.get("reason", "unknown setup failure"))
 		return setup
+	var reward_setup := _session.configure_reward_mode(
+		ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
+	)
+	if not reward_setup.get("success", false):
+		_last_ui_message = "Rewards blocked: %s" % _friendly_reason(String(reward_setup.get("reason", "reward setup failure")))
+		return reward_setup
 	_session.select_target(_session.get_targetable_enemy_ids()[0])
 	_rebuild_encounter_visuals()
 	_append_log(
@@ -987,6 +1007,12 @@ func _reset_encounter() -> void:
 		_floating_combat_text.clear()
 	_delta_us_remainder = 0.0
 	if result.get("success", false):
+		var reward_reset := _session.configure_reward_mode(
+			ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
+		)
+		if not reward_reset.get("success", false):
+			_last_ui_message = "Reward RESET blocked: %s" % _friendly_reason(String(reward_reset.get("reason", "rejected")))
+			return
 		_session.select_target(_session.get_targetable_enemy_ids()[0])
 		_rebuild_encounter_visuals()
 		_append_log("Encounter reset: fixtures, clock, RNG and presentation restored.")
@@ -999,6 +1025,10 @@ func _reset_encounter() -> void:
 
 
 func _select_target_at(screen_position: Vector2, request_desktop_attack: bool) -> Dictionary:
+	var loot_result := _try_collect_loot_at(screen_position)
+	if not loot_result.is_empty():
+		_mouse_attack_held = false
+		return {"selection": {"success": false, "reason": "loot_click"}, "attack": null, "loot": loot_result}
 	for actor_id: String in _session.get_targetable_enemy_ids():
 		var visual := _get_enemy_visual(StringName(actor_id))
 		var pick_radius := TARGET_PICK_RADIUS_PIXELS if visual == null else TARGET_PICK_RADIUS_PIXELS * maxf(1.0, visual.global_transform.get_scale().x)
@@ -1109,6 +1139,10 @@ func _process_new_events() -> void:
 	if not events.is_empty():
 		_invalidate_transcript_cache()
 	for event: CombatEvent in events:
+		if String(event.event_type) in ["consumable_healing_resolved", "consumable_mana_resolved", "consumable_completion_failed", "reward_character_level_gained"]:
+			_update_rewards_panel(true)
+		if event.source_actor_id == Fixture.PLAYER_ID and String(event.event_type) in ["weapon_handling_changed", "weapon_handling_failed", "action_declared", "action_completed", "action_interrupted"]:
+			_update_rewards_panel(true)
 		if _floating_combat_text != null:
 			_floating_combat_text.present_authoritative_event(event)
 		_queue_player_dodge_displacement(event)
@@ -1124,6 +1158,12 @@ func _update_last_message_for_event(event: CombatEvent) -> void:
 	var payload := event.payload
 	var actor_name := "Player" if event.source_actor_id == Fixture.PLAYER_ID else "Opponent"
 	match String(event.event_type):
+		"consumable_healing_resolved":
+			_last_ui_message = "%s potion: HPC %s → %s; remaining %s." % [actor_name, payload.get("hpc_before"), payload.get("hpc_after"), payload.get("quantity_after")]
+		"consumable_mana_resolved":
+			_last_ui_message = "%s potion: Mana %s → %s; remaining %s." % [actor_name, payload.get("mana_before"), payload.get("mana_after"), payload.get("quantity_after")]
+		"consumable_completion_failed":
+			_last_ui_message = "Potion blocked: %s" % payload.get("reason", "unavailable")
 		"physical_attack_accuracy_resolved":
 			if not payload.get("accuracy_success", false):
 				_last_ui_message = "%s ACC check failed; the attack missed." % actor_name
@@ -1260,10 +1300,14 @@ func _rebuild_encounter_visuals() -> void:
 func _refresh_world_item_markers() -> void:
 	if _session == null:
 		return
+	var refresh_key := "%s:%s:%s:%s" % [_session.get_instance_id(), _session.get_resolved_event_history_generation(), _session.get_resolved_event_count(), _player.pixels_per_foot]
+	if refresh_key == _marker_refresh_key:
+		return
+	_marker_refresh_key = refresh_key
+	_loot_pick_positions.clear()
 	var active_ids := {}
 	for item: Dictionary in _session.simulation.get_world_items_snapshot():
-		if String(item.get("state", "")) != "dropped" \
-		or String(item.get("equipment_ref", "")) != String(RareHumanWarriorFixture.WEAPON_REF):
+		if String(item.get("state", "")) != "dropped":
 			continue
 		var world_item_id := String(item.get("world_item_id", ""))
 		var serialized_position: Variant = item.get("position_microfeet")
@@ -1272,12 +1316,18 @@ func _refresh_world_item_markers() -> void:
 		active_ids[world_item_id] = true
 		var marker := _world_item_markers.get(world_item_id) as Node2D
 		if marker == null:
-			marker = _create_dropped_spear_marker(world_item_id)
+			marker = (
+				_create_ground_loot_marker(item)
+				if String(item.get("world_item_kind", "")) == "loot"
+				else _create_dropped_spear_marker(world_item_id)
+			)
 			add_child(marker)
 			_world_item_markers[world_item_id] = marker
 		marker.position = _microfeet_to_pixels(Vector2i(int(serialized_position[0]), int(serialized_position[1])))
 		marker.scale = Vector2.ONE * (_player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT)
 		marker.visible = true
+		if String(item.get("world_item_kind", "")) == "loot":
+			_loot_pick_positions[world_item_id] = marker.global_position
 	for item_id: Variant in _world_item_markers.keys():
 		if active_ids.has(String(item_id)):
 			continue
@@ -1285,6 +1335,35 @@ func _refresh_world_item_markers() -> void:
 		if is_instance_valid(stale):
 			stale.queue_free()
 		_world_item_markers.erase(item_id)
+
+
+func _try_collect_loot_at(screen_position: Vector2) -> Dictionary:
+	var ids: Array = _loot_pick_positions.keys()
+	ids.sort()
+	for item_id: String in ids:
+		if screen_position.distance_to(_loot_pick_positions[item_id]) > 18.0 * maxf(1.0, _player.pixels_per_foot / BASE_WORLD_PIXELS_PER_FOOT):
+			continue
+		var item := _session.simulation.get_world_item(item_id)
+		if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_RUNNING:
+			_last_ui_message = "Combat pickup unavailable: action and hand requirements unverified. Collect between waves."
+			return {"success": false, "reason": "combat_pickup_requirements_unverified"}
+		var result := _session.collect_ground_loot(item_id)
+		var reason := String(result.get("reason", ""))
+		if result.get("success", false):
+			var definition: Dictionary = item.get("item_definition", {})
+			_last_ui_message = "Collected %s %s." % [item.get("quantity", 1), "Gold" if definition.get("definition_id") == "prime_v3_gold" else definition.get("display_name", "item")]
+		else:
+			_last_ui_message = "Available between waves." if reason == "loot_collection_requires_between_wave_downtime" else ("Move closer to collect." if reason == "world_item_out_of_pickup_reach" else "Inventory unavailable.")
+			if reason == "world_item_out_of_pickup_reach":
+				var serialized: Variant = item.get("position_microfeet")
+				var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
+				var item_position: Vector2i = serialized if serialized is Vector2i else Vector2i(int(serialized[0]), int(serialized[1]))
+				if player_state.position_microfeet.distance_squared_to(item_position) <= 1_000_000 * 1_000_000:
+					_last_ui_message = "Path blocked."
+		_refresh_world_item_markers()
+		_update_rewards_panel(true)
+		return result
+	return {}
 
 
 func _create_dropped_spear_marker(world_item_id: String) -> Node2D:
@@ -1310,8 +1389,470 @@ func _create_dropped_spear_marker(world_item_id: String) -> Node2D:
 	return marker
 
 
+func _create_ground_loot_marker(item: Dictionary) -> Node2D:
+	var marker := Node2D.new()
+	var world_item_id := String(item.get("world_item_id", "loot"))
+	marker.name = "GroundLoot_%s" % world_item_id.validate_node_name()
+	var diamond := Polygon2D.new()
+	diamond.name = "LootDiamond"
+	diamond.polygon = PackedVector2Array([Vector2(0, -9), Vector2(9, 0), Vector2(0, 9), Vector2(-9, 0)])
+	diamond.color = Color("#E8C45B")
+	var definition: Dictionary = item.get("item_definition", {})
+	var category := String(definition.get("category", definition.get("item_kind", "other")))
+	var definition_id := String(definition.get("definition_id", ""))
+	if category == "gold" or definition_id == "prime_v3_gold": category = "currency"
+	if category == "potion": category = "consumable"
+	if category == "equipment":
+		var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+		category = "weapon" if catalog.get_weapon(StringName(definition_id)) != null else ("armor" if catalog.get_armor(StringName(definition_id)) != null else "other")
+	diamond.color = {"currency": Color("#E8C45B"), "weapon": Color("#EBAD88"), "armor": Color("#BBC8DF"), "consumable": Color("#A6E5BD")}.get(category, Color("#C99DE3"))
+	marker.add_child(diamond)
+	var item_definition: Dictionary = item.get("item_definition", {})
+	var label := Label.new()
+	label.name = "LootLabel"
+	label.position = Vector2(-58, 11)
+	label.size = Vector2(116, 34)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_color_override("font_color", Color("#FFF3BE"))
+	label.add_theme_color_override("font_outline_color", Color("#101820"))
+	label.add_theme_constant_override("outline_size", 3)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.text = String(item_definition.get("display_name", "Loot"))
+	marker.add_child(label)
+	return marker
+
+
+func _create_rewards_panel() -> void:
+	var ui := get_node_or_null("../HUD/UI") as Control
+	if ui == null or _rewards_panel != null:
+		return
+	_rewards_panel = PanelContainer.new()
+	_rewards_panel.name = "RewardsPanel"
+	_rewards_panel.z_index = 12
+	_rewards_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_rewards_panel.position = Vector2(-310, 124)
+	_rewards_panel.size = Vector2(620, 200)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.025, 0.035, 0.05, 0.95)
+	style.border_color = Color(0.78, 0.62, 0.22, 0.95)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(7)
+	_rewards_panel.add_theme_stylebox_override("panel", style)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	_rewards_panel.add_child(box)
+	_rewards_label = RichTextLabel.new()
+	_rewards_label.name = "RewardsSummary"
+	_rewards_label.custom_minimum_size = Vector2(480, 110)
+	_rewards_label.bbcode_enabled = true
+	_rewards_label.fit_content = false
+	_rewards_label.scroll_active = true
+	_rewards_label.add_theme_font_size_override("normal_font_size", 13)
+	_rewards_label.add_theme_color_override("default_color", Color("#E6ECF2"))
+	box.add_child(_rewards_label)
+	_collect_loot_button = Button.new()
+	_collect_loot_button.name = "CollectNearestLoot"
+	_collect_loot_button.text = "COLLECT ALL LOOT"
+	_collect_loot_button.focus_mode = Control.FOCUS_NONE
+	_collect_loot_button.pressed.connect(_on_collect_loot_pressed)
+	box.add_child(_collect_loot_button)
+	_developer_refresh_button = Button.new()
+	_developer_refresh_button.name = "DeveloperCharacterRefresh"
+	_developer_refresh_button.text = "REFRESH CHARACTER — DEV ONLY"
+	_developer_refresh_button.focus_mode = Control.FOCUS_NONE
+	_developer_refresh_button.visible = false
+	_developer_refresh_button.pressed.connect(_on_developer_refresh_pressed)
+	box.add_child(_developer_refresh_button)
+	_inventory_option = OptionButton.new()
+	_inventory_option.name = "InventoryOption"
+	_inventory_option.focus_mode = Control.FOCUS_NONE
+	_inventory_option.item_selected.connect(_on_inventory_option_selected)
+	box.add_child(_inventory_option)
+	var inventory_actions := HBoxContainer.new()
+	_inventory_equip_button = Button.new()
+	_inventory_equip_button.name = "InventoryEquip"
+	_inventory_equip_button.text = "EQUIP / UNEQUIP"
+	_inventory_equip_button.focus_mode = Control.FOCUS_ALL
+	_inventory_equip_button.pressed.connect(_on_inventory_equip_pressed)
+	inventory_actions.add_child(_inventory_equip_button)
+	_inventory_use_button = Button.new()
+	_inventory_use_button.name = "InventoryUse"
+	_inventory_use_button.text = "USE"
+	_inventory_use_button.focus_mode = Control.FOCUS_NONE
+	_inventory_use_button.pressed.connect(_on_inventory_use_pressed)
+	inventory_actions.add_child(_inventory_use_button)
+	box.add_child(inventory_actions)
+	var weapon_controls := GridContainer.new()
+	weapon_controls.name = "WeaponHandlingControls"
+	weapon_controls.columns = 2
+	for operation: String in ["stow", "hold_one", "regrip", "draw"]:
+		var button := Button.new()
+		button.name = "Weapon_%s" % operation
+		button.text = {"stow": "STOW — FREE", "hold_one": "HOLD ONE HAND — FREE", "regrip": "RE-GRIP — FREE", "draw": "DRAW / EQUIP — 1 ACT"}[operation]
+		button.focus_mode = Control.FOCUS_NONE
+		button.pressed.connect(_on_inventory_weapon_handling.bind(operation))
+		weapon_controls.add_child(button)
+		_weapon_handling_buttons[operation] = button
+	box.add_child(weapon_controls)
+	_advancement_option = OptionButton.new()
+	_advancement_option.name = "AdvancementOption"
+	_advancement_option.focus_mode = Control.FOCUS_ALL
+	_advancement_option.item_selected.connect(_on_advancement_option_selected)
+	box.add_child(_advancement_option)
+	_purchase_advancement_button = Button.new()
+	_purchase_advancement_button.name = "PurchaseAdvancement"
+	_purchase_advancement_button.text = "CONFIRM XP PURCHASE"
+	_purchase_advancement_button.focus_mode = Control.FOCUS_ALL
+	_purchase_advancement_button.pressed.connect(_on_purchase_advancement_pressed)
+	box.add_child(_purchase_advancement_button)
+	var inventory_toggle := Button.new()
+	inventory_toggle.text = "INVENTORY / EQUIPMENT"
+	inventory_toggle.toggle_mode = true
+	inventory_toggle.toggled.connect(func(expanded: bool) -> void:
+		_inventory_option.visible = expanded
+		inventory_actions.visible = expanded
+		weapon_controls.visible = expanded
+		_rewards_panel.size.y = 0
+	)
+	box.add_child(inventory_toggle)
+	box.move_child(inventory_toggle, 2)
+	_inventory_option.visible = false
+	inventory_actions.visible = false
+	weapon_controls.visible = false
+	var advancement_toggle := Button.new()
+	advancement_toggle.text = "CHARACTER ADVANCEMENT"
+	advancement_toggle.toggle_mode = true
+	advancement_toggle.toggled.connect(func(expanded: bool) -> void:
+		_advancement_option.visible = expanded
+		_purchase_advancement_button.visible = expanded
+		_rewards_panel.size.y = 0
+	)
+	box.add_child(advancement_toggle)
+	_advancement_option.visible = false
+	_purchase_advancement_button.visible = false
+	ui.add_child(_rewards_panel)
+	var combat_inventory := Button.new()
+	combat_inventory.name = "CombatInventory"
+	combat_inventory.text = "INVENTORY"
+	combat_inventory.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	combat_inventory.position = Vector2(-180, 110)
+	combat_inventory.focus_mode = Control.FOCUS_NONE
+	combat_inventory.pressed.connect(_on_inventory_toggle_pressed)
+	ui.add_child(combat_inventory)
+	_rewards_panel.visible = false
+
+
+func _on_inventory_toggle_pressed() -> void:
+	# Synchronize lifecycle context before applying explicit player intent.
+	_update_rewards_panel()
+	_combat_inventory_open = not _combat_inventory_open
+	_update_rewards_panel(true)
+
+
+func _on_collect_loot_pressed() -> void:
+	var result := _session.collect_all_ground_loot()
+	_last_ui_message = (
+		"Collected %s loot entries." % result.get("collected_count", 0)
+		if result.get("success", false)
+		else "Collection blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	)
+	_refresh_world_item_markers()
+	_update_rewards_panel(true)
+	_update_presentation()
+
+
+func _on_advancement_option_selected(_index: int) -> void:
+	_update_rewards_panel_text()
+
+
+func _on_developer_refresh_pressed() -> void:
+	var result := _session.request_developer_character_refresh()
+	_last_ui_message = "DEV ONLY: character resources refreshed." if result.get("success",false) else "Developer refresh blocked: %s" % _friendly_reason(String(result.get("reason","rejected")))
+	_update_rewards_panel(true)
+	_process_new_events()
+	_update_presentation()
+
+
+func _on_inventory_option_selected(_index: int) -> void:
+	_update_rewards_panel_text()
+
+
+func _selected_inventory_entry() -> Dictionary:
+	if _inventory_option == null or _inventory_option.selected < 0 \
+	or _inventory_option.selected >= _inventory_entries.size():
+		return {}
+	return _inventory_entries[_inventory_option.selected]
+
+
+func _on_inventory_equip_pressed() -> void:
+	var entry := _selected_inventory_entry()
+	if entry.is_empty():
+		_last_ui_message = "Inventory blocked: no item selected."
+		return
+	var item_id := StringName(String(entry.get("definition_id", "")))
+	var result := (
+		_session.request_player_inventory_unequip(item_id)
+		if entry.get("equipped", false)
+		else _session.request_player_inventory_equip(item_id)
+	)
+	_last_ui_message = "Equipment updated." if result.get("success", false) else "Equipment blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	if result.get("success", false):
+		_player.refresh_equipped_movement_rate(int(_session.simulation.get_actor_definition(Fixture.PLAYER_ID).get_combat_stat("mr")))
+	_update_rewards_panel(true)
+	_update_presentation()
+
+
+func _on_inventory_weapon_handling(operation: String) -> void:
+	var item := _selected_inventory_entry()
+	var result := _session.request_player_weapon_handling(StringName(item.get("definition_id", "")), operation)
+	_last_ui_message = ("Weapon draw started (1 Act)." if result.has("action_instance_id") else "Weapon handling updated.") if result.get("success", false) else "Weapon handling blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	_update_rewards_panel(true)
+	_update_presentation()
+
+
+func _on_inventory_use_pressed() -> void:
+	var entry := _selected_inventory_entry()
+	if entry.is_empty():
+		_last_ui_message = "Inventory blocked: no item selected."
+		return
+	var result := _session.request_player_inventory_consumable_use(StringName(String(entry.get("definition_id", ""))))
+	_last_ui_message = ("Potion action started: retrieve then drink (2 Acts)." if result.has("action_instance_id") else "Consumable used.") if result.get("success", false) else "Use blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	_update_rewards_panel(true)
+	_update_presentation()
+
+
+func _on_purchase_advancement_pressed() -> void:
+	if _advancement_option == null or _advancement_option.selected < 0 \
+	or _advancement_option.selected >= _advancement_options.size():
+		_last_ui_message = "Advancement blocked: no purchase selected."
+		return
+	var option: Dictionary = _advancement_options[_advancement_option.selected]
+	var result := _session.request_character_advancement(
+		StringName(String(option.get("purchase_kind", ""))),
+		StringName(String(option.get("target_id", "")))
+	)
+	if result.get("success", false):
+		var purchase: Dictionary = result.get("purchase", {})
+		_last_ui_message = "%s increased to %s for %s XP." % [
+			String(purchase.get("target_id", "stat")).to_upper(),
+			purchase.get("value_after", "?"), purchase.get("cost", "?"),
+		]
+	else:
+		_last_ui_message = "Advancement blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+	_update_rewards_panel(true)
+	_update_presentation()
+
+
+func _update_rewards_panel(force_refresh: bool = false) -> void:
+	if _rewards_panel == null or _session == null:
+		return
+	var state := _session.get_encounter_state()
+	var context := "%s:%s" % [_session.get_instance_id(), state]
+	if state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		context += ":%s" % _session.get_arena_wave_state().get("current_wave_id", "")
+	if context != _rewards_panel_context:
+		_rewards_panel_context = context
+		# Open once for each victory boundary, never for ordinary content refresh.
+		_combat_inventory_open = state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST
+	var visible := _combat_inventory_open and (
+		state == ArenaCombatSession.ENCOUNTER_RUNNING or (
+			state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME
+			and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST))
+	var was_visible := _rewards_panel.visible
+	_rewards_panel.visible = visible
+	if not visible:
+		return
+	if was_visible and not force_refresh:
+		return
+	var rewards := _session.get_reward_state()
+	var loot := _session.get_ground_loot()
+	_rebuild_advancement_options()
+	_rebuild_inventory_options()
+	var loot_lines := PackedStringArray()
+	var uncollected := 0
+	for item: Dictionary in loot:
+		var definition: Dictionary = item.get("item_definition", {})
+		var position: Array = item.get("position_microfeet", [])
+		var location := "?,?"
+		if position.size() == 2:
+			location = "%.2f, %.2f ft" % [float(position[0]) / 1_000_000.0, float(position[1]) / 1_000_000.0]
+		var status := String(item.get("collection_status", "uncollected"))
+		if status == "uncollected":
+			uncollected += 1
+		loot_lines.append("• %s x%s — %s at %s" % [definition.get("display_name", "Loot"), item.get("quantity", 1), status, location])
+	var defeated := PackedStringArray()
+	for award: Dictionary in rewards.get("awards", []):
+		defeated.append("%s (+%s XP)" % [compact_actor_name(StringName(String(award.get("actor_id", "enemy")))), award.get("xp", 0)])
+	_collect_loot_button.disabled = uncollected == 0
+	_update_rewards_panel_text(defeated, loot_lines)
+
+
+func _rebuild_inventory_options() -> void:
+	if _inventory_option == null:
+		return
+	var selected_id := ""
+	if _inventory_option.selected >= 0 and _inventory_option.selected < _inventory_entries.size():
+		selected_id = String(_inventory_entries[_inventory_option.selected].get("definition_id", ""))
+	_inventory_entries = _session.get_player_inventory_entries()
+	_inventory_option.clear()
+	var restore_index := 0
+	for index in range(_inventory_entries.size()):
+		var entry: Dictionary = _inventory_entries[index]
+		_inventory_option.add_item(format_inventory_entry(entry))
+		if String(entry.get("definition_id", "")) == selected_id:
+			restore_index = index
+	if not _inventory_entries.is_empty():
+		_inventory_option.select(restore_index)
+	for index in range(_inventory_entries.size()):
+		_inventory_option.set_item_tooltip(index, str(_inventory_entries[index]))
+
+
+static func format_inventory_entry(entry: Dictionary) -> String:
+	if entry.get("definition_id") == "prime_v3_gold":
+		return "Gold: %s" % entry.get("quantity", 0)
+	if entry.has("weapon_state"):
+		return "%s — %s" % [entry.get("display_name", "Weapon"), entry.weapon_state]
+	if entry.get("equipped", false):
+		return "%s — EQUIPPED" % entry.get("display_name", "Item")
+	return "%s x%s" % [entry.get("display_name", "Item"), entry.get("quantity", 0)]
+
+
+func _rebuild_advancement_options() -> void:
+	if _advancement_option == null:
+		return
+	var selected_key := ""
+	if _advancement_option.selected >= 0 and _advancement_option.selected < _advancement_options.size():
+		var selected: Dictionary = _advancement_options[_advancement_option.selected]
+		selected_key = "%s:%s" % [selected.get("purchase_kind", ""), selected.get("target_id", "")]
+	_advancement_options = _session.get_character_advancement_options()
+	_advancement_options = _advancement_options.filter(func(option: Dictionary) -> bool:
+		return option.get("available", false) or option.get("blocked_reason") == "insufficient_xp"
+	)
+	_advancement_option.clear()
+	var restore_index := 0
+	for index in range(_advancement_options.size()):
+		var option: Dictionary = _advancement_options[index]
+		var cost_text := "cost unresolved" if option.get("cost") == null else "%s XP" % option.get("cost")
+		var current_text := "?" if option.get("current_value") == null else str(option.get("current_value"))
+		var target_text := "?" if option.get("target_value") == null else str(option.get("target_value"))
+		_advancement_option.add_item("%s %s: %s -> %s (%s)" % [
+			String(option.get("purchase_kind", "")).replace("_", " ").to_upper(),
+			String(option.get("target_id", "")).to_upper(), current_text, target_text, cost_text,
+		])
+		var key := "%s:%s" % [option.get("purchase_kind", ""), option.get("target_id", "")]
+		if key == selected_key:
+			restore_index = index
+	if not _advancement_options.is_empty():
+		_advancement_option.select(restore_index)
+
+
+func _update_rewards_panel_text(
+	defeated: PackedStringArray = PackedStringArray(),
+	loot_lines: PackedStringArray = PackedStringArray()
+) -> void:
+	if _rewards_label == null or _session == null:
+		return
+	var rewards := _session.get_reward_state()
+	var option := {}
+	if _advancement_option != null and _advancement_option.selected >= 0 \
+	and _advancement_option.selected < _advancement_options.size():
+		option = _advancement_options[_advancement_option.selected]
+	var availability := "No verified purchase selected"
+	if not option.is_empty():
+		availability = (
+			"READY — explicit confirmation spends %s XP" % option.get("cost", "?")
+			if option.get("available", false)
+			else "UNAVAILABLE — %s" % _friendly_reason(String(option.get("blocked_reason", "unavailable")))
+		)
+	var history_lines := PackedStringArray()
+	for purchase: Dictionary in rewards.get("purchase_records", []):
+		history_lines.append("• %s %s -> %s (%s XP)" % [
+			String(purchase.get("target_id", "stat")).to_upper(), purchase.get("value_before", "?"),
+			purchase.get("value_after", "?"), purchase.get("cost", "?"),
+		])
+	var item := _selected_inventory_entry()
+	var inventory_text := "No collected or equipped items"
+	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	var progression := _session.get_actor_state(Fixture.PLAYER_ID).progression
+	var policy := player_actor.progression_policy
+	if not policy.is_empty():
+		var current_level := int(progression.get("level",player_actor.level))
+		var expm := int(progression.get("expm",policy.get("initial_expm",0)))
+		var threshold: Variant = PrimeV3LevelCatalog.threshold(int(policy.get("exp_type",0)),current_level+1)
+		availability = "LVL %s | EXP Type %s | EXPM %s | EXPC %s\nNext: %s\n%s" % [current_level,policy.get("exp_type","?"),expm,progression.get("expc",rewards.get("unspent_xp",0)),str(threshold) if threshold != null else "No verified threshold beyond LVL 20",availability]
+		var history: Array = progression.get("history",[])
+		if not history.is_empty():
+			var latest: Dictionary = history.back()
+			availability += "\nLVL %s: HPM Max +%s; %s Max +%s. Current resources unchanged." % [latest.level,latest.hpm_increase,String(latest.resource).to_upper(),latest.maximum_increase]
+	else:
+		availability = "Level progression unavailable: source-backed EXP Type/start data required.\n" + availability
+	if not item.is_empty():
+		inventory_text = "%s — %s%s\n%s" % [
+			item.get("display_name", "Item"), String(item.get("category", "other")).to_upper(),
+			" (MAGICAL)" if item.get("magical", false) else "",
+			item.get("requirements", "No verified requirements"),
+		]
+		if not String(item.get("blocked_reason", "")).is_empty():
+			inventory_text += "\nUnavailable: %s" % _friendly_reason(String(item.get("blocked_reason", "")))
+		if item.has("weapon_state"): inventory_text += "\n%s" % item.weapon_state
+		var provenance: Dictionary = item.get("provenance", {})
+		_inventory_option.tooltip_text = str(item)
+	_rewards_label.text = "[b]WAVE REWARDS[/b]\nWave XP %s | Earned %s | Spent %s | Available %s\nDefeated: %s\n[b]BATTLEFIELD LOOT[/b]\n%s\n[b]INVENTORY / EQUIPMENT[/b]\n%s\n[b]CHARACTER ADVANCEMENT[/b]\n%s\nPurchase History: %s" % [
+		rewards.get("current_wave_earned_xp", 0), rewards.get("earned_xp", 0),
+		rewards.get("spent_xp", 0), rewards.get("unspent_xp", 0),
+		", ".join(defeated) if not defeated.is_empty() else "See authoritative purchase/reward history",
+		"%s entries — click battlefield markers to collect" % loot_lines.size() if not loot_lines.is_empty() else "No resolved ground items",
+		inventory_text,
+		availability,
+		"\n".join(history_lines) if not history_lines.is_empty() else "None",
+	]
+	if _purchase_advancement_button != null:
+		_purchase_advancement_button.disabled = option.is_empty() or not option.get("available", false) or _session.is_encounter_active()
+	if _inventory_equip_button != null:
+		_inventory_equip_button.disabled = item.is_empty() or (
+			not item.get("equipped", false) and not item.get("equipable", false)
+		) or _session.is_encounter_active()
+	if _inventory_use_button != null:
+		_inventory_use_button.disabled = item.is_empty() or not item.get("usable", false)
+		_inventory_use_button.tooltip_text = "Use the selected consumable" if item.get("usable",false) else "USE applies only to an available, verified consumable; weapon attacks use ATTACK."
+	if _developer_refresh_button != null:
+		_developer_refresh_button.visible = _session.get_reward_mode() == ArenaRewardLedger.MODE_DEV_NORMAL and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME
+		var refresh_player := _session.get_actor_state(Fixture.PLAYER_ID)
+		_developer_refresh_button.disabled = refresh_player == null or refresh_player.current_hpc == null or int(refresh_player.current_hpc) <= 0
+	for operation: String in _weapon_handling_buttons:
+		var preview := _session.simulation.get_weapon_handling_preview(Fixture.PLAYER_ID, StringName(item.get("definition_id", "")), operation)
+		var button: Button = _weapon_handling_buttons[operation]
+		button.disabled = not preview.get("success", false)
+		button.tooltip_text = "" if not button.disabled else _friendly_reason(String(preview.get("reason", "Unavailable")))
+
+
 func get_dropped_spear_marker_count_for_testing() -> int:
 	return _world_item_markers.size()
+
+
+func is_rewards_panel_visible_for_testing() -> bool:
+	return _rewards_panel != null and _rewards_panel.visible
+
+
+func get_rewards_panel_text_for_testing() -> String:
+	return "" if _rewards_label == null else _rewards_label.text
+
+
+func get_advancement_option_count_for_testing() -> int:
+	return _advancement_options.size()
+
+
+func get_advancement_purchase_button_disabled_for_testing() -> bool:
+	return true if _purchase_advancement_button == null else _purchase_advancement_button.disabled
+
+
+func get_inventory_option_count_for_testing() -> int:
+	return _inventory_entries.size()
+
+
+func get_inventory_selected_entry_for_testing() -> Dictionary:
+	return _selected_inventory_entry().duplicate(true)
 
 
 func get_dropped_spear_marker_position_for_testing(world_item_id: String) -> Variant:
@@ -1347,6 +1888,7 @@ func _update_combat_movement_lock() -> void:
 
 
 func _update_presentation() -> void:
+	_update_rewards_panel()
 	if _session == null:
 		return
 	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
@@ -1359,7 +1901,8 @@ func _update_presentation() -> void:
 		ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY:
 			_last_ui_message = "VICTORY: the opponent fixture is defeated. Press RESET."
 		ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
-			_last_ui_message = "SAFE DOWNTIME: resources and effects are preserved. Press NEXT WAVE when ready."
+			if not _last_ui_message.begins_with("Collected") and not _last_ui_message in ["Move closer to collect.", "Path blocked.", "Available between waves.", "Inventory unavailable."]:
+				_last_ui_message = "Safe downtime: COLLECT ALL LOOT, then NEXT WAVE when ready."
 		ArenaCombatSession.ENCOUNTER_WAVE_TRANSITION_BLOCKED:
 			_last_ui_message = "Next wave selected; continuous-wave creature integration is pending. Press RESET."
 		ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT:
@@ -1437,7 +1980,7 @@ func _update_presentation() -> void:
 		_encounter_button.disabled = false
 	if _encounter_selector != null:
 		_encounter_selector.text = (
-			"NORMAL\nWAVE 1"
+			("DEV NORMAL — XP ×10" if _encounter_selector_index == 8 else "NORMAL\nWAVE 1")
 			if not _developer_test_mode
 			else (
 				"TEST MODE\nWAVE %d" % _encounter_selector_index

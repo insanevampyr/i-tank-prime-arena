@@ -29,6 +29,13 @@ static func is_player_facing_event(event: CombatEvent) -> bool:
 		"ability_use_committed",
 		"ability_resources_midnight_refreshed",
 		"verified_special_completion_failed",
+		"reward_xp_awarded",
+		"reward_drop_resolved",
+		"reward_source_blocked",
+		"reward_advancement_purchased",
+		"ground_loot_created",
+		"ground_loot_collected",
+		"consumable_healing_resolved", "consumable_mana_resolved", "consumable_completion_failed",
 	]
 
 
@@ -39,6 +46,12 @@ static func format_event(event: CombatEvent) -> String:
 	var prefix := "[%05.2f] " % seconds
 	var payload := event.payload
 	match String(event.event_type):
+		"consumable_healing_resolved":
+			return prefix + "%s drinks Health Potion: HPC %s → %s; %s remaining." % [_display_actor(event.source_actor_id), payload.get("hpc_before"), payload.get("hpc_after"), payload.get("quantity_after")]
+		"consumable_mana_resolved":
+			return prefix + "%s drinks Mana Potion: Mana %s → %s; %s remaining." % [_display_actor(event.source_actor_id), payload.get("mana_before"), payload.get("mana_after"), payload.get("quantity_after")]
+		"consumable_completion_failed":
+			return prefix + "Potion incomplete: %s." % payload.get("reason", "unavailable")
 		"opening_initiative_rolled":
 			return prefix + "%s Initiative: d10 %s + INIT %s = %s" % [
 				_display_actor(event.source_actor_id), payload.get("natural_d10", "?"),
@@ -115,6 +128,35 @@ static func format_event(event: CombatEvent) -> String:
 				payload.get("hpc_before", "?"), payload.get("hpc_after", "?"),
 				payload.get("weapon_rolls", []), payload.get("strength_bonus", "?"), payload.get("multiplied_total", "?"),
 				payload.get("armor_tal", "?"), payload.get("natural_armor_level", "?"),
+			]
+		"reward_xp_awarded":
+			return prefix + "%s awards %s XP; cumulative %s, available %s." % [
+				_display_actor(event.source_actor_id), payload.get("xp", "?"),
+				payload.get("cumulative_earned_xp", "?"), payload.get("unspent_xp", "?"),
+			]
+		"reward_drop_resolved":
+			return prefix + "%s drop %s: %s (%s)." % [
+				_display_actor(event.source_actor_id), payload.get("drop_code", "?"),
+				_pretty_name(String(payload.get("result_kind", "result"))),
+				_pretty_name(String(payload.get("status", "unknown"))),
+			]
+		"reward_source_blocked":
+			return prefix + "%s reward blocked: %s." % [
+				_display_actor(event.source_actor_id), _pretty_name(String(payload.get("reason", "source unresolved"))),
+			]
+		"reward_advancement_purchased":
+			return prefix + "%s advances %s from %s to %s for %s XP; available %s." % [
+				_display_actor(event.source_actor_id), String(payload.get("target_id", "stat")).to_upper(),
+				payload.get("value_before", "?"), payload.get("value_after", "?"),
+				payload.get("cost", "?"), payload.get("unspent_xp", "?"),
+			]
+		"ground_loot_created":
+			var item_definition: Dictionary = payload.get("item_definition", {})
+			return prefix + "%s dropped at %s." % [item_definition.get("display_name", "Loot"), payload.get("position_microfeet", [])]
+		"ground_loot_collected":
+			var item_definition: Dictionary = payload.get("item_definition", {})
+			return prefix + "%s collects %s x%s." % [
+				_display_actor(event.source_actor_id), item_definition.get("display_name", "Loot"), payload.get("quantity", 1),
 			]
 		"actor_resources_committed":
 			return prefix + "%s commits %s; resources now %s." % [_display_actor(event.source_actor_id), payload.get("resource_commitments", {}), payload.get("resources_after", {})]

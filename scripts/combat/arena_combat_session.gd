@@ -14,6 +14,8 @@ const MiniGargoyleSwarmerFixture = preload("res://scripts/creatures/mini_gargoyl
 const RareHumanWarriorFixture = preload("res://scripts/creatures/rare_human_warrior_fixture.gd")
 const RareHumanWarriorBossAI = preload("res://scripts/creatures/rare_human_warrior_boss_ai.gd")
 const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
+const ArenaRewardLedger = preload("res://scripts/rewards/arena_reward_ledger.gd")
+const InventoryCatalog = preload("res://scripts/rewards/prime_v3_inventory_catalog.gd")
 
 const DEFAULT_SEED := 1
 const MICROFEET_PER_FOOT := 1_000_000
@@ -47,6 +49,7 @@ const INVALID_TRANSITION_POSITION := Vector2i(2_147_483_647, 2_147_483_647)
 var simulation: CombatSimulation
 
 var _attack_definition: CombatAttackDefinition
+var _presentation_equipment_catalog: CombatDefinitionCatalog
 var _attack_definitions_by_actor: Dictionary = {}
 var _active_attack_ids_by_actor: Dictionary = {}
 var _selected_target_id: StringName = &""
@@ -115,6 +118,9 @@ var _gargoyle_tactical_states: Dictionary = {}
 var _gargoyle_lane_offsets: Dictionary = {}
 var _gargoyle_failed_approach_counts: Dictionary = {}
 var _gargoyle_last_tactical_signatures: Dictionary = {}
+var _reward_ledger: ArenaRewardLedger
+var _reward_mode: String = ArenaRewardLedger.MODE_TEST
+var _reward_event_cursor: int = 0
 
 
 func _init(
@@ -128,6 +134,7 @@ func _init(
 	_player_character_id = player_character_id
 	_uses_external_simulation = existing_simulation != null
 	simulation = existing_simulation if existing_simulation != null else CombatSimulation.new(seed_value)
+	_reward_ledger = ArenaRewardLedger.new()
 
 
 func initialize(
@@ -753,6 +760,9 @@ func _register_selected_player() -> Dictionary:
 	var registration := _register_wave_combatant(actor, defense, protection, attack)
 	if not registration.get("success", false):
 		return registration
+	var initial_hands := _build_hand_assignments(actor.equipment_refs, CombatDefinitionCatalog.load_default_fixture_catalog(), actor)
+	var initial_hand_result := simulation.configure_actor_hand_occupancy(Fixture.PLAYER_ID, initial_hands)
+	if not initial_hand_result.get("success", false): return initial_hand_result
 	if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS:
 		var hand_result := simulation.configure_actor_hand_occupancy(Fixture.PLAYER_ID, {
 			"left": String(Fixture.VAELIS_WAND_REF),
@@ -797,6 +807,8 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	if _uses_external_simulation:
 		return _failure("external_simulation_reset_unsupported")
 	simulation = CombatSimulation.new(_seed_value)
+	_reward_ledger = ArenaRewardLedger.new()
+	_reward_event_cursor = 0
 	_attack_definition = null
 	_attack_definitions_by_actor.clear()
 	_active_attack_ids_by_actor.clear()
@@ -853,6 +865,379 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR:
 		return initialize_wave_five_rare_human_warrior(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	return initialize(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
+
+
+func configure_reward_mode(mode: String) -> Dictionary:
+	if _encounter_active:
+		return _failure("reward_mode_locked_during_active_encounter")
+	var player_definition := simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if player_definition == null:
+		return _failure("reward_player_unavailable")
+	var result := _reward_ledger.configure(mode, Fixture.PLAYER_ID, player_definition.level)
+	if not result.get("success", false):
+		return result
+	_reward_mode = mode
+	_reward_event_cursor = 0
+	simulation.set_world_item_pickup_resolver(_resolve_world_item_pickup)
+	var reward_battlefield: ArenaBattlefield = _battlefield
+	simulation.set_world_item_landing_resolver(func(_item: Dictionary, position: Vector2i) -> bool:
+		return reward_battlefield.is_ground_world_item_position_legal(position)
+	)
+	_reward_ledger.begin_wave(_current_reward_wave_id())
+	simulation.set_reward_state_snapshot(_reward_ledger.to_dictionary())
+	return result
+
+
+func get_reward_state() -> Dictionary:
+	return _reward_ledger.to_dictionary()
+
+
+func get_reward_mode() -> String:
+	return _reward_mode
+
+
+func request_developer_character_refresh(request_id: String = "") -> Dictionary:
+	if _reward_mode != ArenaRewardLedger.MODE_DEV_NORMAL: return _failure("developer_normal_required")
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("safe_downtime_required")
+	return simulation.refresh_developer_character(Fixture.PLAYER_ID,request_id if not request_id.is_empty() else _next_request_id("developer_refresh"))
+
+
+func get_character_advancement_options() -> Array[Dictionary]:
+	return _reward_ledger.get_purchase_options(simulation)
+
+
+func request_character_advancement(
+	purchase_kind: StringName,
+	target_id: StringName,
+	request_id: String = ""
+) -> Dictionary:
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("advancement_requires_between_wave_downtime")
+	if _reward_mode == ArenaRewardLedger.MODE_TEST:
+		return _failure("test_mode_advancement_prohibited")
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
+		return _failure("player_not_eligible_for_advancement")
+	var stable_request_id := request_id
+	if stable_request_id.is_empty():
+		stable_request_id = _next_request_id("character_advancement")
+	return _reward_ledger.purchase_advancement(
+		simulation, stable_request_id, purchase_kind, target_id
+	)
+
+
+func get_player_inventory_entries() -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	var state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if state == null:
+		return entries
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var ids: Array = state.inventory_quantities.keys()
+	for equipment_ref: String in state.equipment_refs:
+		if not ids.has(equipment_ref):
+			ids.append(equipment_ref)
+	ids.sort()
+	for item_id: Variant in ids:
+		var provenance := {}
+		var collected_definition := {}
+		for world_item: Dictionary in simulation.get_world_items_snapshot():
+			if String(world_item.get("collected_by_actor_id", "")) == String(Fixture.PLAYER_ID) \
+			and String((world_item.get("item_definition", {}) as Dictionary).get("definition_id", "")) == String(item_id):
+				provenance = world_item.get("provenance", {}).duplicate(true)
+				provenance["world_item_id"] = String(world_item.get("world_item_id", ""))
+				collected_definition = (world_item.get("item_definition", {}) as Dictionary).duplicate(true)
+				break
+		var entry := InventoryCatalog.describe_item(
+			String(item_id), int(state.inventory_quantities.get(String(item_id), 0)),
+			state.equipment_refs.has(String(item_id)), catalog, provenance
+		)
+		var weapon := catalog.get_weapon(StringName(item_id))
+		if weapon != null and state.equipment_refs.has(String(item_id)):
+			entry["weapon_state"] = CombatWeaponHandling.label(state, weapon, int(simulation.get_actor_definition(Fixture.PLAYER_ID).attributes.get("str", -1)))
+		if String(entry.get("blocked_reason", "")) == "item_definition_incomplete" and not collected_definition.is_empty():
+			entry["display_name"] = collected_definition.get("display_name", entry["display_name"])
+			entry["source_definition"] = collected_definition
+		entries.append(entry)
+	return entries
+
+
+func request_player_weapon_handling(definition_id: StringName, operation: String, request_id: String = "") -> Dictionary:
+	if _encounter_state not in [ENCOUNTER_RUNNING, ENCOUNTER_BETWEEN_WAVE_DOWNTIME]:
+		return _failure("encounter_not_running")
+	return simulation.request_weapon_handling(Fixture.PLAYER_ID, definition_id, operation, request_id if not request_id.is_empty() else _next_request_id("weapon_%s" % operation))
+
+
+func request_player_inventory_equip(definition_id: StringName, request_id: String = "") -> Dictionary:
+	var boundary := _validate_inventory_management_boundary()
+	if not boundary.get("success", false):
+		return boundary
+	var state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	var actor := simulation.get_actor_definition(Fixture.PLAYER_ID)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var item_id := String(definition_id)
+	if state.equipment_refs.has(item_id):
+		return _failure("item_already_equipped")
+	if int(state.inventory_quantities.get(item_id, 0)) <= 0:
+		return _failure("inventory_item_unavailable")
+	var desired := state.equipment_refs.duplicate()
+	var deltas := {item_id: -1}
+	var weapon := catalog.get_weapon(definition_id)
+	var armor := catalog.get_armor(definition_id)
+	var shield := catalog.get_shield(definition_id)
+	if weapon == null and armor == null and shield == null:
+		return _failure("item_definition_incomplete")
+	if weapon != null:
+		var required_hands := weapon.effective_hands_required(int(actor.attributes.get("str", -1)))
+		if required_hands == CombatWeaponDefinitionResource.INVALID_HAND_REQUIREMENT:
+			return _failure("equipment_strength_requirement_not_met")
+		var weapon_refs: Array[String] = []
+		for equipment_ref: String in desired:
+			if catalog.get_weapon(StringName(equipment_ref)) != null:
+				weapon_refs.append(equipment_ref)
+		if required_hands == 2:
+			for existing: String in weapon_refs:
+				_remove_equipped_to_inventory(desired, deltas, existing)
+			for equipment_ref: String in desired.duplicate():
+				var existing_shield := catalog.get_shield(StringName(equipment_ref))
+				if existing_shield != null and existing_shield.hand_occupancy > 0:
+					_remove_equipped_to_inventory(desired, deltas, equipment_ref)
+		elif weapon_refs.size() >= 2 or _occupied_hand_count(desired, catalog, actor) >= 2:
+			var replace_ref := String(state.hand_occupancy.get("right", ""))
+			if catalog.get_weapon(StringName(replace_ref)) == null:
+				replace_ref = weapon_refs[0] if not weapon_refs.is_empty() else ""
+			if not replace_ref.is_empty():
+				_remove_equipped_to_inventory(desired, deltas, replace_ref)
+	elif armor != null:
+		for equipment_ref: String in desired.duplicate():
+			var existing_armor := catalog.get_armor(StringName(equipment_ref))
+			if existing_armor != null and existing_armor.armor_slot == armor.armor_slot:
+				_remove_equipped_to_inventory(desired, deltas, equipment_ref)
+	else:
+		for equipment_ref: String in desired.duplicate():
+			if catalog.get_shield(StringName(equipment_ref)) != null:
+				_remove_equipped_to_inventory(desired, deltas, equipment_ref)
+	if not desired.has(item_id):
+		desired.append(item_id)
+	return _apply_player_equipment_transaction(desired, deltas, request_id)
+
+
+func request_player_inventory_unequip(definition_id: StringName, request_id: String = "") -> Dictionary:
+	var boundary := _validate_inventory_management_boundary()
+	if not boundary.get("success", false):
+		return boundary
+	var state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	var item_id := String(definition_id)
+	if state == null or not state.equipment_refs.has(item_id):
+		return _failure("equipment_not_equipped")
+	if catalog.get_weapon(definition_id) != null:
+		var weapon_count := 0
+		for equipment_ref: String in state.equipment_refs:
+			if catalog.get_weapon(StringName(equipment_ref)) != null:
+				weapon_count += 1
+		if weapon_count <= 1:
+			return _failure("last_weapon_unequip_requires_verified_player_unarmed_integration")
+	var desired := state.equipment_refs.duplicate()
+	desired.erase(item_id)
+	return _apply_player_equipment_transaction(desired, {item_id: 1}, request_id)
+
+
+func request_player_inventory_consumable_use(definition_id: StringName, request_id: String = "") -> Dictionary:
+	var consumable := InventoryCatalog.get_verified_consumable(String(definition_id))
+	if consumable.is_empty():
+		return _failure("consumable_effect_unverified")
+	var stable_request_id := request_id if not request_id.is_empty() else _next_request_id("downtime_consumable")
+	if _encounter_active and _encounter_state == ENCOUNTER_RUNNING:
+		var action := InventoryCatalog.make_carried_potion_action_definition(
+			String(definition_id), StringName("player_carried_potion:%s" % String(definition_id))
+		)
+		return simulation.start_verified_consumable_healing_action(Fixture.PLAYER_ID, action, stable_request_id)
+	var boundary := _validate_inventory_management_boundary()
+	if not boundary.get("success", false): return boundary
+	return simulation.use_verified_consumable_during_downtime(Fixture.PLAYER_ID, consumable, stable_request_id)
+
+
+func _validate_inventory_management_boundary() -> Dictionary:
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("inventory_management_requires_between_wave_downtime")
+	if _reward_mode == ArenaRewardLedger.MODE_TEST:
+		return _failure("test_mode_inventory_management_prohibited")
+	return {"success": true}
+
+
+func _remove_equipped_to_inventory(desired: PackedStringArray, deltas: Dictionary, equipment_ref: String) -> void:
+	desired.erase(equipment_ref)
+	deltas[equipment_ref] = int(deltas.get(equipment_ref, 0)) + 1
+
+
+func _occupied_hand_count(refs: PackedStringArray, catalog: CombatDefinitionCatalog, actor: CombatActorDefinition) -> int:
+	var result := 0
+	for equipment_ref: String in refs:
+		var weapon := catalog.get_weapon(StringName(equipment_ref))
+		if weapon != null:
+			result += weapon.effective_hands_required(int(actor.attributes.get("str", -1)))
+		var shield := catalog.get_shield(StringName(equipment_ref))
+		if shield != null:
+			result += shield.hand_occupancy
+	return result
+
+
+func _apply_player_equipment_transaction(desired: PackedStringArray, deltas: Dictionary, request_id: String) -> Dictionary:
+	var actor := simulation.get_actor_definition(Fixture.PLAYER_ID)
+	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	# Damaged shield instances cannot be folded into quantity-only storage:
+	# doing so would restore their SHP when re-equipped.
+	var current_defense := simulation.get_defense_profile(Fixture.PLAYER_ID)
+	if current_defense != null and current_defense.shield_block != null:
+		var block := current_defense.shield_block
+		var shield_resource := catalog.get_shield(block.equipment_ref)
+		if shield_resource != null and not desired.has(String(block.equipment_ref)) \
+		and (not block.usable or block.current_shp != shield_resource.maximum_shp):
+			return _failure("damaged_shield_instance_storage_not_supported")
+	var candidate := CombatActorDefinition.new(
+		actor.actor_id, actor.actor_kind, actor.display_name, actor.attributes,
+		actor.base_combat_stats, actor.resource_maxima, desired, actor.defensive_capabilities,
+		actor.field_sources, actor.unresolved_fields, actor.size_category,
+		actor.ability_allowances, actor.inventory_records, actor.level
+	)
+	var validation := catalog.validate_actor_equipment(candidate)
+	if not validation.get("success", false) or String(validation.get("status", "")) != "valid":
+		return {"success": false, "reason": "equipment_combination_invalid", "issues": validation.get("issues", [])}
+	var modifier_result := catalog.calculate_armor_stat_modifiers(desired)
+	if not modifier_result.get("success", false):
+		return {"success": false, "reason": "equipment_modifier_unresolved", "issues": modifier_result.get("issues", [])}
+	var hands := _build_hand_assignments(desired, catalog, actor)
+	if hands.is_empty():
+		return _failure("equipment_hand_occupancy_conflict")
+	var profiles := _build_player_equipment_profiles(desired, catalog)
+	if not profiles.get("success", false):
+		return profiles
+	var stable_request_id := request_id if not request_id.is_empty() else _next_request_id("downtime_equipment")
+	var result := simulation.apply_downtime_equipment_transaction(
+		Fixture.PLAYER_ID, desired, hands, modifier_result["modifiers"],
+		profiles["defense"], profiles["protection"], profiles["attack"], deltas, stable_request_id
+	)
+	if result.get("success", false):
+		_attack_definition = profiles["attack"]
+		_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = profiles["attack"]
+	return result
+
+
+func _build_hand_assignments(refs: PackedStringArray, catalog: CombatDefinitionCatalog, actor: CombatActorDefinition) -> Dictionary:
+	return CombatWeaponHandling.initial_assignments(refs, catalog, actor)
+
+
+func _build_player_equipment_profiles(refs: PackedStringArray, catalog: CombatDefinitionCatalog) -> Dictionary:
+	var state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	var old_defense := simulation.get_defense_profile(Fixture.PLAYER_ID)
+	var old_protection := simulation.get_damage_protection_profile(Fixture.PLAYER_ID)
+	var weapons: Array[CombatWeaponDefinitionResource] = []
+	var shield: CombatShieldDefinitionResource = null
+	var armors: Array[CombatArmorDefinition] = []
+	var sources := PackedStringArray()
+	for equipment_ref: String in refs:
+		var weapon := catalog.get_weapon(StringName(equipment_ref))
+		if weapon != null:
+			weapons.append(weapon)
+			for source: String in weapon.source_refs:
+				if not sources.has(source): sources.append(source)
+		var armor := catalog.get_armor(StringName(equipment_ref))
+		if armor != null:
+			armors.append(armor.make_combat_armor_definition())
+			for source: String in armor.source_refs:
+				if not sources.has(source): sources.append(source)
+		var candidate_shield := catalog.get_shield(StringName(equipment_ref))
+		if candidate_shield != null:
+			shield = candidate_shield
+			for source: String in shield.source_refs:
+				if not sources.has(source): sources.append(source)
+	if weapons.is_empty():
+		return _failure("missing_primary_weapon_equipment")
+	var attack: CombatAttackDefinition
+	if refs.has(String(Fixture.VAELIS_WEAPON_REF)) and refs.has(String(Fixture.VAELIS_WAND_REF)):
+		attack = Fixture.make_player_attack_definition(Fixture.PLAYER_CHARACTER_VAELIS)
+	else:
+		attack = weapons[0].make_attack_definition(&"player_inventory_equipped_attack", HitLocations.get_same_size_attack_profile()) as CombatAttackDefinition
+	if attack == null:
+		return _failure("equipped_weapon_attack_unavailable")
+	var weapon_block := weapons[0].make_block_definition() as CombatBlockDefinition
+	var shield_block: CombatBlockDefinition = null
+	if shield != null:
+		if old_defense != null and old_defense.shield_block != null \
+		and String(old_defense.shield_block.equipment_ref) == String(shield.definition_id):
+			shield_block = old_defense.shield_block
+		else:
+			shield_block = shield.make_block_definition() as CombatBlockDefinition
+	var defense := CombatDefenseProfile.new(
+		&"player_inventory_defenses",
+		old_defense.priority if old_defense != null else PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]),
+		old_defense.modifiers if old_defense != null else {}, weapon_block, shield_block, sources
+	)
+	var protection := CombatDamageProtectionProfile.new(
+		&"player_inventory_protection", armors,
+		old_protection.exact_type_responses if old_protection != null else {}, sources,
+		old_protection.special_field_responses if old_protection != null else {}
+	)
+	return {"success": true, "attack": attack, "defense": defense, "protection": protection, "state": state}
+
+
+func get_ground_loot() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for item: Dictionary in simulation.get_world_items_snapshot():
+		if String(item.get("world_item_kind", "")) == "loot":
+			result.append(item.duplicate(true))
+	return result
+
+
+func collect_ground_loot(world_item_id: String) -> Dictionary:
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("loot_collection_requires_between_wave_downtime")
+	var result := simulation.collect_ground_loot_item(
+		Fixture.PLAYER_ID, world_item_id, _next_request_id("collect_ground_loot")
+	)
+	if result.get("success", false):
+		_reward_ledger.note_collection(simulation, world_item_id)
+	return result
+
+
+func collect_all_ground_loot(request_id: String = "") -> Dictionary:
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("loot_collection_requires_between_wave_downtime")
+	var result := simulation.collect_all_downtime_loot(Fixture.PLAYER_ID, request_id if not request_id.is_empty() else _next_request_id("collect_all_loot"))
+	if result.get("success", false):
+		for item_id: String in result.get("world_item_ids", []): _reward_ledger.note_collection(simulation, item_id)
+	return result
+
+
+func collect_nearest_ground_loot() -> Dictionary:
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		return _failure("loot_collection_requires_between_wave_downtime")
+	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player_state == null:
+		return _failure("reward_player_unavailable")
+	var candidates: Array[Dictionary] = []
+	for item: Dictionary in get_ground_loot():
+		if String(item.get("state", "")) != "dropped" \
+		or String(item.get("collection_status", "")) != "uncollected":
+			continue
+		var serialized: Variant = item.get("position_microfeet")
+		if not (serialized is Array) or serialized.size() != 2:
+			continue
+		var position := Vector2i(int(serialized[0]), int(serialized[1]))
+		candidates.append({
+			"world_item_id": String(item.get("world_item_id", "")),
+			"distance_squared": player_state.position_microfeet.distance_squared_to(position),
+		})
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		var left_distance := int(left["distance_squared"])
+		var right_distance := int(right["distance_squared"])
+		return left_distance < right_distance or (
+			left_distance == right_distance and String(left["world_item_id"]) < String(right["world_item_id"])
+		)
+	)
+	if candidates.is_empty():
+		return _failure("no_uncollected_ground_loot")
+	return collect_ground_loot(String(candidates[0]["world_item_id"]))
 
 
 func set_arena_bounds_microfeet(bounds: Rect2i) -> void:
@@ -1144,6 +1529,8 @@ func _get_actor_attack_legality(attacker_id: StringName, target_id: StringName, 
 		return {"success": false, "reason": "attack_in_progress"}
 	if not attacker_state.equipment_refs.has(String(attack_definition.weapon_ref)):
 		return {"success": false, "reason": "weapon_not_equipped"}
+	if simulation.get_ready_strike_indices(attacker_id, attack_definition).is_empty():
+		return _failure("weapon_grip_not_ready")
 	var geometry := _get_actor_attack_geometry(attacker_id, target_id)
 	return {
 		"success": true,
@@ -1217,6 +1604,7 @@ func advance_by(delta_us: int) -> void:
 				_opponent_last_movement_us = step_timestamp_us
 		_resolve_ready_attack_pipeline()
 		_refresh_active_attacks()
+		_process_reward_events()
 		_update_encounter_outcome()
 		if not _encounter_active:
 			break
@@ -1283,6 +1671,13 @@ func get_player_character_display_name() -> String:
 
 
 func get_player_primary_weapon_display_name() -> String:
+	var attack := _attack_definitions_by_actor.get(String(Fixture.PLAYER_ID)) as CombatAttackDefinition
+	if attack != null:
+		if _presentation_equipment_catalog == null:
+			_presentation_equipment_catalog = CombatDefinitionCatalog.load_default_fixture_catalog()
+		var weapon := _presentation_equipment_catalog.get_weapon(attack.weapon_ref)
+		if weapon != null:
+			return weapon.display_name.to_upper()
 	return Fixture.get_player_primary_weapon_display_name(_player_character_id)
 
 
@@ -1599,6 +1994,34 @@ func _sync_wave_snapshot() -> void:
 		simulation.set_arena_wave_state_snapshot(get_arena_wave_state())
 
 
+func _process_reward_events() -> void:
+	if _reward_ledger == null:
+		return
+	_reward_ledger.begin_wave(_current_reward_wave_id())
+	var batch := simulation.get_resolved_events_from(_reward_event_cursor)
+	if not batch.get("success", false):
+		_reward_event_cursor = simulation.get_resolved_event_count()
+		return
+	_reward_event_cursor = int(batch.get("next_cursor", _reward_event_cursor))
+	var active_enemy_ids := _wave_enemy_actor_ids()
+	for value: Variant in batch.get("events", []):
+		var event := value as CombatEvent
+		if event == null \
+		or not String(event.event_type) in ["physical_damage_resolved", "verified_special_damage_resolved", "force_bolt_damage_resolved"] \
+		or not active_enemy_ids.has(String(event.target_actor_id)):
+			continue
+		var before: Variant = event.payload.get("hpc_before")
+		var after: Variant = event.payload.get("hpc_after")
+		if typeof(before) != TYPE_INT or typeof(after) != TYPE_INT \
+		or int(before) <= 0 or int(after) > 0:
+			continue
+		_reward_ledger.process_defeat(simulation, event.target_actor_id, event.event_id)
+
+
+func _current_reward_wave_id() -> String:
+	return "" if _arena_wave_state_machine == null else String(_arena_wave_state_machine.get_current_wave_id())
+
+
 func _enter_between_wave_downtime() -> Dictionary:
 	if _arena_wave_state_machine == null:
 		return _failure("wave_circuit_not_initialized")
@@ -1654,6 +2077,8 @@ func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
 		_encounter_active = true
 		_encounter_state = ENCOUNTER_RUNNING
 		_opponent_behavior_status = "wave_arrival_active"
+		_reward_ledger.begin_wave(_current_reward_wave_id())
+		simulation.set_reward_state_snapshot(_reward_ledger.to_dictionary())
 		if _opponent_behavior_enabled:
 			_run_opponent_behavior()
 	return {
@@ -1962,6 +2387,12 @@ func _resolve_world_item_pickup(actor_id: StringName, item: Dictionary) -> bool:
 	if actor_state == null or not (item_position is Vector2i):
 		return false
 	if actor_state.position_microfeet.distance_to(item_position) > float(MICROFEET_PER_FOOT):
+		return false
+	# Ordinary loot cannot be collected through cover merely because collision
+	# stops the collector within one foot of the endpoint. The spear's approved
+	# wall-contact retrieval remains a separate world-item path.
+	if String(item.get("world_item_kind", "")) == "loot" \
+	and not _battlefield.has_line_of_sight(actor_state.position_microfeet, item_position):
 		return false
 	# A projectile may legally rest on a wall face. Combat LOS treats touching
 	# that face as obstructed, but pickup requires reachable physical contact,

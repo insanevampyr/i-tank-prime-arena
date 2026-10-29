@@ -175,6 +175,12 @@ func get_movement_state_for_testing() -> Dictionary:
 	return {} if _movement == null else _movement.to_dictionary()
 
 
+func refresh_equipped_movement_rate(effective_mr: int) -> void:
+	if _movement != null:
+		_movement.base_mr = effective_mr
+		test_base_mr = effective_mr
+
+
 func configure_authoritative_actor_profile(actor_definition: CombatActorDefinition) -> Dictionary:
 	if actor_definition == null:
 		return {"success": false, "reason": "missing_actor_definition"}

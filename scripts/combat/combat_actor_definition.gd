@@ -12,6 +12,10 @@ var actor_id: StringName
 var actor_kind: StringName
 var display_name: String
 var size_category: StringName
+var level: int
+var progression_policy: Dictionary = {}
+var class_names: PackedStringArray = PackedStringArray()
+var progression_hpm_increase: int = 0
 var attributes: Dictionary
 var base_combat_stats: Dictionary
 var combat_stats: Dictionary
@@ -38,7 +42,8 @@ func _init(
 	p_unresolved_fields: PackedStringArray = PackedStringArray(),
 	p_size_category: StringName = &"",
 	p_ability_allowances: Dictionary = {},
-	p_inventory_records: Dictionary = {}
+	p_inventory_records: Dictionary = {},
+	p_level: int = -1
 ) -> void:
 	assert(not String(p_actor_id).is_empty(), "Combat actors require a stable identifier.")
 	assert(not String(p_actor_kind).is_empty(), "Combat actors require a stable kind.")
@@ -46,9 +51,11 @@ func _init(
 	actor_kind = p_actor_kind
 	display_name = p_display_name
 	size_category = p_size_category
+	level = p_level
 	attributes = p_attributes.duplicate(true)
 	base_combat_stats = p_combat_stats.duplicate(true)
 	combat_stats = base_combat_stats.duplicate(true)
+	if progression_hpm_increase != 0: combat_stats["hpm"] = int(combat_stats["hpm"]) + progression_hpm_increase
 	equipment_stat_modifiers = {"mr": 0, "dt": 0, "dp": 0}
 	resource_maxima = p_resource_maxima.duplicate(true)
 	ability_allowances = p_ability_allowances.duplicate(true)
@@ -85,14 +92,40 @@ func apply_equipment_stat_modifiers(modifiers: Dictionary) -> void:
 	for field_name: String in equipment_stat_modifiers:
 		if combat_stats.has(field_name):
 			combat_stats[field_name] = int(base_combat_stats[field_name]) + int(equipment_stat_modifiers[field_name])
+	if progression_hpm_increase != 0: combat_stats["hpm"] = int(base_combat_stats["hpm"]) + progression_hpm_increase
+
+
+func apply_verified_resistance_advancement(
+	field_name: String,
+	expected_current_value: int,
+	target_value: int
+) -> Dictionary:
+	if not ["sr", "tb"].has(field_name):
+		return {"success": false, "reason": "unsupported_advancement_field"}
+	if not base_combat_stats.has(field_name) or typeof(base_combat_stats[field_name]) != TYPE_INT:
+		return {"success": false, "reason": "source_current_value_unresolved"}
+	var current_value := int(base_combat_stats[field_name])
+	if current_value != expected_current_value:
+		return {"success": false, "reason": "stale_advancement_value"}
+	if target_value != current_value + 1:
+		return {"success": false, "reason": "advancement_must_increase_one_point"}
+	base_combat_stats[field_name] = target_value
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return {
+		"success": true,
+		"field_name": field_name,
+		"value_before": current_value,
+		"value_after": target_value,
+	}
 
 
 func to_dictionary() -> Dictionary:
-	return {
+	var snapshot := {
 		"actor_id": String(actor_id),
 		"actor_kind": String(actor_kind),
 		"display_name": display_name,
 		"size_category": String(size_category),
+		"level": level,
 		"attributes": attributes.duplicate(true),
 		"base_combat_stats": base_combat_stats.duplicate(true),
 		"combat_stats": combat_stats.duplicate(true),
@@ -105,6 +138,10 @@ func to_dictionary() -> Dictionary:
 		"field_sources": field_sources.duplicate(true),
 		"unresolved_fields": Array(unresolved_fields),
 	}
+	if not progression_policy.is_empty(): snapshot["progression_policy"] = progression_policy.duplicate(true)
+	if not class_names.is_empty(): snapshot["class_names"] = Array(class_names)
+	if progression_hpm_increase != 0: snapshot["progression_hpm_increase"] = progression_hpm_increase
+	return snapshot
 
 
 func _build_unresolved_fields(explicit_fields: PackedStringArray) -> PackedStringArray:

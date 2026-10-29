@@ -50,6 +50,18 @@ const Task35GRareHumanWarriorPotionsAndCombatTests = preload("res://tests/test_t
 const Task35HRareHumanWarriorBossAITests = preload("res://tests/test_task_35h_rare_human_warrior_boss_ai.gd")
 const Task35IWaveFiveTestModeTests = preload("res://tests/test_task_35i_wave_five_test_mode.gd")
 const Task35JPersistentWavesAndSpearMarkerTests = preload("res://tests/test_task_35j_persistent_waves_and_spear_marker.gd")
+const Task36ARewardsAndLootTests = preload("res://tests/test_task_36a_rewards_and_loot.gd")
+const Task36BCharacterAdvancementTests = preload("res://tests/test_task_36b_character_advancement.gd")
+const Task36CInventoryEquipmentConsumableTests = preload("res://tests/test_task_36c_inventory_equipment_consumables.gd")
+const Task36DCharacterSaveContractTests = preload("res://tests/test_task_36d_character_save_contract.gd")
+const Task36ECharacterStorageTests = preload("res://tests/test_task_36e_character_storage.gd")
+const Task36FRewardsUsabilityTests = preload("res://tests/test_task_36f_rewards_usability.gd")
+const Task36GXpPotionTests = preload("res://tests/test_task_36g_xp_and_potions.gd")
+const Task36GFix2WeaponHandlingTests = preload("res://tests/test_task_36g_fix2_weapon_handling.gd")
+const Task36HCharacterLevelingTests = preload("res://tests/test_task_36h_character_leveling.gd")
+const Task36HFix1PlaytestTests = preload("res://tests/test_task_36h_fix1_playtest.gd")
+const Task36IUiCleanupTests = preload("res://tests/test_task_36i_ui_cleanup.gd")
+const Task36IFix3NacInputTests = preload("res://tests/test_task_36i_fix3_nac_input.gd")
 
 
 func _initialize() -> void:
@@ -58,6 +70,18 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	var suites := [
+		{"name":"Task 36I-Fix3 NAC input and concurrency", "instance":Task36IFix3NacInputTests.new()},
+		{"name":"Task 36I targeted UI cleanup", "instance":Task36IUiCleanupTests.new()},
+		{"name":"Task 36H-Fix1 playtest corrections", "instance":Task36HFix1PlaytestTests.new()},
+		{"name":"Task 36H character leveling", "instance":Task36HCharacterLevelingTests.new()},
+		{"name": "Task 36G-Fix2 shared weapon handling", "instance": Task36GFix2WeaponHandlingTests.new()},
+		{"name": "Task 36G Arena XP and combat potions", "instance": Task36GXpPotionTests.new()},
+		{"name": "Task 36F rewards usability and performance", "instance": Task36FRewardsUsabilityTests.new()},
+		{"name": "Task 36E isolated character storage", "instance": Task36ECharacterStorageTests.new()},
+		{"name": "Task 36D character persistence contract", "instance": Task36DCharacterSaveContractTests.new()},
+		{"name": "Task 36C source-verified inventory and equipment", "instance": Task36CInventoryEquipmentConsumableTests.new()},
+		{"name": "Task 36B source-verified character advancement", "instance": Task36BCharacterAdvancementTests.new()},
+		{"name": "Task 36A V3 XP, Random Drops and loot", "instance": Task36ARewardsAndLootTests.new()},
 		{"name": "Task 35J persistent waves and dropped-spear marker", "instance": Task35JPersistentWavesAndSpearMarkerTests.new()},
 		{"name": "Task 35I Wave 5 encounter and developer Test Mode", "instance": Task35IWaveFiveTestModeTests.new()},
 		{"name": "Task 35H Rare Human Warrior authoritative boss AI", "instance": Task35HRareHumanWarriorBossAITests.new()},

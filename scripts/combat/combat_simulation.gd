@@ -43,7 +43,9 @@ var _world_items: Dictionary = {}
 var _thrown_weapon_context_by_attack_id: Dictionary = {}
 var _resolved_events: Array = []
 var _arena_wave_state: Dictionary = {}
+var _reward_state: Dictionary = {}
 var _retired_actor_ids: Dictionary = {}
+var _weapon_handling_catalog: CombatDefinitionCatalog
 var _combat_started: bool = false
 var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
@@ -131,6 +133,12 @@ func get_ability_payment_preview(actor_id: StringName, definition: CombatActionD
 	return _validate_ability_activation(actor_state, definition)
 
 
+func apply_character_experience_award(actor_id: StringName, award_id: String, xp: int, earned: int, spent: int) -> Dictionary:
+	var result := CharacterLevelProgression.apply_award(self, actor_id, award_id, xp, earned, spent)
+	if result.get("success",false): _state_revision += 1
+	return result
+
+
 func apply_authoritative_midnight_refresh(midnight_id: String) -> Dictionary:
 	if midnight_id.is_empty():
 		return _failure("midnight_id_required")
@@ -142,9 +150,9 @@ func apply_authoritative_midnight_refresh(midnight_id: String) -> Dictionary:
 	actor_keys.sort()
 	for actor_key: String in actor_keys:
 		var state: CombatActorState = _actor_states[actor_key]
-		if state.ability_daily_maxima.is_empty():
-			continue
 		var definition: CombatActorDefinition = _actor_definitions[actor_key]
+		if state.ability_daily_maxima.is_empty() and not definition.resource_maxima.has("ap"):
+			continue
 		var daily_before := state.ability_daily_remaining.duplicate(true)
 		var ap_before: Variant = state.resources.get("ap")
 		state.ability_daily_remaining = state.ability_daily_maxima.duplicate(true)
@@ -198,6 +206,85 @@ func configure_actor_hand_occupancy(actor_id: StringName, assignments: Dictionar
 	return _success({"hand_occupancy": normalized.duplicate(true)})
 
 
+func get_weapon_handling_preview(actor_id: StringName, weapon_ref: StringName, operation: String) -> Dictionary:
+	var state := get_actor_state(actor_id)
+	var actor := get_actor_definition(actor_id)
+	if state == null or actor == null: return _failure("unknown_actor")
+	if not _combat_started: return _failure("opening_initiative_unresolved")
+	if _retired_actor_ids.has(String(actor_id)) or state.current_hpc == null or int(state.current_hpc) <= 0:
+		return _failure("actor_not_eligible")
+	if state.awareness != &"aware" or state.conditions.has("incapacitated") or state.conditions.has("unconscious"):
+		return _failure("actor_incapacitated")
+	if state.conditions.has("prone"): return _failure("actor_prone")
+	if _is_actor_critically_staggered(state): return _failure("actor_critically_staggered")
+	if not state.current_action_instance_id.is_empty(): return _failure("actor_action_in_progress")
+	if _weapon_handling_catalog == null:
+		_weapon_handling_catalog = CombatDefinitionCatalog.load_default_fixture_catalog()
+	return CombatWeaponHandling.plan(state, _weapon_handling_catalog.get_weapon(weapon_ref), int(actor.attributes.get("str", -1)), operation)
+
+
+func request_weapon_handling(actor_id: StringName, weapon_ref: StringName, operation: String, request_id: String) -> Dictionary:
+	if request_id.is_empty(): return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
+	var plan := get_weapon_handling_preview(actor_id, weapon_ref, operation)
+	if not plan.get("success", false): return plan
+	if int(plan.required_acts) == 1:
+		if _arena_wave_state.get("state") == "between_wave_downtime":
+			_accepted_request_ids[request_id] = true
+			return _commit_weapon_handling(actor_id, String(weapon_ref), operation, plan, request_id)
+		var definition := CombatActionDefinition.new(
+			StringName("draw_stowed_weapon:%s" % String(weapon_ref)), 1, true, true, {},
+			{"draw_stowed_weapon": {"weapon_ref": String(weapon_ref)}},
+			PackedStringArray(["PRIME-V3 p. 20: equipping costs one Act; Task 36G-Fix2 owner weapon handling contract"])
+		)
+		var result := start_action(actor_id, definition, request_id)
+		if result.get("success", false):
+			get_action(result.action_instance_id).execution_context = {"weapon_ref": String(weapon_ref)}
+		return result
+	_accepted_request_ids[request_id] = true
+	return _commit_weapon_handling(actor_id, String(weapon_ref), operation, plan, request_id)
+
+
+func _commit_weapon_handling(actor_id: StringName, weapon_ref: String, operation: String, plan: Dictionary, request_id: String, parent_event_id: String = "") -> Dictionary:
+	var state := get_actor_state(actor_id)
+	var before_hands := state.hand_occupancy.duplicate(true)
+	var before_mode := String(state.weapon_handling.get(weapon_ref, ""))
+	state.hand_occupancy = plan.hand_occupancy.duplicate(true)
+	if String(plan.mode).is_empty(): state.weapon_handling.erase(weapon_ref)
+	else: state.weapon_handling[weapon_ref] = String(plan.mode)
+	state.revision += 1
+	_state_revision += 1
+	var event := _record_resolved_event(clock.get_elapsed_us(), &"weapon_handling_changed", _get_actor_initiative(String(actor_id)), actor_id, &"", {
+		"request_id": request_id, "weapon_ref": weapon_ref, "operation": operation,
+		"mode_before": before_mode, "mode_after": String(plan.mode),
+		"hands_before": before_hands, "hands_after": state.hand_occupancy.duplicate(true),
+		"required_acts": int(plan.required_acts), "owned": true,
+		"downtime_clock_paused": _arena_wave_state.get("state") == "between_wave_downtime",
+	}, parent_event_id)
+	return _success({"event_id": event.event_id, "operation": operation})
+
+
+func is_weapon_attack_ready(actor_id: StringName, weapon_ref: StringName) -> bool:
+	var state := get_actor_state(actor_id)
+	if state == null or not CombatWeaponHandling.is_attack_ready(state, String(weapon_ref)): return false
+	if state.hand_occupancy_authoritative:
+		if _weapon_handling_catalog == null:
+			_weapon_handling_catalog = CombatDefinitionCatalog.load_default_fixture_catalog()
+		var weapon := _weapon_handling_catalog.get_weapon(weapon_ref)
+		if weapon != null and weapon.base_hands_required == 2:
+			var required := weapon.effective_hands_required(int(get_actor_definition(actor_id).attributes.get("str", -1)))
+			return required > 0 and state.hand_occupancy.values().count(String(weapon_ref)) >= required
+	return true
+
+
+func get_ready_strike_indices(actor_id: StringName, definition: CombatAttackDefinition) -> Array[int]:
+	var indices: Array[int] = []
+	for index in range(1, definition.strikes_per_act + 1):
+		var ref := StringName(definition.get_strike_profile(index).get("weapon_ref", String(definition.weapon_ref)))
+		if is_weapon_attack_ready(actor_id, ref): indices.append(index)
+	return indices
+
+
 func start_gather_material_action(
 	actor_id: StringName,
 	material_id: StringName,
@@ -239,6 +326,8 @@ func start_equip_hand_item_action(
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
+	if actor_state.weapon_handling.has(String(equipment_ref)):
+		return request_weapon_handling(actor_id, equipment_ref, "draw", request_id)
 	var hand_name := String(hand)
 	if not ["left", "right"].has(hand_name):
 		return _failure("invalid_hand")
@@ -459,6 +548,229 @@ func get_world_items_snapshot() -> Array[Dictionary]:
 		item["position_microfeet"] = _serialized_world_item_position(item.get("position_microfeet"))
 		snapshots.append(item)
 	return snapshots
+
+
+func create_ground_loot_item(
+	world_item_id: String,
+	item_definition: Dictionary,
+	position_microfeet: Vector2i,
+	source_actor_id: StringName,
+	origin_event_id: String,
+	provenance: Dictionary = {}
+) -> Dictionary:
+	if world_item_id.is_empty() or origin_event_id.is_empty():
+		return _failure("ground_loot_identity_unresolved")
+	if _world_items.has(world_item_id):
+		return _failure("duplicate_world_item")
+	var definition_id := String(item_definition.get("definition_id", ""))
+	var quantity := int(item_definition.get("quantity", 0))
+	if definition_id.is_empty() or quantity <= 0:
+		return _failure("ground_loot_definition_invalid")
+	var validation := _validate_world_item_landing({
+		"world_item_id": world_item_id,
+		"world_item_kind": "loot",
+	}, position_microfeet)
+	if not validation.get("success", false):
+		return validation
+	var world_item := {
+		"world_item_id": world_item_id,
+		"world_item_kind": "loot",
+		"item_definition": item_definition.duplicate(true),
+		"equipment_ref": definition_id if String(item_definition.get("item_kind", "")) == "equipment" else "",
+		"quantity": quantity,
+		"owner_actor_id": "",
+		"source_actor_id": String(source_actor_id),
+		"origin_event_id": origin_event_id,
+		"state": "dropped",
+		"position_microfeet": position_microfeet,
+		"collection_status": "uncollected",
+		"allocated_actor_id": "",
+		"provenance": provenance.duplicate(true),
+		"revision": 0,
+	}
+	_world_items[world_item_id] = world_item
+	_state_revision += 1
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"ground_loot_created", 0, source_actor_id, &"",
+		{
+			"world_item_id": world_item_id,
+			"item_definition": item_definition.duplicate(true),
+			"position_microfeet": [position_microfeet.x, position_microfeet.y],
+			"origin_event_id": origin_event_id,
+			"provenance": provenance.duplicate(true),
+		}, origin_event_id
+	)
+	return _success({"world_item_id": world_item_id, "event_id": event.event_id})
+
+
+func transfer_defeated_actor_possession_to_ground(
+	actor_id: StringName,
+	world_item_id: String,
+	item_definition: Dictionary,
+	origin_event_id: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) > 0:
+		return _failure("actor_not_defeated")
+	var equipment_ref := String(item_definition.get("definition_id", ""))
+	if equipment_ref.is_empty() or not actor_state.equipment_refs.has(equipment_ref):
+		for existing: Dictionary in _world_items.values():
+			if String(existing.get("equipment_ref", "")) == equipment_ref \
+			and String(existing.get("source_actor_id", "")) == String(actor_id) \
+			and String(existing.get("state", "")) == "dropped":
+				existing["world_item_kind"] = "loot"
+				existing["item_definition"] = item_definition.duplicate(true)
+				existing["quantity"] = int(item_definition.get("quantity", 1))
+				existing["owner_actor_id"] = ""
+				existing["origin_event_id"] = origin_event_id
+				existing["collection_status"] = "uncollected"
+				existing["allocated_actor_id"] = ""
+				existing["provenance"] = {"source_kind": "creature_possession", "reused_existing_world_item": true}
+				existing["revision"] = int(existing.get("revision", 0)) + 1
+				_world_items[String(existing.get("world_item_id", ""))] = existing
+				_state_revision += 1
+				var event := _record_resolved_event(
+					clock.get_elapsed_us(), &"ground_loot_created", 0, actor_id, &"",
+					{
+						"world_item_id": existing.get("world_item_id", ""),
+						"item_definition": item_definition.duplicate(true),
+						"position_microfeet": _serialized_world_item_position(existing.get("position_microfeet")),
+						"origin_event_id": origin_event_id,
+						"provenance": existing["provenance"],
+					}, origin_event_id
+				)
+				return _success({"world_item_id": existing.get("world_item_id", ""), "event_id": event.event_id, "reused_existing_world_item": true})
+		return _failure("possession_not_carried")
+	var prior_hands := actor_state.hand_occupancy.duplicate(true)
+	actor_state.equipment_refs.erase(equipment_ref)
+	for hand: String in ["left", "right"]:
+		if String(actor_state.hand_occupancy.get(hand, "")) == equipment_ref:
+			actor_state.hand_occupancy[hand] = ""
+	actor_state.revision += 1
+	_state_revision += 1
+	var result := create_ground_loot_item(
+		world_item_id, item_definition, actor_state.position_microfeet, actor_id,
+		origin_event_id, {"source_kind": "creature_possession"}
+	)
+	if not result.get("success", false):
+		actor_state.equipment_refs.append(equipment_ref)
+		actor_state.hand_occupancy = prior_hands
+		actor_state.revision += 1
+		_state_revision += 1
+	return result
+
+
+func transfer_defeated_actor_inventory_to_ground(
+	actor_id: StringName,
+	world_item_id: String,
+	item_definition: Dictionary,
+	origin_event_id: String
+) -> Dictionary:
+	var actor_state := get_actor_state(actor_id)
+	if actor_state == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) > 0:
+		return _failure("actor_not_defeated")
+	var inventory_id := String(item_definition.get("inventory_id", item_definition.get("definition_id", "")))
+	var quantity := int(actor_state.inventory_quantities.get(inventory_id, 0))
+	if inventory_id.is_empty() or quantity <= 0:
+		return _failure("inventory_possession_unavailable")
+	var loot_definition := item_definition.duplicate(true)
+	loot_definition["definition_id"] = inventory_id
+	loot_definition["quantity"] = quantity
+	var result := create_ground_loot_item(
+		world_item_id, loot_definition, actor_state.position_microfeet, actor_id,
+		origin_event_id, {"source_kind": "creature_inventory_possession"}
+	)
+	if not result.get("success", false):
+		return result
+	actor_state.inventory_quantities[inventory_id] = 0
+	actor_state.revision += 1
+	_state_revision += 1
+	return result
+
+
+func collect_ground_loot_item(
+	collector_actor_id: StringName,
+	world_item_id: String,
+	request_id: String,
+	approved_downtime_batch: bool = false
+) -> Dictionary:
+	if approved_downtime_batch and _arena_wave_state.get("state") != "between_wave_downtime":
+		return _failure("downtime_batch_not_available")
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	var collector := get_actor_state(collector_actor_id)
+	if collector == null or collector.current_hpc == null or int(collector.current_hpc) <= 0:
+		return _failure("collector_not_eligible")
+	if not _world_items.has(world_item_id):
+		return _failure("unknown_world_item")
+	var world_item: Dictionary = _world_items[world_item_id]
+	if String(world_item.get("world_item_kind", "")) != "loot" \
+	or String(world_item.get("state", "")) != "dropped" \
+	or String(world_item.get("collection_status", "")) != "uncollected":
+		return _failure("ground_loot_not_collectible")
+	if not approved_downtime_batch and (not _world_item_pickup_resolver.is_valid() \
+	or _world_item_pickup_resolver.call(collector_actor_id, world_item.duplicate(true)) != true):
+		return _failure("world_item_out_of_pickup_reach")
+	var item_definition: Dictionary = world_item.get("item_definition", {})
+	var definition_id := String(item_definition.get("definition_id", ""))
+	var quantity := int(world_item.get("quantity", item_definition.get("quantity", 0)))
+	if definition_id.is_empty() or quantity <= 0:
+		return _failure("ground_loot_definition_invalid")
+	var quantity_before := int(collector.inventory_quantities.get(definition_id, 0))
+	collector.inventory_quantities[definition_id] = quantity_before + quantity
+	collector.revision += 1
+	world_item["state"] = "collected"
+	world_item["collection_status"] = "collected"
+	world_item["allocated_actor_id"] = String(collector_actor_id)
+	world_item["collected_by_actor_id"] = String(collector_actor_id)
+	world_item["collected_at_timestamp_us"] = clock.get_elapsed_us()
+	world_item["revision"] = int(world_item.get("revision", 0)) + 1
+	_world_items[world_item_id] = world_item
+	_accepted_request_ids[request_id] = "ground_loot_collection:%s" % world_item_id
+	_state_revision += 1
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"ground_loot_collected", _get_actor_initiative(String(collector_actor_id)),
+		collector_actor_id, &"", {
+			"world_item_id": world_item_id,
+			"item_definition": item_definition.duplicate(true),
+			"quantity": quantity,
+			"quantity_before": quantity_before,
+			"quantity_after": quantity_before + quantity,
+			"request_id": request_id,
+			"collection_policy": "owner_approved_downtime_batch" if approved_downtime_batch else "one_foot_contact",
+		}, String(world_item.get("origin_event_id", ""))
+	)
+	return _success({"world_item_id": world_item_id, "event_id": event.event_id, "quantity_after": quantity_before + quantity})
+
+
+func collect_all_downtime_loot(collector_actor_id: StringName, request_id: String) -> Dictionary:
+	if request_id.is_empty(): return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
+	if _arena_wave_state.get("state") != "between_wave_downtime": return _failure("downtime_batch_not_available")
+	var collector := get_actor_state(collector_actor_id)
+	if collector == null or collector.current_hpc == null or int(collector.current_hpc) <= 0: return _failure("collector_not_eligible")
+	var ids: Array = _world_items.keys()
+	ids.sort()
+	var collected: Array[String] = []
+	var blocked: Array[Dictionary] = []
+	for item_id: String in ids:
+		var item: Dictionary = _world_items[item_id]
+		if item.get("world_item_kind") != "loot" or item.get("collection_status") != "uncollected" or item.get("state") != "dropped": continue
+		var result := collect_ground_loot_item(collector_actor_id, item_id, "%s:item:%s" % [request_id, item_id], true)
+		if result.get("success", false): collected.append(item_id)
+		else: blocked.append({"world_item_id": item_id, "reason": result.get("reason", "unavailable")})
+	_accepted_request_ids[request_id] = "downtime_batch"
+	_record_resolved_event(clock.get_elapsed_us(), &"downtime_loot_batch_completed", _get_actor_initiative(String(collector_actor_id)), collector_actor_id, &"", {
+		"request_id": request_id, "world_item_ids": collected, "blocked_items": blocked,
+		"collection_policy": "owner_approved_downtime_batch",
+	})
+	return _success({"world_item_ids": collected, "collected_count": collected.size(), "blocked_items": blocked})
 
 
 func record_tactical_decision(actor_id: StringName, target_id: StringName, payload: Dictionary) -> CombatEvent:
@@ -785,6 +1097,167 @@ func register_damage_protection_profile(actor_id: StringName, profile: CombatDam
 		{"actor_id": actor_key, "profile_id": String(profile.profile_id)}
 	)
 	return _success({"actor_id": actor_key, "profile_id": String(profile.profile_id)})
+
+
+func get_defense_profile(actor_id: StringName) -> CombatDefenseProfile:
+	return _defense_profiles.get(String(actor_id)) as CombatDefenseProfile
+
+
+func get_damage_protection_profile(actor_id: StringName) -> CombatDamageProtectionProfile:
+	return _damage_protection_profiles.get(String(actor_id)) as CombatDamageProtectionProfile
+
+
+func apply_downtime_equipment_transaction(
+	actor_id: StringName,
+	desired_equipment_refs: PackedStringArray,
+	desired_hand_occupancy: Dictionary,
+	equipment_modifiers: Dictionary,
+	defense_profile: CombatDefenseProfile,
+	protection_profile: CombatDamageProtectionProfile,
+	attack_definition: CombatAttackDefinition,
+	inventory_deltas: Dictionary,
+	request_id: String
+) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	var actor_state := get_actor_state(actor_id)
+	var actor_definition := get_actor_definition(actor_id)
+	if actor_state == null or actor_definition == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
+		return _failure("actor_not_eligible")
+	if not actor_state.current_action_instance_id.is_empty():
+		return _failure("action_in_progress")
+	if defense_profile == null or protection_profile == null or attack_definition == null:
+		return _failure("equipment_combat_profile_unavailable")
+	for hand: String in ["left", "right"]:
+		var equipment_ref := String(desired_hand_occupancy.get(hand, ""))
+		if not equipment_ref.is_empty() and not desired_equipment_refs.has(equipment_ref):
+			return _failure("equipment_hand_assignment_invalid")
+	for inventory_id: Variant in inventory_deltas:
+		var after := int(actor_state.inventory_quantities.get(String(inventory_id), 0)) + int(inventory_deltas[inventory_id])
+		if after < 0:
+			return _failure("inventory_quantity_insufficient")
+	var equipment_before := Array(actor_state.equipment_refs)
+	var resolved_hands := desired_hand_occupancy.duplicate(true)
+	var retained_handling := {}
+	for ref: String in actor_state.weapon_handling:
+		if not desired_equipment_refs.has(ref): continue
+		retained_handling[ref] = actor_state.weapon_handling[ref]
+		for hand: String in ["left", "right"]:
+			if String(resolved_hands.get(hand, "")) == ref: resolved_hands[hand] = ""
+	for ref: String in retained_handling:
+		if retained_handling[ref] != CombatWeaponHandling.ONE_HAND_HOLD: continue
+		for hand: String in ["left", "right"]:
+			if String(actor_state.hand_occupancy.get(hand, "")) != ref: continue
+			if not String(resolved_hands.get(hand, "")).is_empty(): return _failure("equipment_hand_occupancy_conflict")
+			resolved_hands[hand] = ref
+	var hands_before := actor_state.hand_occupancy.duplicate(true)
+	var inventory_before := actor_state.inventory_quantities.duplicate(true)
+	var modifiers_before := actor_definition.equipment_stat_modifiers.duplicate(true)
+	_accepted_request_ids[request_id] = true
+	actor_state.equipment_refs = desired_equipment_refs.duplicate()
+	actor_state.hand_occupancy = {
+		"left": String(resolved_hands.get("left", "")),
+		"right": String(resolved_hands.get("right", "")),
+	}
+	actor_state.weapon_handling = retained_handling
+	actor_state.hand_occupancy_authoritative = true
+	for inventory_id: Variant in inventory_deltas:
+		actor_state.inventory_quantities[String(inventory_id)] = int(actor_state.inventory_quantities.get(String(inventory_id), 0)) + int(inventory_deltas[inventory_id])
+	actor_definition.equipment_refs = desired_equipment_refs.duplicate()
+	actor_definition.apply_equipment_stat_modifiers(equipment_modifiers)
+	_defense_profiles[String(actor_id)] = defense_profile
+	_damage_protection_profiles[String(actor_id)] = protection_profile
+	_attack_definitions[String(attack_definition.attack_definition_id)] = attack_definition
+	_critical_reaction_definitions[String(actor_id)] = {
+		"attack_definition_id": String(attack_definition.attack_definition_id),
+		"authoritative_line_of_sight": true,
+	}
+	var mr_max_microfeet := maxi(0, int(actor_definition.get_combat_stat("mr"))) * 1_000_000
+	actor_state.remaining_mr_microfeet = mini(actor_state.remaining_mr_microfeet, mr_max_microfeet)
+	actor_state.revision += 1
+	_state_revision += 1
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"downtime_equipment_changed", _get_actor_initiative(String(actor_id)), actor_id, &"",
+		{
+			"request_id": request_id,
+			"equipment_before": equipment_before,
+			"equipment_after": Array(desired_equipment_refs),
+			"hands_before": hands_before,
+			"hands_after": actor_state.hand_occupancy.duplicate(true),
+			"inventory_before": inventory_before,
+			"inventory_after": actor_state.inventory_quantities.duplicate(true),
+			"modifiers_before": modifiers_before,
+			"modifiers_after": equipment_modifiers.duplicate(true),
+			"required_acts": 1,
+			"downtime_clock_paused": true,
+		}
+	)
+	return _success({"event_id": event.event_id, "attack_definition_id": String(attack_definition.attack_definition_id)})
+
+
+func use_verified_consumable_during_downtime(
+	actor_id: StringName,
+	consumable: Dictionary,
+	request_id: String
+) -> Dictionary:
+	if request_id.is_empty():
+		return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id):
+		return _failure("duplicate_request")
+	var actor_state := get_actor_state(actor_id)
+	var actor_definition := get_actor_definition(actor_id)
+	if actor_state == null or actor_definition == null:
+		return _failure("unknown_actor")
+	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
+		return _failure("actor_not_eligible")
+	var inventory_id := String(consumable.get("definition_id", ""))
+	if inventory_id.is_empty() or int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
+		return _failure("consumable_unavailable")
+	if bool(consumable.get("requires_free_hand", false)):
+		var hand_failure := PrimeV3InventoryCatalog.validate_potion_hands(actor_state, int(actor_definition.attributes.get("str", -1)))
+		if not hand_failure.is_empty(): return _failure(hand_failure)
+	var effect_kind := String(consumable.get("effect_kind", ""))
+	var maximum: Variant = actor_definition.get_combat_stat("hpm") if effect_kind == "hpc" else actor_definition.resource_maxima.get(effect_kind)
+	var current: Variant = actor_state.current_hpc if effect_kind == "hpc" else actor_state.resources.get(effect_kind)
+	if maximum == null or current == null:
+		return _failure("consumable_effect_target_unavailable")
+	if int(current) >= int(maximum):
+		return _failure("consumable_effect_already_at_maximum")
+	_accepted_request_ids[request_id] = true
+	var rolls: Array[int] = []
+	var draw_indices: Array[int] = []
+	var rolled_total := 0
+	for _index in range(int(consumable.get("dice_count", 0))):
+		var value := roll_int(1, int(consumable.get("die_sides", 0)))
+		rolls.append(value)
+		draw_indices.append(random.get_draw_count())
+		rolled_total += value
+	var amount := rolled_total + int(consumable.get("flat_bonus", 0))
+	var after := mini(int(current) + amount, int(maximum))
+	var quantity_before := int(actor_state.inventory_quantities[inventory_id])
+	actor_state.inventory_quantities[inventory_id] = quantity_before - 1
+	if effect_kind == "hpc":
+		actor_state.current_hpc = after
+	else:
+		actor_state.resources[effect_kind] = after
+	actor_state.revision += 1
+	_state_revision += 1
+	var event := _record_resolved_event(
+		clock.get_elapsed_us(), &"downtime_consumable_used", _get_actor_initiative(String(actor_id)), actor_id, actor_id,
+		{
+			"request_id": request_id, "inventory_id": inventory_id,
+			"effect_kind": effect_kind, "rolls": rolls, "rng_draw_indices": draw_indices,
+			"flat_bonus": int(consumable.get("flat_bonus", 0)), "rolled_amount": amount,
+			"value_before": int(current), "value_after": after, "value_maximum": int(maximum),
+			"quantity_before": quantity_before, "quantity_after": quantity_before - 1,
+			"required_acts": int(consumable.get("required_acts", 1)), "downtime_clock_paused": true,
+		}
+	)
+	return _success({"event_id": event.event_id, "amount": amount, "value_after": after, "quantity_after": quantity_before - 1})
 
 
 func register_critical_reaction_attack(actor_id: StringName, definition: CombatAttackDefinition, authoritative_line_of_sight: bool) -> Dictionary:
@@ -1161,7 +1634,10 @@ func start_verified_consumable_healing_action(
 	if typeof(consumable) != TYPE_DICTIONARY:
 		return _failure("verified_consumable_unresolved")
 	var consumable_definition: Dictionary = consumable
-	if String(consumable_definition.get("kind", "")) != "healing" \
+	# Stored inventory has no separately tracked, already-retrieved potion state.
+	if definition.required_acts != 2 or not bool(consumable_definition.get("requires_free_hand", false)):
+		return _failure("consumable_retrieval_and_drink_required")
+	if not String(consumable_definition.get("kind", "")) in ["healing", "mana"] \
 	or String(consumable_definition.get("inventory_id", "")).is_empty() \
 	or int(consumable_definition.get("dice_count", 0)) <= 0 \
 	or int(consumable_definition.get("die_sides", 0)) <= 0:
@@ -1171,14 +1647,14 @@ func start_verified_consumable_healing_action(
 		return _failure("unknown_actor")
 	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
 		return _failure("actor_not_eligible")
+	if String(consumable_definition.get("kind", "")) == "mana" and not actor_state.resources.has("mana"):
+		return _failure("consumable_effect_target_unavailable")
 	var inventory_id := String(consumable_definition["inventory_id"])
 	if int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
 		return _failure("consumable_unavailable")
 	if bool(consumable_definition.get("requires_free_hand", false)):
-		if not actor_state.hand_occupancy_authoritative:
-			return _failure("consumable_hand_occupancy_unresolved")
-		if not _actor_has_free_hand(actor_state):
-			return _failure("consumable_free_hand_required")
+		var hand_failure := PrimeV3InventoryCatalog.validate_potion_hands(actor_state, int(get_actor_definition(actor_id).attributes.get("str", -1)))
+		if not hand_failure.is_empty(): return _failure(hand_failure)
 	var result := start_action(actor_id, definition, request_id)
 	if not result.get("success", false):
 		return result
@@ -1376,7 +1852,9 @@ func start_physical_attack(
 	var nac_validation := _validate_nac_attack_context(attacker_state, nac_attack_context)
 	if not nac_validation.get("success", false):
 		return nac_validation
-	for strike_index in range(1, definition.strikes_per_act + 1):
+	var ready_strikes := get_ready_strike_indices(attacker_id, definition)
+	if ready_strikes.is_empty(): return _failure("weapon_grip_not_ready")
+	for strike_index: int in ready_strikes:
 		var strike_profile := definition.get_strike_profile(strike_index)
 		var strike_weapon_ref := String(strike_profile.get("weapon_ref", String(definition.weapon_ref)))
 		if definition.requires_equipped_weapon and not attacker_state.equipment_refs.has(strike_weapon_ref):
@@ -1435,7 +1913,7 @@ func start_physical_attack(
 	var declared_elevation_offset := target_state.elevation_microfeet - attacker_state.elevation_microfeet
 	var distance_squared := declared_offset.x * declared_offset.x + declared_offset.y * declared_offset.y + declared_elevation_offset * declared_elevation_offset
 	var attack_instance_ids: Array[String] = []
-	for strike_index in range(1, definition.strikes_per_act + 1):
+	for strike_index: int in ready_strikes:
 		var attack_instance_id := _make_attack_instance_id(_next_attack_sequence)
 		_next_attack_sequence += 1
 		var attack := CombatAttackInstance.new(
@@ -1498,7 +1976,7 @@ func start_physical_attack(
 				"prepared_target_actor_id": pending_called_shot.get("target_actor_id", ""),
 				"prepared_target_location": pending_called_shot.get("target_location", ""),
 				"applied_to_attack": called_shot_matches,
-				"applied_strike_count": definition.strikes_per_act if called_shot_matches else 0,
+				"applied_strike_count": ready_strikes.size() if called_shot_matches else 0,
 			},
 			String(pending_called_shot.get("source_event_id", ""))
 		)
@@ -2571,12 +3049,114 @@ func record_arena_wave_event(event_type: StringName, payload: Dictionary = {}) -
 	)
 
 
+func record_reward_event(
+	event_type: StringName,
+	source_actor_id: StringName,
+	target_actor_id: StringName,
+	payload: Dictionary,
+	parent_event_id: String = ""
+) -> CombatEvent:
+	assert(String(event_type).begins_with("reward_"), "Reward events must use the reserved reward_ prefix.")
+	return _record_resolved_event(
+		clock.get_elapsed_us(), event_type, 0, source_actor_id, target_actor_id,
+		payload.duplicate(true), parent_event_id
+	)
+
+
 func set_arena_wave_state_snapshot(wave_state: Dictionary) -> void:
 	var next_snapshot := wave_state.duplicate(true)
 	if _arena_wave_state == next_snapshot:
 		return
 	_arena_wave_state = next_snapshot
 	_state_revision += 1
+
+
+func set_reward_state_snapshot(reward_state: Dictionary) -> void:
+	var next_snapshot := reward_state.duplicate(true)
+	if _reward_state == next_snapshot:
+		return
+	_reward_state = next_snapshot
+	_state_revision += 1
+
+
+func apply_verified_character_advancement(
+	actor_id: StringName,
+	purchase_kind: StringName,
+	target_id: StringName,
+	expected_current_value: int,
+	target_value: int
+) -> Dictionary:
+	var actor_key := String(actor_id)
+	var definition := get_actor_definition(actor_id)
+	var state := get_actor_state(actor_id)
+	if definition == null or state == null:
+		return _failure("unknown_actor")
+	if state.current_hpc == null or int(state.current_hpc) <= 0:
+		return _failure("actor_incapacitated")
+	var expected_target := &"sr" if purchase_kind == &"special_resistance" else (
+		&"tb" if purchase_kind == &"talent_bonus" else &""
+	)
+	if expected_target == &"" or target_id != expected_target:
+		return _failure("unsupported_advancement_purchase")
+	var preserved_state := {
+		"current_hpc": state.current_hpc,
+		"resources": state.resources.duplicate(true),
+		"conditions": state.conditions.duplicate(),
+		"equipment_refs": Array(state.equipment_refs),
+		"inventory_quantities": state.inventory_quantities.duplicate(true),
+	}
+	var applied := definition.apply_verified_resistance_advancement(
+		String(target_id), expected_current_value, target_value
+	)
+	if not applied.get("success", false):
+		return applied
+	state.revision += 1
+	_state_revision += 1
+	return _success({
+		"actor_id": actor_key,
+		"purchase_kind": String(purchase_kind),
+		"target_id": String(target_id),
+		"value_before": expected_current_value,
+		"value_after": target_value,
+		"preserved_state": preserved_state,
+		"current_state": {
+			"current_hpc": state.current_hpc,
+			"resources": state.resources.duplicate(true),
+			"conditions": state.conditions.duplicate(),
+			"equipment_refs": Array(state.equipment_refs),
+			"inventory_quantities": state.inventory_quantities.duplicate(true),
+		},
+	})
+
+
+func refresh_developer_character(actor_id: StringName, request_id: String) -> Dictionary:
+	# Explicit owner-approved testing exception, not ordinary Prime recovery.
+	if request_id.is_empty(): return _failure("missing_request_id")
+	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
+	if _reward_state.get("mode") != "dev_normal": return _failure("developer_normal_required")
+	if _arena_wave_state.get("state") != "between_wave_downtime": return _failure("safe_downtime_required")
+	if String(actor_id) != String(_reward_state.get("player_actor_id","")): return _failure("developer_refresh_player_only")
+	var state := get_actor_state(actor_id)
+	var actor := get_actor_definition(actor_id)
+	if state == null or actor == null: return _failure("unknown_actor")
+	if state.current_hpc == null or int(state.current_hpc) <= 0: return _failure("developer_refresh_cannot_resurrect")
+	# Victory freezes pending combat actions until the existing NEXT WAVE
+	# retirement path handles them. They do not prohibit authorized DEV recovery.
+	var maximum: Variant = get_effective_actor_combat_stat(actor_id,"hpm")
+	if maximum == null or int(maximum) <= 0: return _failure("resource_restoration_restricted")
+	var before := {"hpc":state.current_hpc,"resources":state.resources.duplicate(true),"daily_uses":state.ability_daily_remaining.duplicate(true)}
+	_accepted_request_ids[request_id] = true
+	state.current_hpc = int(maximum)
+	for resource: String in ["mana","ap"]:
+		if state.resources.has(resource) and actor.resource_maxima.has(resource): state.resources[resource] = int(actor.resource_maxima[resource])
+	state.ability_daily_remaining = state.ability_daily_maxima.duplicate(true)
+	state.revision += 1
+	_state_revision += 1
+	var event := _record_resolved_event(clock.get_elapsed_us(),&"developer_character_refreshed",_get_actor_initiative(String(actor_id)),actor_id,actor_id,{
+		"request_id":request_id,"developer_only":true,"mode":"dev_normal","before":before,
+		"after":{"hpc":state.current_hpc,"resources":state.resources.duplicate(true),"daily_uses":state.ability_daily_remaining.duplicate(true)},
+		"combat_clock_paused":true,"source_ref":"Task 36H-Fix1 explicit owner-approved developer recovery exception"})
+	return _success({"event_id":event.event_id})
 
 
 func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
@@ -2717,6 +3297,7 @@ func get_state_snapshot() -> Dictionary:
 		"next_damage_sequence": _next_damage_sequence,
 		"next_critical_sequence": _next_critical_sequence,
 		"arena_wave_state": _arena_wave_state.duplicate(true),
+		"reward_state": _reward_state.duplicate(true),
 		"processed_midnight_ids": processed_midnight_ids,
 		"retired_actor_ids": retired_actor_ids,
 		"combat_started": _combat_started,
@@ -2912,6 +3493,14 @@ func _complete_action(action: CombatActionInstance, cause_event_id: String) -> v
 		completion_prerequisites_satisfied = _apply_gathered_material(actor_state, action, completed.event_id)
 	if definition.extension_metadata.has("equip_hand_item"):
 		completion_prerequisites_satisfied = _apply_equipped_hand_item(actor_state, action, completed.event_id)
+	if definition.extension_metadata.has("draw_stowed_weapon"):
+		var weapon_ref := StringName(action.execution_context.get("weapon_ref", ""))
+		var plan := get_weapon_handling_preview(action.actor_id, weapon_ref, "draw")
+		completion_prerequisites_satisfied = bool(plan.get("success", false))
+		if completion_prerequisites_satisfied:
+			_commit_weapon_handling(action.actor_id, String(weapon_ref), "draw", plan, action.request_id, completed.event_id)
+		else:
+			_record_resolved_event(clock.get_elapsed_us(), &"weapon_handling_failed", action.initiative, action.actor_id, &"", {"action_instance_id": action.action_instance_id, "weapon_ref": String(weapon_ref), "reason": plan.get("reason", "draw_completion_invalid")}, completed.event_id)
 	if definition.extension_metadata.has("retrieve_world_item"):
 		completion_prerequisites_satisfied = _apply_retrieved_world_item(actor_state, action, completed.event_id)
 	if definition.extension_metadata.has("verified_consumable"):
@@ -3371,8 +3960,9 @@ func _apply_verified_consumable_healing(
 		failure_reason = "actor_no_longer_eligible"
 	elif int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
 		failure_reason = "consumable_unavailable_at_completion"
-	elif bool(consumable.get("requires_free_hand", false)) and not _actor_has_free_hand(actor_state):
-		failure_reason = "consumable_free_hand_lost"
+	elif bool(consumable.get("requires_free_hand", false)):
+		failure_reason = PrimeV3InventoryCatalog.validate_potion_hands(actor_state, int(get_actor_definition(action.actor_id).attributes.get("str", -1)))
+		if failure_reason == "consumable_free_hand_required": failure_reason = "consumable_free_hand_lost"
 	if not failure_reason.is_empty():
 		_record_resolved_event(
 			clock.get_elapsed_us(), &"consumable_completion_failed", action.initiative,
@@ -3397,6 +3987,19 @@ func _apply_verified_consumable_healing(
 		rolled_total += value
 	var amount := rolled_total + int(consumable.get("flat_bonus", 0))
 	var actor_definition := get_actor_definition(action.actor_id)
+	if String(consumable.get("kind", "healing")) == "mana":
+		var mana_before := int(actor_state.resources.get("mana", 0))
+		var mana_max := int(actor_definition.resource_maxima.get("mana", 0))
+		actor_state.resources["mana"] = mini(mana_before + amount, mana_max)
+		actor_state.revision += 1
+		_state_revision += 1
+		_record_resolved_event(clock.get_elapsed_us(), &"consumable_mana_resolved", action.initiative, action.actor_id, action.actor_id, {
+			"action_instance_id": action.action_instance_id, "inventory_id": inventory_id,
+			"quantity_before": quantity_before, "quantity_after": quantity_before - 1,
+			"rolls": rolls, "rng_draw_indices": draw_indices, "flat_bonus": int(consumable.get("flat_bonus", 0)),
+			"rolled_recovery": amount, "mana_before": mana_before, "mana_after": actor_state.resources["mana"], "mana_max": mana_max,
+		}, parent_event_id)
+		return true
 	var hpc_before := int(actor_state.current_hpc)
 	var hpc_max := int(actor_definition.get_combat_stat("hpm"))
 	actor_state.current_hpc = mini(hpc_before + amount, hpc_max)
@@ -3763,6 +4366,8 @@ func _evaluate_final_attack_legality(attack: CombatAttackInstance, definition: C
 		return _failure("target_not_eligible_at_resolution")
 	if definition.requires_equipped_weapon and not attacker_state.equipment_refs.has(String(attack.weapon_ref)):
 		return _failure("weapon_not_equipped_at_resolution")
+	if not is_weapon_attack_ready(attack.attacker_id, attack.weapon_ref):
+		return _failure("weapon_grip_not_ready_at_resolution")
 	if definition.requires_hand_occupancy and attacker_state.hand_occupancy_authoritative \
 	and not attacker_state.hand_occupancy.values().has(String(attack.weapon_ref)):
 		return _failure("weapon_not_in_hand_at_resolution")
@@ -3971,6 +4576,9 @@ func _evaluate_block_eligibility(
 	result["target_modifier"] = target_modifier + block_definition.target_modifier
 	if not defender_state.equipment_refs.has(String(block_definition.equipment_ref)):
 		result["reason"] = "blocking_equipment_not_equipped"
+		return result
+	if not is_weapon_attack_ready(defender_state.actor_id, block_definition.equipment_ref):
+		result["reason"] = "blocking_weapon_grip_not_ready"
 		return result
 	if not block_definition.proficiency_verified:
 		result["reason"] = "blocking_proficiency_unverified"
@@ -4674,6 +5282,9 @@ func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary
 		return
 	if not reactor_state.equipment_refs.has(String(definition.weapon_ref)):
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_weapon_not_equipped")
+		return
+	if not is_weapon_attack_ready(reactor_id, definition.weapon_ref):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_weapon_grip_not_ready")
 		return
 	if definition.requires_line_of_sight and registration["authoritative_line_of_sight"] != true:
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_line_of_sight_unverified")

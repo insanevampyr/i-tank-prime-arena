@@ -83,10 +83,10 @@ static func configure_simulation(
 		var reaction_result := simulation.register_critical_reaction_attack(actor_id, actor_attack, true)
 		if not reaction_result.get("success", false):
 			return reaction_result
-		if is_player and player_character_id == PLAYER_CHARACTER_VAELIS:
-			var hand_result := simulation.configure_actor_hand_occupancy(actor_id, {"left": String(VAELIS_WAND_REF), "right": String(VAELIS_WEAPON_REF)})
-			if not hand_result.get("success", false):
-				return hand_result
+		var hands := CombatWeaponHandling.initial_assignments(actor.equipment_refs, CombatDefinitionCatalog.load_default_fixture_catalog(), actor)
+		if hands.is_empty(): return {"success": false, "reason": "fixture_hand_assignments_unresolved"}
+		var hand_result := simulation.configure_actor_hand_occupancy(actor_id, hands)
+		if not hand_result.get("success", false): return hand_result
 
 	var player_position_result := simulation.apply_authoritative_position(PLAYER_ID, player_position_microfeet, 0)
 	if not player_position_result.get("success", false):
