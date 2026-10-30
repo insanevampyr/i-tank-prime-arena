@@ -28,18 +28,19 @@ static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: S
 	next["run_spent_xp"] = spent
 	next.award_ids.append(award_id)
 	for gained_level in range(level+1,target_level+1):
-		var die := int(PrimeV3LevelCatalog.HIT_DICE[exp_type-1][0])
-		var flat := int(PrimeV3LevelCatalog.HIT_DICE[exp_type-1][1])
+		var terms := growth_terms(actor)
+		var die := int(terms.die)
+		var flat := int(terms.flat)
 		var roll := sim.roll_int(1,die)
-		var hpb := int(actor.combat_stats.hpb)
+		var hpb := int(terms.hpb)
 		var increase := roll + flat + hpb
 		var hpm_before := int(actor.get_combat_stat("hpm"))
 		actor.progression_hpm_increase += increase
 		actor.apply_equipment_stat_modifiers(actor.equipment_stat_modifiers)
-		var resource := "mana" if policy.resource_mode == "mana" else "ap"
+		var resource := String(terms.resource)
 		var maximum_before := int(actor.resource_maxima.get(resource,0))
-		var wisdom := int(actor.attributes.get("wis",0))
-		var resource_gain := int(wisdom / 2) + 5 if resource == "mana" else 1
+		var wisdom := int(terms.wisdom)
+		var resource_gain := int(terms.resource_gain)
 		actor.resource_maxima[resource] = maximum_before + resource_gain
 		if not state.resources.has(resource): state.resources[resource] = 0
 		var record := {"actor_id":String(actor_id),"award_id":award_id,"exp_type":exp_type,
@@ -58,6 +59,17 @@ static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: S
 	state.progression = next
 	state.revision += 1
 	return {"success":true,"level":next.level,"levels_gained":target_level-level}
+
+static func growth_terms(actor: CombatActorDefinition) -> Dictionary:
+	# Pure shared rule terms for live leveling and saved-history validation.
+	# Callers validate the progression policy first; no roll or state mutation.
+	var exp_type := int(actor.progression_policy.exp_type)
+	var resource := "mana" if actor.progression_policy.resource_mode == "mana" else "ap"
+	var wisdom := int(actor.attributes.get("wis",0))
+	return {"die":int(PrimeV3LevelCatalog.HIT_DICE[exp_type-1][0]),
+		"flat":int(PrimeV3LevelCatalog.HIT_DICE[exp_type-1][1]),
+		"hpb":int(actor.combat_stats.hpb),"resource":resource,"wisdom":wisdom,
+		"resource_gain":int(wisdom / 2) + 5 if resource == "mana" else 1}
 
 static func _failure(reason: String) -> Dictionary:
 	return {"success":false,"reason":reason}

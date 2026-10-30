@@ -41,7 +41,7 @@ func read_profile(profile_id: String) -> Dictionary:
 			result["rejected_files"] = rejected
 			return result
 		# Future versions must never be silently downgraded to an old backup.
-		if result.get("reason") == "unsupported_format_or_version": return result
+		if result.get("reason") in ["unsupported_format_or_version","unsupported_storage_version"]: return result
 		rejected.append(name)
 	return _failure("no_valid_generation" if not names.is_empty() else "save_missing")
 
@@ -66,13 +66,46 @@ func write_profile(profile_id: String, payload: Dictionary, transaction_id: Stri
 	return result
 
 
+func inspect_profile(profile_id: String) -> Dictionary:
+	# Read-only history inspection; never repairs/removes evidence or locks.
+	if not _valid_id(profile_id) or _root.is_empty(): return _failure("invalid_profile_id")
+	var directory := _root.path_join(profile_id)
+	if not DirAccess.dir_exists_absolute(directory):
+		return {"success":true,"generations":[],"writer_locked":false,"pending_write":false,"profile_directory_exists":false}
+	var dir := DirAccess.open(directory)
+	if dir == null: return _failure("directory_read_failed")
+	var records: Array = []
+	var rejected: Array = []
+	var names: Array[String] = []
+	for name: String in dir.get_files():
+		if name.begins_with("generation_") and name.ends_with(".json"): names.append(name)
+	names.sort()
+	var next_generation := 1
+	var transactions := {}
+	for name: String in names:
+		var record := _read_generation(directory.path_join(name),profile_id)
+		if record.get("success",false):
+			if int(record.payload.generation) != next_generation: rejected.append({"file":name,"reason":"generation_history_gap"})
+			if transactions.has(record.transaction_id): rejected.append({"file":name,"reason":"duplicate_transaction_in_history"})
+			transactions[record.transaction_id] = true
+			next_generation = int(record.payload.generation)+1
+			records.append(record)
+		else:
+			rejected.append({"file":name,"reason":record.get("reason","")})
+	return {"success":rejected.is_empty(),"reason":"" if rejected.is_empty() else "generation_recovery_required","profile_directory_exists":true,
+		"generations":records,"rejected_files":rejected,"writer_locked":DirAccess.dir_exists_absolute(directory.path_join("writer.lock")),
+		"pending_write":FileAccess.file_exists(directory.path_join("write.pending"))}
+
+
 func _write_locked(directory: String, profile_id: String, payload: Dictionary, transaction_id: String, text: String) -> Dictionary:
 	var dir := DirAccess.open(directory)
 	if dir == null: return _failure("directory_read_failed")
 	for name: String in dir.get_files():
 		if not name.begins_with("generation_") or not name.ends_with(".json"): continue
 		var prior := _read_generation(directory.path_join(name), profile_id)
-		if not prior.get("success", false): return _failure("generation_repair_required")
+		if not prior.get("success", false):
+			if prior.get("reason") in ["unsupported_format_or_version","unsupported_storage_version"]: return prior
+			return _failure("generation_repair_required")
 		if prior.transaction_id == transaction_id: return _failure("duplicate_transaction")
 	var current := read_profile(profile_id)
 	if current.get("success", false):
@@ -110,7 +143,9 @@ func _read_generation(path: String, profile_id: String) -> Dictionary:
 	var parser := JSON.new()
 	if parser.parse(text) != OK: return _failure("invalid_storage_json")
 	var parsed: Variant = parser.data
-	if not parsed is Dictionary or parsed.get("storage_version") != 1 or typeof(parsed.get("document")) != TYPE_STRING or typeof(parsed.get("transaction_id")) != TYPE_STRING:
+	if not parsed is Dictionary: return _failure("invalid_storage_document")
+	if parsed.get("storage_version") != 1: return _failure("unsupported_storage_version")
+	if typeof(parsed.get("document")) != TYPE_STRING or typeof(parsed.get("transaction_id")) != TYPE_STRING or parsed.size() != 3:
 		return _failure("invalid_storage_document")
 	if not _valid_id(parsed.transaction_id): return _failure("invalid_transaction_id")
 	var decoded := Contract.decode(parsed.document)

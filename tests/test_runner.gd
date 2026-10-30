@@ -62,6 +62,14 @@ const Task36HCharacterLevelingTests = preload("res://tests/test_task_36h_charact
 const Task36HFix1PlaytestTests = preload("res://tests/test_task_36h_fix1_playtest.gd")
 const Task36IUiCleanupTests = preload("res://tests/test_task_36i_ui_cleanup.gd")
 const Task36IFix3NacInputTests = preload("res://tests/test_task_36i_fix3_nac_input.gd")
+const CharacterProfileProjectionTests = preload("res://tests/test_character_profile_projection.gd")
+const CharacterPersistenceCoordinatorTests = preload("res://tests/test_character_persistence_coordinator.gd")
+const CharacterPersistenceSessionTests = preload("res://tests/test_character_persistence_session.gd")
+const PlayableCharacterAdmissionTests = preload("res://tests/test_playable_character_admission.gd")
+const PlayableVaelisPersistenceTests = preload("res://tests/test_playable_vaelis_persistence.gd")
+const PersistenceNextWaveFixTests = preload("res://tests/test_persistence_next_wave_fix.gd")
+const ReturnToWaveOneTests = preload("res://tests/test_return_to_wave_one.gd")
+const NewRunPolicyForceSsTests = preload("res://tests/test_new_run_policy_force_ss.gd")
 
 
 func _initialize() -> void:
@@ -69,7 +77,18 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
+	# Legacy fixtures remain ephemeral. The playable persistence suite supplies
+	# disposable storage explicitly and restores this flag on completion.
+	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 36J-Fix3 new-run policy and Force SS", "instance":NewRunPolicyForceSsTests.new()},
+		{"name":"Task 36J-Fix2 return to Wave 1", "instance":ReturnToWaveOneTests.new()},
+		{"name":"Task 36J-Fix1 persistence NEXT WAVE", "instance":PersistenceNextWaveFixTests.new()},
+		{"name":"Task 36J-Pass5 playable Vaelis persistence", "instance":PlayableVaelisPersistenceTests.new()},
+		{"name":"Task 36J-Pass4 source starter admission", "instance":PlayableCharacterAdmissionTests.new()},
+		{"name":"Task 36J-Pass3 persistence session gates", "instance":CharacterPersistenceSessionTests.new()},
+		{"name":"Task 36J-Pass2 persistence coordinator", "instance":CharacterPersistenceCoordinatorTests.new()},
+		{"name":"Task 36J-Pass1 character projection", "instance":CharacterProfileProjectionTests.new()},
 		{"name":"Task 36I-Fix3 NAC input and concurrency", "instance":Task36IFix3NacInputTests.new()},
 		{"name":"Task 36I targeted UI cleanup", "instance":Task36IUiCleanupTests.new()},
 		{"name":"Task 36H-Fix1 playtest corrections", "instance":Task36HFix1PlaytestTests.new()},

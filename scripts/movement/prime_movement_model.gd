@@ -58,6 +58,33 @@ var _last_run_duration_us: int = 0
 var _running_check_sequence: int = 0
 var _last_movement_direction: Vector2 = Vector2.ZERO
 var _is_prone: bool = false
+const ENTRY_FIELDS := ["_movement_modifier_mr","_is_running","_running_elapsed_us","_next_maintenance_at_us","_recovery_remaining_units","_running_retry_cooldown_us","_last_check_result","_last_check_evidence","_last_end_reason","_last_run_duration_us","_running_check_sequence","_is_prone"]
+
+
+func wave_entry_state() -> Dictionary:
+	var dynamic := {}
+	for field: String in ENTRY_FIELDS: dynamic[field] = get(field).duplicate(true) if get(field) is Dictionary else get(field)
+	return {"version":1,"profile":{"mr":base_mr,"spd":effective_spd,"end":effective_end,"investment":running_skill_investment,"scm":skill_check_modifier,"rb":roll_bonus},"state":dynamic,"direction":[_last_movement_direction.x,_last_movement_direction.y],"rng":(_roll_source as DeterministicCombatRng).wave_entry_state()}
+
+
+func restore_wave_entry(value: Dictionary) -> bool:
+	var expected := {"mr":base_mr,"spd":effective_spd,"end":effective_end,"investment":running_skill_investment,"scm":skill_check_modifier,"rb":roll_bonus}
+	if value.get("version") != 1 or value.get("profile") != expected or not value.get("state") is Dictionary or value.state.size() != ENTRY_FIELDS.size() or not value.state.has_all(ENTRY_FIELDS) or not value.get("direction") is Array or value.direction.size() != 2: return false
+	for field: String in ENTRY_FIELDS:
+		var field_value: Variant = value.state[field]
+		if field in ["_is_running","_is_prone"]:
+			if not field_value is bool: return false
+		elif field == "_last_check_evidence":
+			if not field_value is Dictionary: return false
+		elif (typeof(field_value) != TYPE_INT and typeof(field_value) != TYPE_FLOAT) or not is_finite(float(field_value)) or floor(float(field_value)) != float(field_value) or field_value < 0 or field_value > 9007199254740991: return false
+	for component: Variant in value.direction:
+		if (typeof(component) != TYPE_INT and typeof(component) != TYPE_FLOAT) or not is_finite(float(component)) or absf(float(component)) > 1: return false
+	var restored_rng := DeterministicCombatRng.new(0)
+	if not value.get("rng") is Dictionary or not restored_rng.restore_wave_entry(value.rng): return false
+	for field: String in ENTRY_FIELDS: set(field,value.state[field].duplicate(true) if value.state[field] is Dictionary else value.state[field])
+	_last_movement_direction = Vector2(value.direction[0],value.direction[1])
+	_roll_source = restored_rng
+	return true
 
 
 func _init(

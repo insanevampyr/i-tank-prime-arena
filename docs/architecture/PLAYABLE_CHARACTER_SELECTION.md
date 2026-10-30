@@ -1,5 +1,7 @@
 # Playable Character Selection
 
+Task 36J-Pass5 validates Vaelis desktop admission/loading before session activation. NORMAL/DEV profiles are isolated; TEST/Guard remain nonpersistent. Failed application retains the prior session. START uses a saved entry; RETRY WAVE discards unsecured combat. Completed-circuit NEW RUN preserves permanent progression with a fresh run identity. RESET remains ephemeral and never deletes profiles. Web saving remains blocked. See the Pass5 persistence-contract section for guarantees/gates; selection layout is unchanged.
+
 Task 34 adds a bounded READY-state selector to the existing Arena scene. `CHAR: GUARD` is the default; pressing it toggles to `CHAR: VAELIS`. The selected character name is also shown in the combat status. Selection rebuilds the chosen duel/wave with the current seed, remains disabled after START, and is preserved by RESET.
 
 ## Runtime profiles

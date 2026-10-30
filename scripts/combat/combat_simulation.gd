@@ -57,6 +57,8 @@ var _gatherable_material_resolver: Callable
 var _world_item_landing_resolver: Callable
 var _world_item_pickup_resolver: Callable
 var _thrown_weapon_trajectory_resolver: Callable
+var _inventory_instance_resolver: Callable
+var wave_entry_opening: Dictionary = {}
 
 
 func _init(seed_value: int) -> void:
@@ -96,6 +98,14 @@ func schedule_event(
 
 func roll_int(min_inclusive: int, max_inclusive: int) -> int:
 	return random.next_int(min_inclusive, max_inclusive)
+
+
+func set_inventory_instance_resolver(resolver: Callable) -> void:
+	_inventory_instance_resolver = resolver
+
+
+func _select_inventory_instances(actor_id: StringName, definition: String, quantity: int, equipped: bool = false) -> Dictionary:
+	return _inventory_instance_resolver.call(actor_id,definition,quantity,equipped) if _inventory_instance_resolver.is_valid() else {"success":true}
 
 
 func set_attack_final_line_of_sight_resolver(resolver: Callable) -> void:
@@ -796,7 +806,8 @@ func register_verified_special_damage_definition(
 	return _success({"special_id": key})
 
 
-func begin_combat() -> Dictionary:
+func begin_combat(entry_opening: Dictionary = {}) -> Dictionary:
+	if entry_opening.is_empty(): entry_opening = wave_entry_opening
 	if _combat_started:
 		return _failure("combat_already_started")
 	if not _actions.is_empty():
@@ -813,8 +824,13 @@ func begin_combat() -> Dictionary:
 	for actor_key: String in actor_keys:
 		var actor_definition: CombatActorDefinition = _actor_definitions[actor_key]
 		var actor_state: CombatActorState = _actor_states[actor_key]
-		actor_state.opening_initiative_roll = roll_int(1, 10)
-		actor_state.opening_initiative_rng_draw_index = random.get_draw_count()
+		if not entry_opening.is_empty():
+			if not entry_opening.has(actor_key) or int(entry_opening[actor_key].get("roll",0)) < 1 or int(entry_opening[actor_key].get("roll",0)) > 10: return _failure("invalid_entry_initiative")
+			actor_state.opening_initiative_roll = int(entry_opening[actor_key].roll)
+			actor_state.opening_initiative_rng_draw_index = int(entry_opening[actor_key].draw_index)
+		else:
+			actor_state.opening_initiative_roll = roll_int(1, 10)
+			actor_state.opening_initiative_rng_draw_index = random.get_draw_count()
 		actor_state.opening_initiative_total = int(actor_state.opening_initiative_roll) + int(actor_definition.get_combat_stat("init"))
 		actor_state.revision += 1
 
@@ -852,6 +868,7 @@ func begin_combat() -> Dictionary:
 			"total": actor_state.opening_initiative_total,
 			"opening_order_rank": actor_state.opening_order_rank,
 		}
+		if not entry_opening.is_empty(): entry["restored_wave_entry"] = true
 		opening_order.append(entry)
 		_record_resolved_event(
 			clock.get_elapsed_us(),
@@ -1141,6 +1158,11 @@ func apply_downtime_equipment_transaction(
 		if after < 0:
 			return _failure("inventory_quantity_insufficient")
 	var equipment_before := Array(actor_state.equipment_refs)
+	var ownership_selections := {}
+	for inventory_id: String in inventory_deltas:
+		var selected := _select_inventory_instances(actor_id,inventory_id,absi(int(inventory_deltas[inventory_id])),int(inventory_deltas[inventory_id]) > 0)
+		if not selected.get("success",false): return selected
+		if selected.has("selection"): ownership_selections[inventory_id] = selected.selection
 	var resolved_hands := desired_hand_occupancy.duplicate(true)
 	var retained_handling := {}
 	for ref: String in actor_state.weapon_handling:
@@ -1196,6 +1218,7 @@ func apply_downtime_equipment_transaction(
 			"downtime_clock_paused": true,
 		}
 	)
+	if not ownership_selections.is_empty(): event.payload["ownership_selections"] = ownership_selections
 	return _success({"event_id": event.event_id, "attack_definition_id": String(attack_definition.attack_definition_id)})
 
 
@@ -1227,6 +1250,8 @@ func use_verified_consumable_during_downtime(
 		return _failure("consumable_effect_target_unavailable")
 	if int(current) >= int(maximum):
 		return _failure("consumable_effect_already_at_maximum")
+	var ownership := _select_inventory_instances(actor_id,inventory_id,1)
+	if not ownership.get("success",false): return ownership
 	_accepted_request_ids[request_id] = true
 	var rolls: Array[int] = []
 	var draw_indices: Array[int] = []
@@ -1257,6 +1282,7 @@ func use_verified_consumable_during_downtime(
 			"required_acts": int(consumable.get("required_acts", 1)), "downtime_clock_paused": true,
 		}
 	)
+	if ownership.has("selection"): event.payload["ownership_selection"] = ownership.selection
 	return _success({"event_id": event.event_id, "amount": amount, "value_after": after, "quantity_after": quantity_before - 1})
 
 
@@ -3955,7 +3981,9 @@ func _apply_verified_consumable_healing(
 	parent_event_id: String
 ) -> bool:
 	var inventory_id := String(consumable.get("inventory_id", ""))
+	var ownership := _select_inventory_instances(action.actor_id,inventory_id,1)
 	var failure_reason := ""
+	if not ownership.get("success",false): failure_reason = String(ownership.get("reason","consumable_instance_unavailable"))
 	if actor_state.current_hpc == null or int(actor_state.current_hpc) <= 0:
 		failure_reason = "actor_no_longer_eligible"
 	elif int(actor_state.inventory_quantities.get(inventory_id, 0)) <= 0:
@@ -3999,6 +4027,7 @@ func _apply_verified_consumable_healing(
 			"rolls": rolls, "rng_draw_indices": draw_indices, "flat_bonus": int(consumable.get("flat_bonus", 0)),
 			"rolled_recovery": amount, "mana_before": mana_before, "mana_after": actor_state.resources["mana"], "mana_max": mana_max,
 		}, parent_event_id)
+		if ownership.has("selection"): (_resolved_events.back() as CombatEvent).payload["ownership_selection"] = ownership.selection
 		return true
 	var hpc_before := int(actor_state.current_hpc)
 	var hpc_max := int(actor_definition.get_combat_stat("hpm"))
@@ -4022,6 +4051,7 @@ func _apply_verified_consumable_healing(
 			"hpc_max": hpc_max,
 		}, parent_event_id
 	)
+	if ownership.has("selection"): (_resolved_events.back() as CombatEvent).payload["ownership_selection"] = ownership.selection
 	return true
 
 
@@ -5002,6 +5032,9 @@ func _apply_successful_shield_block(
 	if destroyed:
 		shield.usable = false
 		defender_state.equipment_refs.remove_at(defender_state.equipment_refs.find(String(shield.equipment_ref)))
+		get_actor_definition(defender_state.actor_id).equipment_refs = defender_state.equipment_refs.duplicate()
+		for hand: String in ["left","right"]:
+			if defender_state.hand_occupancy.get(hand) == String(shield.equipment_ref): defender_state.hand_occupancy[hand] = ""
 		defender_state.revision += 1
 	attempt.resources_spent = {"shield_shp": 1}
 	attempt.resolution_context = {

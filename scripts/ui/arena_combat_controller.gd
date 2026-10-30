@@ -115,6 +115,9 @@ var _weapon_handling_buttons: Dictionary = {}
 var _inventory_entries: Array[Dictionary] = []
 var _combat_inventory_open := false
 var _rewards_panel_context := ""
+var _next_wave_failure_reason := ""
+var _return_wave_one_failure_reason := ""
+var _return_wave_one_button: Button
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -158,6 +161,14 @@ func _ready() -> void:
 	_player.set_authoritative_movement_resolver(_resolve_player_movement)
 	if _encounter_button != null and not _encounter_button.pressed.is_connected(_on_encounter_button_pressed):
 		_encounter_button.pressed.connect(_on_encounter_button_pressed)
+	if _encounter_button != null:
+		_return_wave_one_button = Button.new()
+		_return_wave_one_button.name = "ReturnToWaveOne"
+		_return_wave_one_button.text = "RETURN TO WAVE 1"
+		_return_wave_one_button.focus_mode = Control.FOCUS_NONE
+		_return_wave_one_button.visible = false
+		_return_wave_one_button.pressed.connect(_on_return_to_wave_one_pressed)
+		_encounter_button.get_parent().add_child(_return_wave_one_button)
 	if _encounter_selector != null and not _encounter_selector.pressed.is_connected(_on_encounter_selector_pressed):
 		_encounter_selector.pressed.connect(_on_encounter_selector_pressed)
 	if _character_selector != null and not _character_selector.pressed.is_connected(_on_character_selector_pressed):
@@ -763,24 +774,36 @@ static func _is_attack_key(keycode: Key) -> bool:
 
 func _on_encounter_button_pressed() -> void:
 	_clear_attack_hold_intent()
-	# Close presentation before START/NEXT WAVE can activate enemies.
-	_combat_inventory_open = false
-	if _rewards_panel != null:
-		_rewards_panel.hide()
+	# Requests resolve synchronously before rendering. Keep downtime visible
+	# until the authoritative checkpoint and transition have actually succeeded.
+	var close_rewards := false
 	if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY:
-		_player.reset_for_encounter(_initial_player_position_feet)
-		_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
+		if _session._playable_persistence == null:
+			_player.reset_for_encounter(_initial_player_position_feet)
+			_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot
 		var start_result := _session.start_encounter()
+		close_rewards = start_result.get("success",false)
 		_last_ui_message = "Encounter started. Opening Initiative is authoritative." if start_result.get("success", false) else "Start blocked: %s" % _friendly_reason(String(start_result.get("reason", "rejected")))
 	elif _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		var advance_result := _session.request_next_wave()
 		if advance_result.get("success", false):
+			close_rewards = true
+			_next_wave_failure_reason = ""
 			_last_ui_message = "Advanced to %s in the continuing authoritative combat session." % String(advance_result.get("next_wave_id", "next wave"))
 			_rebuild_encounter_visuals()
 		else:
-			_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(String(advance_result.get("reason", "rejected")))
+			_next_wave_failure_reason = String(advance_result.get("persistence",{}).get("reason",advance_result.get("reason","rejected")))
+			_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(_next_wave_failure_reason)
+	elif _session._playable_persistence != null:
+		var completed := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY
+		var result := _prepare_encounter_fixture(completed)
+		close_rewards = result.get("success",false)
+		_last_ui_message = "New run ready." if result.get("success",false) and completed else ("Wave entry restored." if result.get("success",false) else "Recovery blocked: %s" % result.get("reason","unverified save"))
 	else:
 		_reset_encounter()
+	if close_rewards:
+		_combat_inventory_open = false
+		if _rewards_panel != null: _rewards_panel.hide()
 	_update_presentation()
 
 
@@ -864,6 +887,7 @@ func _on_seed_text_submitted(seed_text: String) -> void:
 
 
 func _apply_selected_seed(seed_text: String) -> Dictionary:
+	if _session != null and _session._playable_persistence != null: return {"success":false,"reason":"persistent_wave_entry_seed_locked"}
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		_last_ui_message = "Seed change blocked: RESET the active encounter first."
 		_update_presentation()
@@ -915,6 +939,9 @@ static func _fits_signed_64_bit(value: String) -> bool:
 
 
 func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
+	var previous_motion := _player.capture_wave_entry_motion()
+	var previous_position := _player.position
+	var previous_fixture := _encounter_fixture_id
 	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "encounter_selection_requires_ready_state"}
@@ -933,6 +960,9 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	if _floating_combat_text != null:
 		_floating_combat_text.clear()
 	var result := _prepare_encounter_fixture()
+	if not result.get("success",false):
+		_encounter_fixture_id = previous_fixture
+		_restore_profile_visual_state(previous_motion,previous_position)
 	if result.get("success", false):
 		_last_ui_message = "%s selected. Press START." % _session.get_encounter_display_name()
 	_update_combat_movement_lock()
@@ -940,13 +970,60 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	return result
 
 
-func _prepare_encounter_fixture() -> Dictionary:
-	_session = ArenaCombatSession.new(combat_seed, null, _encounter_fixture_id, _player_character_id)
+func _on_return_to_wave_one_pressed() -> void:
+	_update_rewards_panel()
+	_clear_attack_hold_intent()
+	var authorization := _session.get_return_to_wave_one_authorization()
+	var result: Dictionary = authorization
+	if authorization.get("success",false): result = _prepare_encounter_fixture(true,authorization.checkpoint)
+	if result.get("success",false):
+		_return_wave_one_failure_reason = ""
+		_last_ui_message = "New Wave 1 entry saved. Secured character progress retained."
+	else:
+		_return_wave_one_failure_reason = String(result.get("reason","unverified checkpoint"))
+		_last_ui_message = "Return to Wave 1 blocked: %s" % _friendly_reason(_return_wave_one_failure_reason)
+	_update_combat_movement_lock()
+	_update_presentation()
+
+
+func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+	var previous_motion := _player.capture_wave_entry_motion()
+	var previous_position := _player.position
+	var previous_fixture := _encounter_fixture_id
+	var previous := _session
+	var result := _prepare_encounter_candidate(new_run,defeated_checkpoint)
+	if not result.get("success",false):
+		_session = previous
+		_encounter_fixture_id = previous_fixture
+		_restore_profile_visual_state(previous_motion,previous_position)
+	return result
+
+
+func _restore_profile_visual_state(motion: Dictionary, previous_position: Vector2) -> void:
+	if _session != null:
+		_player.configure_authoritative_actor_profile(_session.simulation.get_actor_definition(Fixture.PLAYER_ID))
+	_player.position = previous_position
+	_player.restore_wave_entry_motion(motion)
+
+
+func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+	var previous_session := _session
+	var requested_seed: int = previous_session._seed_value if new_run and previous_session != null else combat_seed
+	_session = ArenaCombatSession.new(requested_seed, null, _encounter_fixture_id, _player_character_id)
+	var reward_mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
+	var persistent_setup := _session.prepare_playable_persistence(reward_mode,new_run,defeated_checkpoint)
+	if not persistent_setup.get("success",false):
+		_session = previous_session
+		_last_ui_message = "Character load blocked: %s" % persistent_setup.get("reason","invalid profile")
+		return persistent_setup
+	if persistent_setup.get("persistent",false): _encounter_fixture_id = _session._encounter_fixture_id
 	_session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	_session.set_opponent_behavior_enabled(true)
 	var setup: Dictionary
 	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS:
-		setup = _session.initialize_wave_one_goblins(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
+		var player_spawn := Vector2i(roundi(_initial_player_position_feet.x*1000000),roundi(_initial_player_position_feet.y*1000000)) if new_run else _node_position_microfeet(_player)
+		var opponent_spawn := Vector2i(roundi(_initial_opponent_position_feet.x*1000000),roundi(_initial_opponent_position_feet.y*1000000)) if new_run else _node_position_microfeet(_opponent)
+		setup = _session.initialize_wave_one_goblins(player_spawn, opponent_spawn, false)
 	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES:
 		setup = _session.initialize_wave_two_spadoodles(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	elif _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES:
@@ -958,15 +1035,35 @@ func _prepare_encounter_fixture() -> Dictionary:
 	else:
 		setup = _session.initialize(_node_position_microfeet(_player), _node_position_microfeet(_opponent), false)
 	if not setup.get("success", false):
+		_session = previous_session
 		_last_ui_message = "Combat fixture blocked: %s" % String(setup.get("reason", "unknown setup failure"))
 		return setup
 	var reward_setup := _session.configure_reward_mode(
 		ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
 	)
 	if not reward_setup.get("success", false):
+		_session = previous_session
 		_last_ui_message = "Rewards blocked: %s" % _friendly_reason(String(reward_setup.get("reason", "reward setup failure")))
 		return reward_setup
-	_session.select_target(_session.get_targetable_enemy_ids()[0])
+	var running_validation := _player.configure_authoritative_actor_profile(_session.simulation.get_actor_definition(Fixture.PLAYER_ID))
+	if not running_validation.get("success",false):
+		_session = previous_session
+		return running_validation
+	_session.player_movement_boundary_provider = _player.capture_wave_entry_motion
+	var finalized := _session.finalize_playable_persistence()
+	if not finalized.get("success",false):
+		_session = previous_session
+		_last_ui_message = "Character recovery blocked: %s" % finalized.get("reason","invalid checkpoint")
+		return finalized
+	var targets := _session.get_targetable_enemy_ids()
+	if not targets.is_empty(): _session.select_target(targets[0])
+	else: _session.clear_target()
+	var authoritative_player := _session.get_actor_state(Fixture.PLAYER_ID)
+	_player.apply_authoritative_combat_position(_microfeet_to_feet(authoritative_player.position_microfeet))
+	if _session._playable_persistence != null and not _session._playable_persistence.recovery.is_empty():
+		if not _player.restore_wave_entry_motion(_session._playable_persistence.recovery.movement):
+			_session = previous_session
+			return {"success":false,"reason":"running_entry_application_failed"}
 	_rebuild_encounter_visuals()
 	_append_log(
 		"Synthetic Small Guard size test ready; Guard statistics/loadout are reused and no printed creature identity is claimed."
@@ -981,10 +1078,6 @@ func _prepare_encounter_fixture() -> Dictionary:
 				)
 		)
 	)
-	var running_validation := _player.configure_authoritative_actor_profile(Fixture.make_player_actor(_player_character_id, Fixture.PLAYER_ID))
-	if not running_validation.get("success", false):
-		_last_ui_message = "Running fixture blocked: %s" % _friendly_reason(String(running_validation.get("reason", "unresolved running profile")))
-		return running_validation
 	return setup
 
 
@@ -1653,6 +1746,8 @@ func _update_rewards_panel(force_refresh: bool = false) -> void:
 		context += ":%s" % _session.get_arena_wave_state().get("current_wave_id", "")
 	if context != _rewards_panel_context:
 		_rewards_panel_context = context
+		_next_wave_failure_reason = ""
+		_return_wave_one_failure_reason = ""
 		# Open once for each victory boundary, never for ordinary content refresh.
 		_combat_inventory_open = state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST
 	var visible := _combat_inventory_open and (
@@ -1901,14 +1996,19 @@ func _update_presentation() -> void:
 		ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY:
 			_last_ui_message = "VICTORY: the opponent fixture is defeated. Press RESET."
 		ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
-			if not _last_ui_message.begins_with("Collected") and not _last_ui_message in ["Move closer to collect.", "Path blocked.", "Available between waves.", "Inventory unavailable."]:
+			if not _next_wave_failure_reason.is_empty():
+				_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(_next_wave_failure_reason)
+			elif not _last_ui_message.begins_with("Collected") and not _last_ui_message in ["Move closer to collect.", "Path blocked.", "Available between waves.", "Inventory unavailable."]:
 				_last_ui_message = "Safe downtime: COLLECT ALL LOOT, then NEXT WAVE when ready."
 		ArenaCombatSession.ENCOUNTER_WAVE_TRANSITION_BLOCKED:
 			_last_ui_message = "Next wave selected; continuous-wave creature integration is pending. Press RESET."
-		ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT:
-			_last_ui_message = "DEFEAT: the player fixture is defeated. Press RESET."
-		ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT:
-			_last_ui_message = "DOUBLE DEFEAT: both fixtures reached zero HPC. Press RESET."
+		ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT, ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT:
+			if not _return_wave_one_failure_reason.is_empty():
+				_last_ui_message = "Return to Wave 1 blocked: %s" % _friendly_reason(_return_wave_one_failure_reason)
+			elif _session._playable_persistence != null:
+				_last_ui_message = "DEFEAT: RETRY WAVE restores entry; RETURN TO WAVE 1 starts anew."
+			else:
+				_last_ui_message = "DOUBLE DEFEAT: both fixtures reached zero HPC. Press RESET." if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT else "DEFEAT: the player fixture is defeated. Press RESET."
 	if _player_hpc_label != null:
 		_player_hpc_label.visible = player_state.current_hpc != null and int(player_state.current_hpc) > 0
 	var resource_presentation := _get_player_resource_presentation(player_state)
@@ -1956,7 +2056,7 @@ func _update_presentation() -> void:
 				String(_assigned_special_id).replace("_", " ").to_upper(),
 			]
 		_combat_status.text = (
-			"%s | %s | %s\nPLAYER: %s\nTARGET: %s | %s: %s\nRANGE: %s%s\n%s"
+			"%s | %s | %s\nPLAYER: %s\nTARGET: %s | %s: %s\nRANGE: %s%s\n%s | %s"
 			% [
 				_session.get_encounter_state().replace("_", " ").to_upper(),
 				_session.get_encounter_display_name(),
@@ -1968,8 +2068,10 @@ func _update_presentation() -> void:
 				distance_text,
 				force_controls,
 				_compact_status_message(_last_ui_message),
+				_session.get_character_persistence_status().get("text", "Progress not saved"),
 			]
 		)
+		_combat_status.tooltip_text = "Character persistence: %s" % _session.get_character_persistence_status().get("reason", "unavailable")
 	_update_facing_indicators()
 	if _encounter_button != null:
 		_encounter_button.text = (
@@ -1977,7 +2079,13 @@ func _update_presentation() -> void:
 			if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
 			else ("NEXT WAVE" if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME else "RESET")
 		)
+		if _session._playable_persistence != null:
+			if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY: _encounter_button.text = "NEW RUN"
+			elif _session.get_encounter_state() in [ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT,ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT]: _encounter_button.text = "RETRY WAVE"
 		_encounter_button.disabled = false
+	if _return_wave_one_button != null:
+		_return_wave_one_button.visible = _session.get_return_to_wave_one_authorization().get("success",false)
+		_return_wave_one_button.tooltip_text = "Return blocked: %s" % _friendly_reason(_return_wave_one_failure_reason) if not _return_wave_one_failure_reason.is_empty() else "Start Wave 1 with the secured character and approved NEW RUN restoration."
 	if _encounter_selector != null:
 		_encounter_selector.text = (
 			("DEV NORMAL — XP ×10" if _encounter_selector_index == 8 else "NORMAL\nWAVE 1")

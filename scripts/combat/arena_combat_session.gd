@@ -121,6 +121,14 @@ var _gargoyle_last_tactical_signatures: Dictionary = {}
 var _reward_ledger: ArenaRewardLedger
 var _reward_mode: String = ArenaRewardLedger.MODE_TEST
 var _reward_event_cursor: int = 0
+var _character_persistence := CharacterPersistenceSession.new()
+var _profile_binding_requested := false
+var _persistent_starter_audit: Dictionary = {}
+var _playable_persistence: PlayableCharacterPersistence
+var _entry_bootstrap: Dictionary = {}
+var _entry_dice: Array = []
+var player_movement_boundary_provider: Callable
+var _authorized_entry_write := false
 
 
 func _init(
@@ -142,6 +150,7 @@ func initialize(
 	opponent_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = opponent_position_microfeet
 	var initial_occupancy := {
@@ -199,6 +208,7 @@ func initialize_wave_one_goblins(
 	first_goblin_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = true
@@ -315,6 +325,7 @@ func initialize_wave_two_spadoodles(
 	first_spadoodle_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = false
@@ -411,6 +422,7 @@ func initialize_wave_three_skelly_hades(
 	first_enemy_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = false
@@ -546,6 +558,7 @@ func initialize_wave_four_gargoyles(
 	first_gargoyle_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = false
@@ -636,6 +649,7 @@ func initialize_wave_five_rare_human_warrior(
 	boss_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
 	_is_wave_one_goblin_encounter = false
@@ -754,8 +768,20 @@ func _register_selected_player() -> Dictionary:
 	var attack := Fixture.make_player_attack_definition(_player_character_id)
 	var defense := Fixture.make_player_defense_profile(_player_character_id, Fixture.PLAYER_ID)
 	var protection := Fixture.make_player_damage_protection_profile(_player_character_id, Fixture.PLAYER_ID)
+	if _playable_persistence != null:
+		actor = _playable_persistence.candidate.actor_definition
+		actor.actor_id = Fixture.PLAYER_ID
+		var profiles := _build_player_equipment_profiles(actor.equipment_refs,CombatDefinitionCatalog.load_default_fixture_catalog())
+		if not profiles.success: return profiles
+		attack = profiles.attack
+		defense = profiles.defense
+		protection = profiles.protection
+		if defense.shield_block != null:
+			var ref := String(defense.shield_block.equipment_ref)
+			if not _playable_persistence.candidate.shield_blocks.has(ref): return _failure("restored_shield_instance_missing")
+			defense.shield_block = _playable_persistence.candidate.shield_blocks[ref]
 	var validation := Fixture.validate_player_combatant(_player_character_id, actor, defense, protection, attack)
-	if not validation.get("success", false):
+	if _playable_persistence == null and not validation.get("success", false):
 		return _failure(String(validation.get("reason", "player_fixture_invalid")))
 	var registration := _register_wave_combatant(actor, defense, protection, attack)
 	if not registration.get("success", false):
@@ -763,7 +789,7 @@ func _register_selected_player() -> Dictionary:
 	var initial_hands := _build_hand_assignments(actor.equipment_refs, CombatDefinitionCatalog.load_default_fixture_catalog(), actor)
 	var initial_hand_result := simulation.configure_actor_hand_occupancy(Fixture.PLAYER_ID, initial_hands)
 	if not initial_hand_result.get("success", false): return initial_hand_result
-	if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS:
+	if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and _playable_persistence == null:
 		var hand_result := simulation.configure_actor_hand_occupancy(Fixture.PLAYER_ID, {
 			"left": String(Fixture.VAELIS_WAND_REF),
 			"right": String(Fixture.VAELIS_WEAPON_REF),
@@ -775,7 +801,89 @@ func _register_selected_player() -> Dictionary:
 			return _failure(String(automation_result.get("reason", "vaelis_nac_configuration_failed")))
 	_attack_definition = attack
 	_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = attack
+	if _playable_persistence != null: return _playable_persistence.apply_player(self)
 	return {"success": true}
+
+
+func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+	if _initialized: return _failure("persistence_requires_fresh_session")
+	if not defeated_checkpoint.is_empty():
+		if not new_run or mode != defeated_checkpoint.get("mode") or mode not in [ArenaRewardLedger.MODE_NORMAL,ArenaRewardLedger.MODE_DEV_NORMAL] or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
+			return _failure("defeated_profile_mode_mismatch")
+		if OS.has_feature("web") or _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]: return _failure("defeated_profile_encounter_not_authorized")
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or mode == "test" or PlayableCharacterPersistence.test_nonpersistent: return {"success":true,"persistent":false}
+	if _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]: return {"success":true,"persistent":false}
+	if OS.has_feature("web"): return {"success":true,"persistent":false,"reason":"web_write_coordination_unverified"}
+	var service := PlayableCharacterPersistence.new()
+	var opened := service.open(mode,new_run,defeated_checkpoint)
+	if not opened.success: return opened
+	_playable_persistence = service
+	_entry_bootstrap = service.recovery.duplicate(true)
+	if _entry_bootstrap.is_empty(): _encounter_fixture_id = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+	if not _entry_bootstrap.is_empty():
+		_seed_value = String(_entry_bootstrap.seed).to_int()
+		simulation = CombatSimulation.new(_seed_value)
+		simulation.wave_entry_opening = _entry_bootstrap.opening.duplicate(true)
+		var number := int(String(_entry_bootstrap.wave_id).trim_prefix("wave_"))
+		_encounter_fixture_id = [Fixture.ENCOUNTER_WAVE_ONE_GOBLINS,Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES,Fixture.ENCOUNTER_WAVE_THREE_SKELLY_HADES,Fixture.ENCOUNTER_WAVE_FOUR_GARGOYLES,Fixture.ENCOUNTER_WAVE_FIVE_RARE_HUMAN_WARRIOR][number-1]
+		for row: Dictionary in _entry_bootstrap.roster:
+			for index in range(row.dice_results.size()): _entry_dice.append({"value":int(row.dice_results[index]),"rng_draw_index":int(row.rng_draw_indices[index])})
+	return {"success":true,"persistent":true,"encounter_fixture_id":_encounter_fixture_id}
+
+
+func get_return_to_wave_one_authorization() -> Dictionary:
+	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or _playable_persistence == null or _reward_mode != _playable_persistence.mode:
+		return {"success":false,"reason":"persistent_vaelis_required"}
+	if _encounter_state not in [ENCOUNTER_PLAYER_DEFEAT,ENCOUNTER_DOUBLE_DEFEAT]: return {"success":false,"reason":"return_requires_player_defeat"}
+	var service := _playable_persistence
+	var entry: Dictionary = service._prior.get("recovery",{})
+	if service.generation < 1 or entry.get("phase") != "entry" or entry.get("wave_id") != _current_reward_wave_id() or entry.get("run_id") != service.run_id:
+		return {"success":false,"reason":"verified_wave_entry_required"}
+	if not service._prepared.is_empty() and not service._last_ack: return {"success":false,"reason":"persistent_checkpoint_pending"}
+	return {"success":true,"checkpoint":{"profile_id":service.profile_id,"mode":service.mode,"run_id":service.run_id,"wave_id":entry.wave_id,"generation":service.generation}}
+
+
+func finalize_playable_persistence() -> Dictionary:
+	if _playable_persistence == null: return {"success":true,"persistent":false}
+	_authorized_entry_write = true
+	var result := _playable_persistence.bind_runtime(self)
+	_authorized_entry_write = false
+	if not result.success:
+		_encounter_active = false
+		return result
+	_entry_bootstrap.clear()
+	return result
+
+
+func bind_character_profile_before_initialization(source: CombatCharacterDefinitionResource, profile_id: String, rules_revision: String, authority: Callable, isolated_storage: CharacterSaveStorage = null) -> Dictionary:
+	if _initialized or _profile_binding_requested: return _failure("profile_binding_requires_new_session")
+	_profile_binding_requested = true
+	# Host-only seam. The current fixtures have no instance/admission authority;
+	# the controller never constructs profile IDs or supplies a verifier.
+	if isolated_storage != null: _character_persistence = CharacterPersistenceSession.new(isolated_storage)
+	return _character_persistence.bind_before_run(source, profile_id, rules_revision, authority)
+
+
+func get_character_persistence_status() -> Dictionary:
+	if _playable_persistence != null: return _playable_persistence.status()
+	var status := _character_persistence.get_status()
+	# Source availability is diagnostic only. It never manufactures a profile or
+	# changes the fixture's starting inventory to match a proposed admission.
+	var unbound_mode: bool = status.get("reason") == "trusted_profile_and_item_ownership_unavailable" or (status.get("reason") == "nonproduction_mode_lineage" and status.get("mode_history") == ["dev_normal"])
+	if unbound_mode and not _persistent_starter_audit.is_empty():
+		status["starter_verified"] = _persistent_starter_audit.get("success",false)
+		status["reason"] = _persistent_starter_audit.get("reason","interrupted_wave_resource_checkpoint_and_instance_application_unavailable")
+		status["starter_details"] = _persistent_starter_audit.get("details",{}).duplicate(true)
+		status["profile_namespace"] = _reward_mode
+	return status
+
+
+func _checkpoint_character(boundary: String) -> Dictionary:
+	if _playable_persistence != null:
+		return _playable_persistence.checkpoint(self,"entry" if boundary == "next_wave_entry" else ("complete" if boundary == "run_completed" else "downtime"))
+	if not _character_persistence.requires_checkpoint(): return {"success":true,"persistent":false}
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("persistence_requires_completed_wave_downtime")
+	return _character_persistence.checkpoint(simulation.get_actor_definition(Fixture.PLAYER_ID), simulation.get_actor_state(Fixture.PLAYER_ID), _reward_ledger.to_dictionary(), simulation.get_defense_profile(Fixture.PLAYER_ID), boundary)
 
 
 func set_opponent_behavior_enabled(enabled: bool) -> void:
@@ -786,6 +894,8 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 
 
 func start_encounter() -> Dictionary:
+	if not _character_persistence.can_start_run():
+		return {"success":false,"reason":"character_profile_not_ready","persistence":get_character_persistence_status()}
 	if not _initialized:
 		return _failure("encounter_not_initialized")
 	if _arena_wave_state_machine != null and not _is_playable_wave_encounter():
@@ -806,6 +916,10 @@ func start_encounter() -> Dictionary:
 func reset_encounter(start_active: bool = false) -> Dictionary:
 	if _uses_external_simulation:
 		return _failure("external_simulation_reset_unsupported")
+	_character_persistence.fixture_reset()
+	if _playable_persistence != null:
+		_playable_persistence.fixture_reset()
+		_playable_persistence = null
 	simulation = CombatSimulation.new(_seed_value)
 	_reward_ledger = ArenaRewardLedger.new()
 	_reward_event_cursor = 0
@@ -870,6 +984,7 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 func configure_reward_mode(mode: String) -> Dictionary:
 	if _encounter_active:
 		return _failure("reward_mode_locked_during_active_encounter")
+	if _playable_persistence != null and mode != _playable_persistence.mode: return _failure("persistent_profile_mode_locked")
 	var player_definition := simulation.get_actor_definition(Fixture.PLAYER_ID)
 	if player_definition == null:
 		return _failure("reward_player_unavailable")
@@ -877,6 +992,15 @@ func configure_reward_mode(mode: String) -> Dictionary:
 	if not result.get("success", false):
 		return result
 	_reward_mode = mode
+	_character_persistence.observe_mode(mode)
+	var preflight := _character_persistence.inspect_before_run()
+	if preflight.get("reason") == "trusted_profile_and_item_ownership_unavailable" or (preflight.get("reason") == "nonproduction_mode_lineage" and _character_persistence.get_status().mode_history == ["dev_normal"]):
+		var starter_audit := PlayableCharacterAdmission.audit(_player_character_id)
+		_persistent_starter_audit = {"success":starter_audit.success,"details":starter_audit.get("details",{})}
+		if not starter_audit.success: _persistent_starter_audit["reason"] = starter_audit.reason
+		if _player_character_id == Fixture.PLAYER_CHARACTER_GUARD: _persistent_starter_audit = {"success":false,"reason":"guard_fixture_nonpersistent_by_design"}
+	if preflight.get("reason") == "starter_instance_admission_required":
+		_character_persistence.checkpoint(player_definition, simulation.get_actor_state(Fixture.PLAYER_ID), _reward_ledger.to_dictionary(), simulation.get_defense_profile(Fixture.PLAYER_ID), "run_admission")
 	_reward_event_cursor = 0
 	simulation.set_world_item_pickup_resolver(_resolve_world_item_pickup)
 	var reward_battlefield: ArenaBattlefield = _battlefield
@@ -884,6 +1008,7 @@ func configure_reward_mode(mode: String) -> Dictionary:
 		return reward_battlefield.is_ground_world_item_position_legal(position)
 	)
 	_reward_ledger.begin_wave(_current_reward_wave_id())
+	if _playable_persistence != null: _playable_persistence.restore_ledger(_reward_ledger)
 	simulation.set_reward_state_snapshot(_reward_ledger.to_dictionary())
 	return result
 
@@ -911,6 +1036,9 @@ func request_character_advancement(
 	target_id: StringName,
 	request_id: String = ""
 ) -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("advancement_requires_between_wave_downtime")
 	if _reward_mode == ArenaRewardLedger.MODE_TEST:
@@ -921,9 +1049,11 @@ func request_character_advancement(
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
-	return _reward_ledger.purchase_advancement(
+	var result := _reward_ledger.purchase_advancement(
 		simulation, stable_request_id, purchase_kind, target_id
 	)
+	if result.get("success", false): result["persistence"] = _checkpoint_character("character_changed")
+	return result
 
 
 func get_player_inventory_entries() -> Array[Dictionary]:
@@ -947,6 +1077,9 @@ func get_player_inventory_entries() -> Array[Dictionary]:
 				provenance["world_item_id"] = String(world_item.get("world_item_id", ""))
 				collected_definition = (world_item.get("item_definition", {}) as Dictionary).duplicate(true)
 				break
+		if _playable_persistence != null:
+			if collected_definition.is_empty(): collected_definition = _playable_persistence.owned_description(String(item_id))
+			provenance = _playable_persistence.owned_provenance(String(item_id))
 		var entry := InventoryCatalog.describe_item(
 			String(item_id), int(state.inventory_quantities.get(String(item_id), 0)),
 			state.equipment_refs.has(String(item_id)), catalog, provenance
@@ -962,9 +1095,16 @@ func get_player_inventory_entries() -> Array[Dictionary]:
 
 
 func request_player_weapon_handling(definition_id: StringName, operation: String, request_id: String = "") -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
+		if operation == "draw" and _encounter_state == ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("persistent_downtime_draw_requires_inventory_reequip")
 	if _encounter_state not in [ENCOUNTER_RUNNING, ENCOUNTER_BETWEEN_WAVE_DOWNTIME]:
 		return _failure("encounter_not_running")
-	return simulation.request_weapon_handling(Fixture.PLAYER_ID, definition_id, operation, request_id if not request_id.is_empty() else _next_request_id("weapon_%s" % operation))
+	var result := simulation.request_weapon_handling(Fixture.PLAYER_ID, definition_id, operation, request_id if not request_id.is_empty() else _next_request_id("weapon_%s" % operation))
+	if result.get("success", false) and _encounter_state == ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+		result["persistence"] = _checkpoint_character("character_changed")
+	return result
 
 
 func request_player_inventory_equip(definition_id: StringName, request_id: String = "") -> Dictionary:
@@ -1043,6 +1183,9 @@ func request_player_inventory_unequip(definition_id: StringName, request_id: Str
 
 
 func request_player_inventory_consumable_use(definition_id: StringName, request_id: String = "") -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
 	var consumable := InventoryCatalog.get_verified_consumable(String(definition_id))
 	if consumable.is_empty():
 		return _failure("consumable_effect_unverified")
@@ -1054,10 +1197,15 @@ func request_player_inventory_consumable_use(definition_id: StringName, request_
 		return simulation.start_verified_consumable_healing_action(Fixture.PLAYER_ID, action, stable_request_id)
 	var boundary := _validate_inventory_management_boundary()
 	if not boundary.get("success", false): return boundary
-	return simulation.use_verified_consumable_during_downtime(Fixture.PLAYER_ID, consumable, stable_request_id)
+	var result := simulation.use_verified_consumable_during_downtime(Fixture.PLAYER_ID, consumable, stable_request_id)
+	if result.get("success", false): result["persistence"] = _checkpoint_character("character_changed")
+	return result
 
 
 func _validate_inventory_management_boundary() -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("inventory_management_requires_between_wave_downtime")
 	if _reward_mode == ArenaRewardLedger.MODE_TEST:
@@ -1092,7 +1240,7 @@ func _apply_player_equipment_transaction(desired: PackedStringArray, deltas: Dic
 		var block := current_defense.shield_block
 		var shield_resource := catalog.get_shield(block.equipment_ref)
 		if shield_resource != null and not desired.has(String(block.equipment_ref)) \
-		and (not block.usable or block.current_shp != shield_resource.maximum_shp):
+		and (not block.usable or block.current_shp != shield_resource.maximum_shp) and _playable_persistence == null:
 			return _failure("damaged_shield_instance_storage_not_supported")
 	var candidate := CombatActorDefinition.new(
 		actor.actor_id, actor.actor_kind, actor.display_name, actor.attributes,
@@ -1120,6 +1268,7 @@ func _apply_player_equipment_transaction(desired: PackedStringArray, deltas: Dic
 	if result.get("success", false):
 		_attack_definition = profiles["attack"]
 		_attack_definitions_by_actor[String(Fixture.PLAYER_ID)] = profiles["attack"]
+		result["persistence"] = _checkpoint_character("character_changed")
 	return result
 
 
@@ -1168,6 +1317,12 @@ func _build_player_equipment_profiles(refs: PackedStringArray, catalog: CombatDe
 			shield_block = old_defense.shield_block
 		else:
 			shield_block = shield.make_block_definition() as CombatBlockDefinition
+		if _playable_persistence != null:
+			var wear := _playable_persistence.equipment_condition(String(shield.definition_id))
+			if not wear.success: return wear
+			if not wear.condition.is_empty():
+				shield_block.current_shp = int(wear.condition.shp)
+				shield_block.usable = bool(wear.condition.usable)
 	var defense := CombatDefenseProfile.new(
 		&"player_inventory_defenses",
 		old_defense.priority if old_defense != null else PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]),
@@ -1190,6 +1345,9 @@ func get_ground_loot() -> Array[Dictionary]:
 
 
 func collect_ground_loot(world_item_id: String) -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("loot_collection_requires_between_wave_downtime")
 	var result := simulation.collect_ground_loot_item(
@@ -1197,15 +1355,20 @@ func collect_ground_loot(world_item_id: String) -> Dictionary:
 	)
 	if result.get("success", false):
 		_reward_ledger.note_collection(simulation, world_item_id)
+		result["persistence"] = _checkpoint_character("character_changed")
 	return result
 
 
 func collect_all_ground_loot(request_id: String = "") -> Dictionary:
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("loot_collection_requires_between_wave_downtime")
 	var result := simulation.collect_all_downtime_loot(Fixture.PLAYER_ID, request_id if not request_id.is_empty() else _next_request_id("collect_all_loot"))
 	if result.get("success", false):
 		for item_id: String in result.get("world_item_ids", []): _reward_ledger.note_collection(simulation, item_id)
+		result["persistence"] = _checkpoint_character("character_changed")
 	return result
 
 
@@ -1605,6 +1768,7 @@ func advance_by(delta_us: int) -> void:
 		_resolve_ready_attack_pipeline()
 		_refresh_active_attacks()
 		_process_reward_events()
+		if _playable_persistence != null: _playable_persistence.ingest(self)
 		_update_encounter_outcome()
 		if not _encounter_active:
 			break
@@ -1696,6 +1860,7 @@ func request_player_special(
 	automatic_activation: bool = false,
 	perceived_danger: bool = false
 ) -> Dictionary:
+	if _playable_persistence != null and special_id == VaelisForce.FORCE_SHIELD_ID and _encounter_state in [ENCOUNTER_BETWEEN_WAVE_DOWNTIME,ENCOUNTER_PLAYER_VICTORY]: return _failure("persistent_frozen_cast_preparation_not_supported")
 	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		return {"success": false, "reason": "player_special_not_available", "resource_spent": 0}
 	if not _encounter_active or _encounter_state != ENCOUNTER_RUNNING:
@@ -1727,7 +1892,12 @@ func request_player_special(
 func cancel_player_force_shield() -> Dictionary:
 	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		return _failure("player_special_not_available")
-	return simulation.cancel_persistent_damage_shield(Fixture.PLAYER_ID, VaelisForce.FORCE_SHIELD_ID, _next_request_id("force_shield_cancel"))
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
+	var result := simulation.cancel_persistent_damage_shield(Fixture.PLAYER_ID, VaelisForce.FORCE_SHIELD_ID, _next_request_id("force_shield_cancel"))
+	if result.get("success",false) and _playable_persistence != null and _encounter_state in [ENCOUNTER_BETWEEN_WAVE_DOWNTIME,ENCOUNTER_PLAYER_VICTORY]: result["persistence"] = _checkpoint_character("run_completed" if _encounter_state == ENCOUNTER_PLAYER_VICTORY else "character_changed")
+	return result
 
 
 func configure_player_nac_automation(settings: Dictionary) -> Dictionary:
@@ -1973,6 +2143,9 @@ func get_state_snapshot() -> Dictionary:
 
 
 func _roll_wave_quantity(dice_sides: int) -> Dictionary:
+	if not _entry_dice.is_empty():
+		var recorded: Dictionary = _entry_dice.pop_front()
+		return recorded
 	var value := simulation.roll_int(1, dice_sides)
 	return {"value": value, "rng_draw_index": simulation.random.get_draw_count()}
 
@@ -2034,11 +2207,25 @@ func _enter_between_wave_downtime() -> Dictionary:
 	_encounter_state = ENCOUNTER_BETWEEN_WAVE_DOWNTIME
 	_opponent_behavior_status = "between_wave_downtime"
 	_publish_wave_transition(transition)
+	if _playable_persistence != null:
+		# The clock is already frozen. Apply the existing wave-retirement rules
+		# before projecting a safe boundary, otherwise an attack at a defeated
+		# enemy can wait forever for retirement behind its own required save.
+		var retirement := _retire_completed_wave_combatants()
+		if not retirement.get("success",false): return retirement
 	return {
 		"success": true,
 		"wave_id": _arena_wave_state_machine.get_current_wave_id(),
 		"downtime": get_between_wave_downtime_state(),
+		"persistence": _checkpoint_character("wave_completed"),
 	}
+
+
+func _retire_completed_wave_combatants() -> Dictionary:
+	var remaining := PackedStringArray()
+	for actor_id: String in _wave_enemy_actor_ids():
+		if not simulation.is_actor_retired(StringName(actor_id)): remaining.append(actor_id)
+	return {"success":true} if remaining.is_empty() else simulation.retire_wave_combatants(remaining)
 
 
 func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
@@ -2051,8 +2238,11 @@ func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
 	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
 		return _failure("player_not_eligible_for_next_wave")
+	var checkpoint := _checkpoint_character("next_wave")
+	if not checkpoint.get("success", false):
+		return {"success":false,"reason":"character_checkpoint_not_secured","persistence":checkpoint}
 	var retiring_actor_ids := _wave_enemy_actor_ids()
-	var retirement := simulation.retire_wave_combatants(retiring_actor_ids)
+	var retirement := _retire_completed_wave_combatants()
 	if not retirement.get("success", false):
 		return retirement
 	for actor_id: String in retiring_actor_ids:
@@ -2079,8 +2269,18 @@ func _advance_from_between_wave_downtime(trigger: String) -> Dictionary:
 		_opponent_behavior_status = "wave_arrival_active"
 		_reward_ledger.begin_wave(_current_reward_wave_id())
 		simulation.set_reward_state_snapshot(_reward_ledger.to_dictionary())
+		_authorized_entry_write = true
+		var entry_checkpoint := _checkpoint_character("next_wave_entry") if _playable_persistence != null else {"success":true}
+		_authorized_entry_write = false
+		if not entry_checkpoint.success:
+			_encounter_active = false
+			_encounter_state = ENCOUNTER_WAVE_TRANSITION_BLOCKED
+			return entry_checkpoint
 		if _opponent_behavior_enabled:
 			_run_opponent_behavior()
+	if _playable_persistence != null and _arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE:
+		var final_checkpoint := _checkpoint_character("run_completed")
+		if not final_checkpoint.success: return final_checkpoint
 	return {
 		"success": true,
 		"advanced": true,

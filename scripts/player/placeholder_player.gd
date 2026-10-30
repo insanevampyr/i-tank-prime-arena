@@ -175,6 +175,20 @@ func get_movement_state_for_testing() -> Dictionary:
 	return {} if _movement == null else _movement.to_dictionary()
 
 
+func capture_wave_entry_motion() -> Dictionary:
+	return _movement.wave_entry_state()
+
+
+func restore_wave_entry_motion(value: Dictionary) -> bool:
+	var candidate := PrimeMovementModel.new(test_base_mr,test_effective_spd,test_effective_end,test_running_skill_investment,test_skill_check_modifier,test_roll_bonus,DeterministicCombatRng.new(test_rng_seed))
+	if not candidate.restore_wave_entry(value): return false
+	candidate.position_feet = position / pixels_per_foot
+	_movement = candidate
+	_movement_rng = candidate._roll_source
+	_run_was_held = false
+	return true
+
+
 func refresh_equipped_movement_rate(effective_mr: int) -> void:
 	if _movement != null:
 		_movement.base_mr = effective_mr

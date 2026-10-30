@@ -1,14 +1,51 @@
 class_name CharacterSaveContract
 extends RefCounted
 
-# A proposal/serialization contract only. No filesystem or gameplay callers.
+# Versioned serialization only. No filesystem or playable-session callers.
 const FORMAT := "itank_arena_character"
 const VERSION := 1
+const PROFILE_VERSION := 2
 const MAX_SAFE_INTEGER := 9_007_199_254_740_991
 const PAYLOAD_KEYS := ["character_id", "definition_id", "rules_revision", "generation", "base_attributes", "xp", "purchases", "items", "secured_checkpoints"]
 
 
 static func validate(payload: Dictionary) -> Dictionary:
+	if payload.has("permanent") or payload.has("lineage"):
+		var legacy := payload.duplicate(true)
+		legacy.erase("permanent")
+		legacy.erase("lineage")
+		legacy.erase("settlements")
+		legacy.erase("profile_namespace")
+		legacy.erase("recovery")
+		legacy.erase("equipment_state")
+		legacy.erase("run_history")
+		var result := validate(legacy)
+		if payload.has("run_history"):
+			var runs: Variant = payload.run_history
+			var seen_runs := {}
+			if not runs is Array or runs.is_empty():
+				result.errors.append("invalid_run_history")
+			else:
+				for run: Variant in runs:
+					if not run is String or run.is_empty() or run.length() > 64 or not run.is_valid_identifier() or seen_runs.has(run): result.errors.append("invalid_or_duplicate_run_identity")
+					else: seen_runs[run] = true
+				if payload.get("recovery") is Dictionary and not seen_runs.has(payload.recovery.get("run_id")): result.errors.append("recovery_run_not_authorized")
+		if payload.has("recovery"):
+			if not payload.recovery is Dictionary or not CharacterWaveCheckpoint.validate(payload.recovery).get("success",false): result.errors.append("invalid_wave_recovery_checkpoint")
+		if payload.has("equipment_state"):
+			if not payload.equipment_state is Dictionary or payload.equipment_state.size() != 2 or not payload.equipment_state.get("hands") is Dictionary or not payload.equipment_state.get("handling") is Dictionary: result.errors.append("invalid_profile_equipment_state")
+		if payload.has("profile_namespace"):
+			var save_namespace: Variant = payload.profile_namespace
+			if save_namespace not in ["normal","dev_normal"] or not payload.get("character_id") is String:
+				result.errors.append("invalid_profile_namespace")
+			elif not payload.character_id.begins_with("prod_" if save_namespace == "normal" else "dev_"):
+				result.errors.append("profile_namespace_identity_mismatch")
+		if payload.has("settlements"):
+			_validate_records(payload.settlements,"receipt_id",result.errors,"settlement")
+		if not payload.get("permanent") is Dictionary or not payload.get("lineage") is Dictionary:
+			result.errors.append("incomplete_v2_profile")
+		result.success = result.errors.is_empty()
+		return result
 	var errors: Array[String] = []
 	for key: Variant in payload:
 		if not PAYLOAD_KEYS.has(String(key)): errors.append("unsupported_field:%s" % key)
@@ -68,7 +105,7 @@ static func encode(payload: Dictionary) -> Dictionary:
 	if not validation.success: return validation
 	var serialized := JSON.stringify(payload, "", true, true)
 	return {"success": true, "text": JSON.stringify({
-		"format": FORMAT, "version": VERSION, "payload_json": serialized,
+		"format": FORMAT, "version": PROFILE_VERSION if payload.has("permanent") else VERSION, "payload_json": serialized,
 		"sha256": serialized.sha256_text(),
 	}, "", true, true)}
 
@@ -78,7 +115,7 @@ static func decode(text: String) -> Dictionary:
 	if parser.parse(text) != OK or not parser.data is Dictionary:
 		return {"success": false, "reason": "invalid_json"}
 	var envelope: Dictionary = parser.data
-	if envelope.get("format") != FORMAT or envelope.get("version") != VERSION:
+	if envelope.get("format") != FORMAT or (envelope.get("version") != VERSION and envelope.get("version") != PROFILE_VERSION):
 		return {"success": false, "reason": "unsupported_format_or_version"}
 	if envelope.size() != 4 or typeof(envelope.get("payload_json")) != TYPE_STRING or typeof(envelope.get("sha256")) != TYPE_STRING:
 		return {"success": false, "reason": "invalid_envelope"}
@@ -88,9 +125,12 @@ static func decode(text: String) -> Dictionary:
 	if parser.parse(serialized) != OK or not parser.data is Dictionary:
 		return {"success": false, "reason": "invalid_payload_json"}
 	var payload: Dictionary = parser.data
+	var is_profile := payload.has("permanent") and payload.has("lineage")
+	if (envelope.version == PROFILE_VERSION) != is_profile:
+		return {"success": false, "reason": "unsupported_format_or_version"}
 	var validation := validate(payload)
 	if not validation.success: return validation
-	return {"success": true, "payload": _normalize_json_numbers(payload)}
+	return {"success": true, "payload": _normalize_json_numbers(payload), "version": int(envelope.version)}
 
 
 static func _normalize_json_numbers(value: Variant) -> Variant:
@@ -112,10 +152,23 @@ static func validate_replacement(current: Dictionary, candidate: Dictionary) -> 
 		if not result.success: return result
 	if current.character_id != candidate.character_id:
 		return {"success": false, "reason": "character_identity_mismatch"}
+	if current.definition_id != candidate.definition_id or current.rules_revision != candidate.rules_revision:
+		return {"success": false, "reason": "character_definition_or_rules_mismatch"}
+	if current.get("profile_namespace","normal") != candidate.get("profile_namespace","normal"):
+		return {"success":false,"reason":"profile_namespace_changed"}
+	var old_runs: Array = current.get("run_history",[])
+	if candidate.get("run_history",[]).slice(0,old_runs.size()) != old_runs:
+		return {"success":false,"reason":"run_history_removed_or_changed"}
+	if current.has("permanent") != candidate.has("permanent"):
+		return {"success": false, "reason": "profile_version_transition_requires_verified_migration"}
 	if candidate.generation != current.generation + 1:
 		return {"success": false, "reason": "stale_or_nonsequential_generation"}
 	for checkpoint: Variant in current.secured_checkpoints:
 		if not candidate.secured_checkpoints.has(checkpoint): return {"success": false, "reason": "secured_checkpoint_removed"}
+	var receipt_map := {}
+	for receipt: Dictionary in candidate.get("settlements",[]): receipt_map[receipt.receipt_id] = receipt
+	for receipt: Dictionary in current.get("settlements",[]):
+		if receipt_map.get(receipt.receipt_id) != receipt: return {"success":false,"reason":"settlement_removed_or_changed"}
 	return {"success": true}
 
 

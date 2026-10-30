@@ -24,6 +24,7 @@ var processed_defeat_event_ids: Dictionary = {}
 var collected_world_item_ids: Dictionary = {}
 var processed_purchase_request_ids: Dictionary = {}
 var _next_world_item_sequence: int = 0
+var profile_ownership: Dictionary = {}
 
 
 func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int) -> Dictionary:
@@ -271,7 +272,7 @@ func to_dictionary() -> Dictionary:
 	collected_ids.sort()
 	var purchase_request_ids: Array = processed_purchase_request_ids.keys()
 	purchase_request_ids.sort()
-	return {
+	var snapshot := {
 		"mode": mode,
 		"player_actor_id": String(player_actor_id),
 		"player_level": player_level,
@@ -291,6 +292,8 @@ func to_dictionary() -> Dictionary:
 		"spending_available": mode != MODE_TEST,
 		"spending_blocked_reason": "" if mode != MODE_TEST else "test_mode_advancement_prohibited",
 	}
+	if not profile_ownership.is_empty(): snapshot["profile_ownership"] = profile_ownership.duplicate(true)
+	return snapshot
 
 
 func _next_world_item_id(actor_id: String) -> String:

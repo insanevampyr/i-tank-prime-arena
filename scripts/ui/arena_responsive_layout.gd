@@ -99,8 +99,11 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	# rectangles which Godot can silently expand into their neighbours.
 	var toolbar_keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
 	var preferred_widths := [104.0 if compact else 132.0, 116.0 if compact else 132.0, 108.0 if compact else 124.0, 104.0 if compact else 120.0]
+	if toolbar_minimums.has("return_wave_one_rect"):
+		toolbar_keys.insert(3,"return_wave_one_rect")
+		preferred_widths.insert(3,184.0)
 	var toolbar_height := (48.0 if compact else 52.0) / canvas_scale
-	var toolbar_width := toolbar_gap * 3.0
+	var toolbar_width := toolbar_gap * float(toolbar_keys.size()-1)
 	var widths: Array[float] = []
 	for index in range(toolbar_keys.size()):
 		var minimum: Vector2 = toolbar_minimums.get(toolbar_keys[index], Vector2.ZERO)
@@ -201,6 +204,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"combat_log_rect": combat_log_rect,
 		"developer_debug_rect": developer_debug_rect,
 		"encounter_button_rect": encounter_button_rect,
+		"return_wave_one_rect": toolbar_rects.get("return_wave_one_rect",Rect2()),
 		"encounter_selector_rect": selector_button_rect,
 		"debug_button_rect": debug_button_rect,
 		"log_button_rect": log_button_rect,
@@ -247,6 +251,11 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button]
 	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
 	var font_sizes := [13.0, 13.0, 14.0, 16.0]
+	var return_button := _return_wave_one_button()
+	if return_button != null and return_button.visible:
+		buttons.append(return_button)
+		keys.append("return_wave_one_rect")
+		font_sizes.append(14.0)
 	for index in range(buttons.size()):
 		var button: Button = buttons[index]
 		if button != null:
@@ -275,6 +284,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_apply_control_rect(_combat_log, metrics["combat_log_rect"])
 	_apply_control_rect(_developer_debug, metrics["developer_debug_rect"])
 	_apply_control_rect(_encounter_button, metrics["encounter_button_rect"])
+	if return_button != null and return_button.visible: _apply_control_rect(return_button,metrics["return_wave_one_rect"])
 	_apply_control_rect(_encounter_selector, metrics["encounter_selector_rect"])
 	_apply_control_rect(_debug_button, metrics["debug_button_rect"])
 	_apply_control_rect(_attack_readiness, metrics["attack_readiness_rect"])
@@ -315,7 +325,13 @@ func _toolbar_labels() -> Array[String]:
 	var labels: Array[String] = []
 	for button: Button in [_encounter_selector, _log_button, _debug_button, _encounter_button]:
 		labels.append(button.text if button != null else "")
+	var return_button := _return_wave_one_button()
+	labels.append(return_button.text if return_button != null and return_button.visible else "")
 	return labels
+
+
+func _return_wave_one_button() -> Button:
+	return _encounter_button.get_parent().get_node_or_null("ReturnToWaveOne") as Button if _encounter_button != null else null
 
 
 func _apply_control_rect(control: Control, rect: Rect2) -> void:
