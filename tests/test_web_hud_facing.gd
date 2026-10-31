@@ -71,8 +71,18 @@ func _test_hud_regions_and_clipping_at_supported_resolutions() -> void:
 	var status_label := scene.get_node("HUD/UI/CombatStatus") as Label
 	var results_label := scene.get_node("HUD/UI/CombatLog") as RichTextLabel
 	_expect_true(status_label.clip_text, "Combat status text must be clipped to its bounded panel.")
-	_expect_equal(status_label.autowrap_mode, TextServer.AUTOWRAP_OFF, "Combat status must keep its four deliberate lines instead of wrapping target names.")
-	_expect_equal(status_label.max_lines_visible, 4, "Combat status must remain a four-line compact summary.")
+	_expect_equal(status_label.autowrap_mode, TextServer.AUTOWRAP_OFF, "Combat status must keep deliberate rows instead of wrapping target names.")
+	# 36K-Fix1 retains the four combat rows and exposes persistence on row five.
+	var controller: ArenaCombatController = scene.get_node("CombatController")
+	var lines := status_label.text.split("\n")
+	_expect_equal(status_label.max_lines_visible, 5, "The compact HUD must expose the approved persistence row.")
+	_expect_equal(lines.size(), 5, "The summary must contain four combat rows followed by persistence/message feedback.")
+	if lines.size() == 5:
+		for index in range(4):
+			_expect_true(lines[index].begins_with(["READY | ", "PLAYER: HPC ", "TARGET: ", "RANGE: "][index]), "Combat row %d must retain its content and order." % (index + 1))
+		_expect_true(lines[4].begins_with(controller._browser_status_text() + " | "), "Persistence status must precede long messages so horizontal clipping cannot hide it.")
+	_expect_true(status_label.is_visible_in_tree() and status_label.clip_contents, "The summary must remain visible inside its bounded backdrop.")
+	_expect_equal(status_label.get_visible_line_count(), 5, "The actual label must display all five rows without hiding persistence feedback.")
 	_expect_true(status_label.get_theme_stylebox("normal") is StyleBoxFlat, "Combat status must use a distinct bounded backdrop.")
 	_expect_true(results_label.scroll_active and results_label.scroll_following, "Recent results must scroll inside its own bounded region.")
 	_expect_true(results_label.get_theme_stylebox("normal") is StyleBoxFlat, "Recent results must use a distinct bounded backdrop.")

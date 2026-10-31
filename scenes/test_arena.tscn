@@ -184,7 +184,7 @@ theme_override_font_sizes/font_size = 14
 theme_override_styles/normal = SubResource("StyleBoxFlat_hud_summary")
 text = "Combat fixture initializing..."
 text_overrun_behavior = 3
-max_lines_visible = 4
+max_lines_visible = 5
 
 [node name="CombatLog" type="RichTextLabel" parent="HUD/UI"]
 layout_mode = 0

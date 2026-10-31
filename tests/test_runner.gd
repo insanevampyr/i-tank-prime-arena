@@ -70,6 +70,8 @@ const PlayableVaelisPersistenceTests = preload("res://tests/test_playable_vaelis
 const PersistenceNextWaveFixTests = preload("res://tests/test_persistence_next_wave_fix.gd")
 const ReturnToWaveOneTests = preload("res://tests/test_return_to_wave_one.gd")
 const NewRunPolicyForceSsTests = preload("res://tests/test_new_run_policy_force_ss.gd")
+const CharacterBrowserStorageTests = preload("res://tests/test_character_browser_storage.gd")
+const PlayableBrowserPersistenceTests = preload("res://tests/test_playable_browser_persistence.gd")
 
 
 func _initialize() -> void:
@@ -81,6 +83,8 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 36K-Pass2 playable browser persistence", "instance":PlayableBrowserPersistenceTests.new()},
+		{"name":"Task 36K-Pass1 browser storage boundary", "instance":CharacterBrowserStorageTests.new()},
 		{"name":"Task 36J-Fix3 new-run policy and Force SS", "instance":NewRunPolicyForceSsTests.new()},
 		{"name":"Task 36J-Fix2 return to Wave 1", "instance":ReturnToWaveOneTests.new()},
 		{"name":"Task 36J-Fix1 persistence NEXT WAVE", "instance":PersistenceNextWaveFixTests.new()},

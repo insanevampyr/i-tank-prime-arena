@@ -56,6 +56,13 @@ func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary
 	source = starter.source
 	profile_id = starter.profile_id
 	var history := storage.inspect_profile(profile_id)
+	return open_verified_history(starter,history,new_run,defeated_checkpoint)
+
+# Shared source/lineage/hydration path. Browser callers supply fully decoded,
+# verified history only after asynchronous lock acquisition and inspection.
+func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary) -> Dictionary:
+	source = starter.source
+	profile_id = starter.profile_id
 	if not history.success or history.writer_locked or history.pending_write: return _fail("profile_history_or_lock_requires_review")
 	for index in range(1,history.generations.size()):
 		var before: Dictionary = history.generations[index-1].payload
@@ -458,6 +465,9 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 	_allowed_payloads[Profiles.fingerprint(_prepared.payload)] = _lineage.duplicate(true)
 	_allowed_proposals[Profiles.fingerprint(_prepared)] = true
 	_last_ack = false
+	return publish_prepared()
+
+func publish_prepared() -> Dictionary:
 	return _ack(Coordinator.new(storage).commit(_prepared,source,profile_id,Admission.RULES,_verify))
 
 func reconcile() -> Dictionary:

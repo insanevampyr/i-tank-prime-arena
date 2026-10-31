@@ -118,6 +118,12 @@ var _rewards_panel_context := ""
 var _next_wave_failure_reason := ""
 var _return_wave_one_failure_reason := ""
 var _return_wave_one_button: Button
+var _web_operation: Dictionary = {}
+var _web_creation_dialog: ConfirmationDialog
+var _web_releases: Array = []
+var _browser_motion_paused := false
+var _browser_motion_was_processing := false
+var _browser_controls_locked := false
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -198,7 +204,14 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_poll_browser_persistence()
 	if _session == null:
+		return
+	if _browser_transition_blocked():
+		_clear_attack_hold_intent()
+		_freeze_browser_motion()
+		_player.set_combat_movement_locked(true)
+		_update_presentation()
 		return
 	if not _session.is_encounter_active():
 		_clear_attack_hold_intent()
@@ -252,6 +265,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _browser_transition_blocked(): return
 	if _session == null:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -649,6 +663,7 @@ func _toggle_nac_settings_panel() -> void:
 
 
 func _apply_nac_settings_from_ui() -> void:
+	if _browser_transition_blocked(): return
 	if _nac_profile_option == null:
 		return
 	var result := _session.configure_player_nac_automation({
@@ -773,6 +788,17 @@ static func _is_attack_key(keycode: Key) -> bool:
 
 
 func _on_encounter_button_pressed() -> void:
+	if not _web_operation.is_empty():
+		_retry_browser_operation()
+		return
+	if _session._playable_persistence is PlayableBrowserPersistence:
+		var service := _session._playable_persistence as PlayableBrowserPersistence
+		if service.pending_or_unsecured():
+			if service._browser_result.get("state") != "pending": service.reconcile()
+			return
+		if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+			_begin_browser_next_wave()
+			return
 	_clear_attack_hold_intent()
 	# Requests resolve synchronously before rendering. Keep downtime visible
 	# until the authoritative checkpoint and transition have actually succeeded.
@@ -798,7 +824,7 @@ func _on_encounter_button_pressed() -> void:
 		var completed := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY
 		var result := _prepare_encounter_fixture(completed)
 		close_rewards = result.get("success",false)
-		_last_ui_message = "New run ready." if result.get("success",false) and completed else ("Wave entry restored." if result.get("success",false) else "Recovery blocked: %s" % result.get("reason","unverified save"))
+		_last_ui_message = "Loading character." if result.get("state") == "pending" else ("New run ready." if result.get("success",false) and completed else ("Wave entry restored." if result.get("success",false) else "Recovery blocked: %s" % result.get("reason","unverified save")))
 	else:
 		_reset_encounter()
 	if close_rewards:
@@ -822,6 +848,7 @@ func _on_encounter_selector_pressed() -> void:
 		)
 	)
 	var result := _select_encounter_fixture(fixture)
+	if result.get("state") == "pending": return
 	if not result.get("success", false):
 		_encounter_selector_index = previous_index
 		_developer_test_mode = previous_test_mode
@@ -856,6 +883,9 @@ static func _selector_index_for_fixture(encounter_fixture_id: StringName, test_m
 
 
 func _on_character_selector_pressed() -> void:
+	if _can_cancel_browser_load():
+		_cancel_browser_creation()
+		return
 	var next_character := Fixture.PLAYER_CHARACTER_VAELIS if _player_character_id == Fixture.PLAYER_CHARACTER_GUARD else Fixture.PLAYER_CHARACTER_GUARD
 	_select_player_character(next_character)
 
@@ -869,6 +899,7 @@ func _select_player_character(player_character_id: StringName) -> Dictionary:
 	var previous_character := _player_character_id
 	_player_character_id = player_character_id
 	var result := _select_encounter_fixture(_encounter_fixture_id)
+	if result.get("state") == "pending": return result
 	if not result.get("success", false):
 		_player_character_id = previous_character
 		return result
@@ -939,6 +970,7 @@ static func _fits_signed_64_bit(value: String) -> bool:
 
 
 func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
+	if _browser_transition_blocked(): return {"success":false,"reason":"character_storage_pending"}
 	var previous_motion := _player.capture_wave_entry_motion()
 	var previous_position := _player.position
 	var previous_fixture := _encounter_fixture_id
@@ -961,7 +993,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 		_floating_combat_text.clear()
 	var result := _prepare_encounter_fixture()
 	if not result.get("success",false):
-		_encounter_fixture_id = previous_fixture
+		if result.get("state") != "pending": _encounter_fixture_id = previous_fixture
 		_restore_profile_visual_state(previous_motion,previous_position)
 	if result.get("success", false):
 		_last_ui_message = "%s selected. Press START." % _session.get_encounter_display_name()
@@ -971,12 +1003,16 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 
 
 func _on_return_to_wave_one_pressed() -> void:
+	if _browser_transition_blocked(): return
 	_update_rewards_panel()
 	_clear_attack_hold_intent()
 	var authorization := _session.get_return_to_wave_one_authorization()
 	var result: Dictionary = authorization
 	if authorization.get("success",false): result = _prepare_encounter_fixture(true,authorization.checkpoint)
-	if result.get("success",false):
+	if result.get("state") == "pending":
+		_return_wave_one_failure_reason = ""
+		_last_ui_message = "Loading character."
+	elif result.get("success",false):
 		_return_wave_one_failure_reason = ""
 		_last_ui_message = "New Wave 1 entry saved. Secured character progress retained."
 	else:
@@ -987,6 +1023,7 @@ func _on_return_to_wave_one_pressed() -> void:
 
 
 func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+	if _use_browser_character_persistence(): return _begin_browser_load(new_run,defeated_checkpoint)
 	var previous_motion := _player.capture_wave_entry_motion()
 	var previous_position := _player.position
 	var previous_fixture := _encounter_fixture_id
@@ -1006,12 +1043,15 @@ func _restore_profile_visual_state(motion: Dictionary, previous_position: Vector
 	_player.restore_wave_entry_motion(motion)
 
 
-func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableBrowserPersistence = null) -> Dictionary:
 	var previous_session := _session
 	var requested_seed: int = previous_session._seed_value if new_run and previous_session != null else combat_seed
 	_session = ArenaCombatSession.new(requested_seed, null, _encounter_fixture_id, _player_character_id)
 	var reward_mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
-	var persistent_setup := _session.prepare_playable_persistence(reward_mode,new_run,defeated_checkpoint)
+	var persistent_setup := _session.prepare_playable_persistence(reward_mode,new_run,defeated_checkpoint,browser_service)
+	if browser_service != null and not persistent_setup.get("persistent",false):
+		_session = previous_session
+		return {"success":false,"reason":"persistent_browser_candidate_required"}
 	if not persistent_setup.get("success",false):
 		_session = previous_session
 		_last_ui_message = "Character load blocked: %s" % persistent_setup.get("reason","invalid profile")
@@ -1050,19 +1090,37 @@ func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Di
 		_session = previous_session
 		return running_validation
 	_session.player_movement_boundary_provider = _player.capture_wave_entry_motion
+	if browser_service != null and not browser_service.recovery.is_empty() and not _player.restore_wave_entry_motion(browser_service.recovery.movement):
+		_session = previous_session
+		return {"success":false,"reason":"running_entry_application_failed"}
 	var finalized := _session.finalize_playable_persistence()
+	if browser_service != null and (finalized.get("success",false) or finalized.get("state") == "pending"):
+		_web_operation["candidate"] = _session
+		_web_operation["phase"] = "saving" if finalized.get("state") == "pending" else "transfer_needed"
+		_session = previous_session
+		return {"success":false,"state":"pending"}
 	if not finalized.get("success",false):
 		_session = previous_session
 		_last_ui_message = "Character recovery blocked: %s" % finalized.get("reason","invalid checkpoint")
 		return finalized
+	var presented := _present_loaded_session()
+	if not presented.success:
+		_session = previous_session
+		return presented
+	if previous_session != null and previous_session._playable_persistence is PlayableBrowserPersistence:
+		_release_browser_service(previous_session._playable_persistence)
+	return setup
+
+func _present_loaded_session(select_target: bool = true) -> Dictionary:
+	_player.configure_authoritative_actor_profile(_session.simulation.get_actor_definition(Fixture.PLAYER_ID))
 	var targets := _session.get_targetable_enemy_ids()
-	if not targets.is_empty(): _session.select_target(targets[0])
-	else: _session.clear_target()
+	if select_target:
+		if not targets.is_empty(): _session.select_target(targets[0])
+		else: _session.clear_target()
 	var authoritative_player := _session.get_actor_state(Fixture.PLAYER_ID)
 	_player.apply_authoritative_combat_position(_microfeet_to_feet(authoritative_player.position_microfeet))
 	if _session._playable_persistence != null and not _session._playable_persistence.recovery.is_empty():
 		if not _player.restore_wave_entry_motion(_session._playable_persistence.recovery.movement):
-			_session = previous_session
 			return {"success":false,"reason":"running_entry_application_failed"}
 	_rebuild_encounter_visuals()
 	_append_log(
@@ -1078,7 +1136,179 @@ func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Di
 				)
 		)
 	)
-	return setup
+	return {"success":true}
+
+func _use_browser_character_persistence() -> bool:
+	return (OS.has_feature("web") or PlayableBrowserPersistence.test_factory.is_valid()) and not PlayableCharacterPersistence.test_nonpersistent and _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and _encounter_fixture_id not in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
+
+func _browser_transition_blocked() -> bool:
+	return not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
+
+func _browser_status_text() -> String:
+	if not _web_operation.is_empty(): return _web_operation.service.status().get("text","Progress not saved")
+	return _session.get_character_persistence_status().get("text","Progress not saved")
+
+func _can_cancel_browser_load() -> bool:
+	return not _web_operation.is_empty() and not _web_operation.get("lease_transferred",false) and _web_operation.get("phase") == "failed" and _web_operation.kind == "load" and _web_operation.service._prepared.is_empty()
+
+func _begin_browser_load(new_run: bool, defeated: Dictionary) -> Dictionary:
+	if not _web_operation.is_empty(): return {"success":false,"state":"pending"}
+	_freeze_browser_motion()
+	var service := PlayableBrowserPersistence.new()
+	var previous: PlayableBrowserPersistence = _session._playable_persistence as PlayableBrowserPersistence if _session != null else null
+	_web_operation = {"service":service,"phase":"loading","kind":"load","new_run":new_run,"defeated":defeated.duplicate(true),"previous":_session,"motion":_player.capture_wave_entry_motion(),"position":_player.position,"fixture":_encounter_fixture_id}
+	var opened := service.open_browser("dev_normal" if _encounter_selector_index == 8 else "normal",previous,new_run,defeated)
+	_last_ui_message = "Loading character."
+	return opened
+
+func _begin_browser_next_wave() -> void:
+	var fork := BrowserWaveCandidate.prepare(_session)
+	if not fork.success:
+		_last_ui_message = "Progress not saved. Retry after the checkpoint completes."
+		return
+	_freeze_browser_motion()
+	var candidate: ArenaCombatSession = fork.candidate
+	_web_operation = {"service":candidate._playable_persistence,"candidate":candidate,"phase":"saving","kind":"next","previous":_session,"opponent_behavior":fork.opponent_behavior,"motion":_player.capture_wave_entry_motion(),"position":_player.position,"fixture":_encounter_fixture_id}
+	var prepared := candidate.request_next_wave()
+	if prepared.get("success",false): _web_operation.phase = "transfer_needed"
+	elif candidate._playable_persistence._browser_result.get("state") != "pending": _web_operation.phase = "failed"
+	_last_ui_message = "Saving progress."
+
+func _poll_browser_persistence() -> void:
+	for index in range(_web_releases.size()-1,-1,-1):
+		var releasing: PlayableBrowserPersistence = _web_releases[index]
+		if releasing.poll_browser().get("state") != "pending": _web_releases.remove_at(index)
+	if _web_operation.is_empty():
+		if _session != null and _session._playable_persistence is PlayableBrowserPersistence:
+			var current := _session._playable_persistence as PlayableBrowserPersistence
+			if current._browser_result.get("state") == "pending": current.poll_browser()
+		return
+	if _web_operation.phase in ["failed","confirmation"]: return
+	var service: PlayableBrowserPersistence = _web_operation.service
+	var response := service.poll_browser()
+	if response.get("state") == "pending": return
+	if response.get("state") == "confirmation_required":
+		_web_operation.phase = "confirmation"
+		if _web_creation_dialog == null:
+			_web_creation_dialog = ConfirmationDialog.new()
+			_web_creation_dialog.title = "Create Vaelis character?"
+			_web_creation_dialog.dialog_text = "No saved character exists in this browser profile. Create a new Vaelis?\nBrowser saves are local to this origin and may be deleted or evicted."
+			_web_creation_dialog.confirmed.connect(_confirm_browser_character)
+			_web_creation_dialog.canceled.connect(_cancel_browser_creation)
+			add_child(_web_creation_dialog)
+		_web_creation_dialog.title = "Create Vaelis (%s)?" % service.mode.replace("_"," ").to_upper()
+		_web_creation_dialog.popup_centered()
+		return
+	if not response.get("success",false):
+		_web_operation.phase = "failed"
+		_last_ui_message = service.status().text+". Press RETRY STORAGE."
+		return
+	if _web_operation.phase == "loading":
+		var built := _prepare_encounter_candidate(_web_operation.new_run,_web_operation.defeated,service)
+		_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
+		_encounter_fixture_id = _web_operation.fixture
+		if not built.get("success",false) and built.get("state") != "pending":
+			_web_operation.phase = "failed"
+			service._error("recovery_required",built.get("reason","candidate_invalid"))
+		return
+	if _web_operation.phase in ["saving","transfer_needed"]:
+		if _web_operation.kind == "next" and _web_operation.candidate.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
+			# A changed post-wave boundary may itself need acknowledgement before
+			# the existing transition can prepare its new wave-entry publication.
+			var continued: Dictionary = _web_operation.candidate.request_next_wave()
+			if not continued.get("success",false):
+				_web_operation.phase = "saving" if continued.get("state") == "pending" or continued.get("persistence",{}).get("state") == "pending" else "failed"
+				return
+		var transfer := service.transfer_lease()
+		_web_operation.phase = "transfer"
+		if transfer.get("state") == "pending": return
+		if not transfer.get("success",false):
+			_web_operation.phase = "failed"
+			return
+	if _web_operation.phase == "transfer": _adopt_browser_candidate()
+
+func _adopt_browser_candidate() -> void:
+	_web_operation["lease_transferred"] = true
+	var candidate: ArenaCombatSession = _web_operation.candidate
+	var previous: ArenaCombatSession = _web_operation.previous
+	var service: PlayableBrowserPersistence = _web_operation.service
+	if previous != null and previous._playable_persistence is PlayableBrowserPersistence:
+		var previous_service := previous._playable_persistence as PlayableBrowserPersistence
+		if previous_service.browser == service.browser: previous_service._owns_lease = false
+		else: _release_browser_service(previous_service)
+	_session = candidate
+	service._status["text"] = "Progress saved"
+	_encounter_fixture_id = candidate._encounter_fixture_id
+	if _web_operation.kind == "next":
+		candidate._opponent_behavior_enabled = _web_operation.opponent_behavior
+		candidate._encounter_state = ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY if candidate._arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE else ArenaCombatSession.ENCOUNTER_RUNNING
+		candidate._encounter_active = candidate._encounter_state == ArenaCombatSession.ENCOUNTER_RUNNING
+	candidate.player_movement_boundary_provider = _player.capture_wave_entry_motion
+	var presented := _present_loaded_session(_web_operation.kind != "next")
+	if not presented.success:
+		# Pre-adoption validation below ensures this is never a speculative apply.
+		_session = previous
+		_encounter_fixture_id = _web_operation.fixture
+		_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
+		service._error("recovery_required",presented.reason)
+		_web_operation.phase = "failed"
+		return
+	if _web_operation.kind != "next":
+		_event_cursor = 0
+		_event_history_generation = -1
+		_applied_displacement_event_ids.clear()
+		_pending_player_displacement_event_ids.clear()
+	_next_wave_failure_reason = ""
+	_return_wave_one_failure_reason = ""
+	_combat_inventory_open = false
+	if _rewards_panel != null: _rewards_panel.hide()
+	_last_ui_message = "Progress saved."
+	_web_operation.clear()
+	_delta_us_remainder = 0.0
+	_update_combat_movement_lock()
+	_update_presentation()
+
+func _confirm_browser_character() -> void:
+	if _web_operation.is_empty(): return
+	_web_operation.phase = "loading"
+	_web_operation.service.confirm_creation()
+
+func _cancel_browser_creation() -> void:
+	if _web_operation.is_empty(): return
+	_release_browser_service(_web_operation.service)
+	_player_character_id = _session._player_character_id
+	_encounter_fixture_id = _session._encounter_fixture_id
+	_encounter_selector_index = 8 if _session._reward_mode == "dev_normal" else _selector_index_for_fixture(_encounter_fixture_id,_session._reward_mode == "test")
+	_developer_test_mode = _session._reward_mode == "test"
+	_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
+	_web_operation.clear()
+	_last_ui_message = "Progress not saved. Character creation canceled."
+
+func _retry_browser_operation() -> void:
+	if _web_operation.get("phase") != "failed": return
+	var service: PlayableBrowserPersistence = _web_operation.service
+	if not service._prepared.is_empty():
+		_web_operation.phase = "saving"
+		service.reconcile()
+	else:
+		_web_operation.phase = "loading"
+		if service._owns_lease or not service.previous_owner.is_empty(): service._send("inspect",{"profile":service.profile_id})
+		else: service._send("acquire",{"profile":service.profile_id,"owner":service.owner})
+
+func _release_browser_service(service: PlayableBrowserPersistence) -> void:
+	if service._owns_lease:
+		service.release_lease()
+		_web_releases.append(service)
+
+func _exit_tree() -> void:
+	if _session != null and _session._playable_persistence is PlayableBrowserPersistence:
+		var service := _session._playable_persistence as PlayableBrowserPersistence
+		service.release_lease()
+		service.browser.dispose()
+	if not _web_operation.is_empty():
+		var service: PlayableBrowserPersistence = _web_operation.service
+		service.release_lease()
+		if service.browser != null: service.browser.dispose()
 
 
 func _reset_encounter() -> void:
@@ -1644,6 +1874,7 @@ func _on_inventory_toggle_pressed() -> void:
 
 
 func _on_collect_loot_pressed() -> void:
+	if _browser_transition_blocked(): return
 	var result := _session.collect_all_ground_loot()
 	_last_ui_message = (
 		"Collected %s loot entries." % result.get("collected_count", 0)
@@ -1660,6 +1891,7 @@ func _on_advancement_option_selected(_index: int) -> void:
 
 
 func _on_developer_refresh_pressed() -> void:
+	if _browser_transition_blocked(): return
 	var result := _session.request_developer_character_refresh()
 	_last_ui_message = "DEV ONLY: character resources refreshed." if result.get("success",false) else "Developer refresh blocked: %s" % _friendly_reason(String(result.get("reason","rejected")))
 	_update_rewards_panel(true)
@@ -1679,6 +1911,7 @@ func _selected_inventory_entry() -> Dictionary:
 
 
 func _on_inventory_equip_pressed() -> void:
+	if _browser_transition_blocked(): return
 	var entry := _selected_inventory_entry()
 	if entry.is_empty():
 		_last_ui_message = "Inventory blocked: no item selected."
@@ -1697,6 +1930,7 @@ func _on_inventory_equip_pressed() -> void:
 
 
 func _on_inventory_weapon_handling(operation: String) -> void:
+	if _browser_transition_blocked(): return
 	var item := _selected_inventory_entry()
 	var result := _session.request_player_weapon_handling(StringName(item.get("definition_id", "")), operation)
 	_last_ui_message = ("Weapon draw started (1 Act)." if result.has("action_instance_id") else "Weapon handling updated.") if result.get("success", false) else "Weapon handling blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
@@ -1705,6 +1939,7 @@ func _on_inventory_weapon_handling(operation: String) -> void:
 
 
 func _on_inventory_use_pressed() -> void:
+	if _browser_transition_blocked(): return
 	var entry := _selected_inventory_entry()
 	if entry.is_empty():
 		_last_ui_message = "Inventory blocked: no item selected."
@@ -1716,6 +1951,7 @@ func _on_inventory_use_pressed() -> void:
 
 
 func _on_purchase_advancement_pressed() -> void:
+	if _browser_transition_blocked(): return
 	if _advancement_option == null or _advancement_option.selected < 0 \
 	or _advancement_option.selected >= _advancement_options.size():
 		_last_ui_message = "Advancement blocked: no purchase selected."
@@ -1970,6 +2206,11 @@ func _queue_player_dodge_displacement(event: CombatEvent) -> void:
 
 
 func _update_combat_movement_lock() -> void:
+	if _browser_transition_blocked():
+		_freeze_browser_motion()
+		_player.set_combat_movement_locked(true)
+		return
+	_resume_browser_motion()
 	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
 	if player_state == null:
 		return
@@ -1981,9 +2222,26 @@ func _update_combat_movement_lock() -> void:
 		or player_state.critical_stagger_until_us > _session.simulation.clock.get_elapsed_us()
 	)
 
+func _freeze_browser_motion() -> void:
+	if _browser_motion_paused: return
+	_browser_motion_was_processing = _player.is_physics_processing()
+	_browser_motion_paused = true
+	_player.set_physics_process(false)
+
+func _resume_browser_motion() -> void:
+	if not _browser_motion_paused: return
+	_player.set_physics_process(_browser_motion_was_processing)
+	_browser_motion_paused = false
+
 
 func _update_presentation() -> void:
-	_update_rewards_panel()
+	var storage_locked := _browser_transition_blocked()
+	_update_rewards_panel(storage_locked != _browser_controls_locked)
+	_browser_controls_locked = storage_locked
+	if storage_locked:
+		for button: Button in [_collect_loot_button,_developer_refresh_button,_inventory_equip_button,_inventory_use_button,_purchase_advancement_button]:
+			if button != null: button.disabled = true
+		for button: Button in _weapon_handling_buttons.values(): button.disabled = true
 	if _session == null:
 		return
 	var player_state := _session.get_actor_state(Fixture.PLAYER_ID)
@@ -2067,11 +2325,14 @@ func _update_presentation() -> void:
 				readiness,
 				distance_text,
 				force_controls,
+				_browser_status_text(),
 				_compact_status_message(_last_ui_message),
-				_session.get_character_persistence_status().get("text", "Progress not saved"),
 			]
 		)
 		_combat_status.tooltip_text = "Character persistence: %s" % _session.get_character_persistence_status().get("reason", "unavailable")
+		if not _web_operation.is_empty() or _session._playable_persistence is PlayableBrowserPersistence:
+			var storage_status: Dictionary = _web_operation.service.status() if not _web_operation.is_empty() else _session._playable_persistence.status()
+			_combat_status.tooltip_text = "Browser saves are local to this browser and origin; they can be deleted or evicted. %s: %s" % [_browser_status_text(),storage_status.get("reason","unavailable")]
 	_update_facing_indicators()
 	if _encounter_button != null:
 		_encounter_button.text = (
@@ -2082,9 +2343,16 @@ func _update_presentation() -> void:
 		if _session._playable_persistence != null:
 			if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY: _encounter_button.text = "NEW RUN"
 			elif _session.get_encounter_state() in [ArenaCombatSession.ENCOUNTER_PLAYER_DEFEAT,ArenaCombatSession.ENCOUNTER_DOUBLE_DEFEAT]: _encounter_button.text = "RETRY WAVE"
-		_encounter_button.disabled = false
+		_encounter_button.disabled = _browser_transition_blocked()
+		if not _web_operation.is_empty() and _web_operation.get("phase") == "failed":
+			_encounter_button.text = "RETRY STORAGE"
+			_encounter_button.disabled = false
+		elif _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence._browser_result.get("state") in ["failed","unavailable","recovery_required"]:
+			_encounter_button.text = "RETRY STORAGE"
+			_encounter_button.disabled = false
 	if _return_wave_one_button != null:
 		_return_wave_one_button.visible = _session.get_return_to_wave_one_authorization().get("success",false)
+		_return_wave_one_button.disabled = _browser_transition_blocked()
 		_return_wave_one_button.tooltip_text = "Return blocked: %s" % _friendly_reason(_return_wave_one_failure_reason) if not _return_wave_one_failure_reason.is_empty() else "Start Wave 1 with the secured character and approved NEW RUN restoration."
 	if _encounter_selector != null:
 		_encounter_selector.text = (
@@ -2096,13 +2364,16 @@ func _update_presentation() -> void:
 				else ("TEST FIXTURE\nSMALL" if _encounter_selector_index == 7 else "TEST FIXTURE\nGUARD")
 			)
 		)
-		_encounter_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
+		_encounter_selector.disabled = _browser_transition_blocked() or _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	if _character_selector != null:
 		_character_selector.text = "CHAR: %s" % ("VAELIS" if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS else "GUARD")
-		_character_selector.disabled = _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
+		_character_selector.disabled = _browser_transition_blocked() or _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
+		if _can_cancel_browser_load():
+			_character_selector.text = "CANCEL LOAD"
+			_character_selector.disabled = false
 	if _nac_settings_panel != null and _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		_nac_settings_panel.visible = false
-	var seed_editable := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
+	var seed_editable := not _browser_transition_blocked() and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
 	if _seed_label != null:
 		_seed_label.text = "SEED %d" % _authoritative_seed()
 	if _seed_input != null:
@@ -2453,6 +2724,7 @@ func _place_initial_combatants() -> void:
 
 
 func _resolve_player_movement(desired_microfeet: Vector2i, effective_mr: int) -> Dictionary:
+	if _browser_transition_blocked(): return {"success":false,"reason":"character_storage_pending"}
 	if _session == null:
 		return {"success": false, "reason": "session_unavailable", "position_microfeet": desired_microfeet}
 	return _session.request_player_movement(desired_microfeet, effective_mr)
