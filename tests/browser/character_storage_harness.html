@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Arena 36K disposable browser storage tests</title>
+<style>body{font:16px system-ui;max-width:1000px;margin:24px auto;padding:12px;background:#142331;color:#fff}button{margin:8px;padding:12px}pre{white-space:pre-wrap;background:#0b151f;padding:16px}p{line-height:1.5}</style>
+<h1>Arena 36K — disposable IndexedDB tests</h1>
+<p>Tests use only <strong id="database"></strong>. No gameplay or production saves. Keep the same <code>?test=</code> token to check close/reopen and two tabs. A fresh token is needed for a fresh core run.</p>
+<button id="core">Run core browser tests</button>
+<button id="hold">Tab A: hold writer and save generation 1</button>
+<button id="contend">Tab B: verify competing writer rejection</button>
+<button id="reopen">After A closes: verify readback and acquire writer</button>
+<button id="release">Release writer</button>
+<button id="verify">Reopened tab: verify generation 2</button>
+<pre id="output" role="status">Ready. No tests run.</pre>
+<script src="../../scripts/rewards/character_browser_store.js"></script>
+<script src="character_storage_harness.js"></script>
+</html>
