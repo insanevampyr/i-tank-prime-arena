@@ -141,3 +141,30 @@ Task 36C adds collected and equipped item identities, quantities, category, veri
 An exact registered weapon, armor or shield uses one atomic transaction. The proposed set is validated for STR, equipment slot overlap and hand occupancy before any quantity changes. Success moves quantities exactly once, rebuilds the player's attack, Block and location-protection profiles, recalculates armor MR/DT/projectile-Dodge from immutable base values, and preserves HPC, Mana/AP, conditions and effects. Failure changes nothing. Removing the last player weapon remains blocked because a general playable-character unarmed sequence is not source-integrated.
 
 Only identified Health Potions (`1d10+2 HPC`) and Mana Potions (`3d6+2 Mana`) are usable. Their rolls use the continuing combat RNG and ordered events record draws, quantity and capped resource values. Other potion IDs, abstract Random Drop item categories, battlefield dropping and encumbrance remain visible but unavailable. Thrown/dropped Boar Spear state remains exclusively under its existing world-item and retrieval transaction.
+# Task 37A Pass 1 integration boundary
+
+The premade Vaelis baseline is now DT 6 / DP 3 at DEX 9. Admission explicitly
+accepts only the current definition or the exact historical 3/6 definition;
+existing profiles keep their original lineage, allocation and starter-item
+provenance. The shared native/browser history loader selects the appropriate
+authored source before hydration. Backup validation does the same for the first
+generation and requires subsequent generations to retain that lineage.
+
+New isolated core modules: `DexAllocation` (positive permanent deltas, locked
+assignments, source/activation-specific temporary allocations and replayable
+model history), `PrimeV3DexChart` (Mana/Regular ACC lookup), and
+`DefensivePreferences` (legal-choice planning with individual Block/NAC source
+identities). Callers must supply authority-verified grant/source identities and
+eligibility; these helpers do not attest those facts themselves. No live XP
+purchase or equipment/Special activation calls them in Pass 1.
+
+Keep the next integration atomic: authoritative actor/session commands, save V2
+development extension and continuity validators, projection/hydration, wave
+checkpoints, backup validation, then minimal confirmation/preferences controls.
+Temporary allocation activation identity and permanent receipt identity must
+survive every relevant boundary without being hidden in unrelated fields.
+The defense resolver must recheck eligibility before each actual attempt, stop
+after a success, preserve existing NAC limits/trigger rules, and record choices
+in deterministic history. Until that integration is approved and validated,
+there is no new player-facing preference/allocation control and the isolated
+records are not accepted as permanent gameplay save fields.

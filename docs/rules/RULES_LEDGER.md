@@ -669,3 +669,51 @@ Continuation verification: damaged/destroyed shields cannot be stowed or replace
 | PRINTED PRIME CONSUMABLES | Health Potion restores `1d10+2 HPC`; Mana Potion restores `3d6+2 Mana`; drinking costs one Act. Arena retains the accepted free-hand prerequisite and consumes exactly one identified item only after an authoritative request succeeds. | PRIME-V3 printed pp. 20 and 120; Task 35G accepted hand boundary | Implemented for `health_potion` and Random Drop IDs explicitly resolving to Health or Mana Potion; other potion identities fail closed |
 | AUTHORITATIVE OWNERSHIP | Collection changes one stable world item from dropped/uncollected to collected and increments one actor quantity. Equipping moves one carried instance into equipment; replacement/unequip returns the displaced instance. | Task 36A reward/world-item contract; Task 36C transaction requirement | Implemented in schema-12 actor state and ordered events; Boar Spear combat drop/retrieval remains unchanged |
 | SOURCE GATE | Abstract Random Drop categories do not identify complete Prime item definitions. General dropping lacks verified action/placement requirements, combat armor don/doff timing is unresolved, and complete carried weight is unavailable. | Task 36C Prime audit and current reward catalog | Items remain inspectable with provenance but unsupported equip/use/drop/encumbrance actions are disabled |
+# Task 37A Pass 1 — bounded DEX and defense-policy foundation
+
+**OWNER-APPROVED ARENA RULINGS:** Fresh premade Vaelis now has DEX 9,
+DT 6 / DP 3, ACC 9. This supersedes the historical supplied 3/6 split only
+for fresh characters. The source JSON remains historical evidence; starter
+possessions and their provenance are unchanged. Exact historical definition
+fingerprints remain supported by native/shared browser admission and backup
+validation, without migrating or rewriting any saved generation.
+
+Prime V3 p. 20 establishes the DEX allocation pool and DT/DP delivery classes.
+The Mana/Regular DEX-to-ACC columns on pp. 53–56 agree for values 0–35.
+`PrimeV3DexChart` provides that exact lookup; unsupported values/chart kinds
+return unavailable rather than clamping. It does not authorize mortal cap
+exceptions or attribute purchases.
+
+`DexAllocation` is an isolated deterministic foundation, not an active gameplay
+purchase/control. Permanent growth receipts grant only the positive delta;
+confirmed allocation consumes pending points without refund/reassignment.
+Positive temporary bonuses are source/activation-specific, split evenly with
+DT receiving the odd point. Safe confirmed customization locks one activation;
+removal removes only that contribution. Reapplying the same activation retains
+its allocation/lock, while a new activation starts with the automatic split.
+Draft edits are not authoritative state. Explicit DT/DP effects remain in the
+existing modifier system; negative DEX and same-source stacking remain gated.
+Its `derived` projection calculates ACC from effective DEX without touching
+HPC, Mana, AP, effects, equipment or RNG. This bookkeeping does not establish
+new effect-stacking permission or wire new DEX effects into combat.
+
+**OWNER OVERRIDE TO PRINTED RESOLUTION ORDER:** The approved next runtime policy
+allows free NAC/Dodge/Block/Soak ordering, independent legal weapon/shield Block
+attempts, and early termination on success. At the first Dodge/Soak entry, choose
+the higher eligible effective value, break ties by preference, and permit only
+one actual Dodge/Soak attempt. This differs from the stages on V3 p. 31 and the
+historical Arena default; it is not represented as a manuscript quotation.
+`DefensivePreferences.plan` validates preference/source identities and plans
+that selection using supplied authoritative eligibility facts, preserving the
+per-Special/per-Block input order and performing no RNG or resource mutations.
+It is NOT yet connected to the live defense/NAC resolver; existing runtime
+defense behavior remains unchanged in this bounded pass.
+
+**Deferred together:** live defense/NAC integration, early-success execution,
+player preference/allocation controls, and the approved versioned V2 development
+extension through projection/hydration/checkpoints/backup continuity. The local
+allocation record version 1 is an isolated model serialization, not a new save
+format or an enabled permanent-save field. No editable gameplay controls or
+unpersisted character changes are enabled. DEX buying stays blocked. Save
+Contract V2 and simulation schema 12 are unchanged. Existing fixtures do not
+acquire fabricated allocation histories. No full character creator is added.

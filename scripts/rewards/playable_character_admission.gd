@@ -28,6 +28,11 @@ static func audit(character: StringName) -> Dictionary:
 	var stat_sources := {"hpm":"HPM","acc":"ACC","at":"AT","mr":"MR_ft","dt":"DT","dp":"DP","init":"INIT","sb":"SB","hpb":"HPB","nal":"NAL","physical_soak":"PS","ss":"SS","rb":"RB"}
 	for key: String in stat_sources:
 		var values: Dictionary = record.resources if key == "hpm" else record.derived
+		# #37A changes the premade only. The original JSON remains historical
+		# provenance for starter possessions and existing immutable saves.
+		if key in ["dt","dp"]:
+			if record.derived.get("DT") != 3 or record.derived.get("DP") != 6 or source.combat_stats.dt != 6 or source.combat_stats.dp != 3: return _fail("vaelis_owner_allocation_mismatch")
+			continue
 		if source.combat_stats.get(key) != values.get(stat_sources[key]): return _fail("vaelis_derived_source_mismatch")
 	if source.combat_stats.get("sr") != record.attributes.get("SR") or source.combat_stats.get("tb") != record.attributes.get("TB"): return _fail("vaelis_resistance_source_mismatch")
 	if source.level != record.character.get("level") or source.resource_maxima.get("mana") != record.resources.get("mana_max") or source.resource_maxima.get("blood") != record.resources.get("BM") or record.resources.get("ability_points") != null: return _fail("vaelis_resource_source_mismatch")
@@ -60,7 +65,7 @@ static func profile_identity(character: StringName, mode: String) -> Dictionary:
 	var prefix := "prod_" if mode == "normal" else "dev_"
 	return {"success":true,"profile_id":prefix+String(character),"profile_namespace":mode,"rules_revision":RULES}
 
-static func prepare_starter(character: StringName, mode: String) -> Dictionary:
+static func prepare_starter(character: StringName, mode: String, baseline_digest: String = "") -> Dictionary:
 	var identity := profile_identity(character,mode)
 	if not identity.success: return identity
 	var verified := audit(character)
@@ -68,6 +73,17 @@ static func prepare_starter(character: StringName, mode: String) -> Dictionary:
 	var profile: String = identity.profile_id
 	var source: CombatCharacterDefinitionResource = verified.source
 	var actor: CombatActorDefinition = verified.actor
+	if not baseline_digest.is_empty() and baseline_digest != Profiles.fingerprint(source.to_dictionary()):
+		# Exact pre-37A authored variant only; no arbitrary baseline acceptance,
+		# migration, rewritten history or redistribution of existing characters.
+		source.combat_stats.dt = 3
+		source.combat_stats.dp = 6
+		source.field_sources.combat_stats = "PRIME-V3 p. 53 Mana Attribute Chart applied to supplied attributes; DEX split 3 DT / 6 DP supplied"
+		if baseline_digest != Profiles.fingerprint(source.to_dictionary()): return _fail("unsupported_authored_baseline")
+		actor.base_combat_stats.dt = 3
+		actor.base_combat_stats.dp = 6
+		actor.field_sources = source.field_sources.duplicate(true)
+		actor.apply_equipment_stat_modifiers(actor.equipment_stat_modifiers)
 	var state := CombatActorState.new(actor)
 	state.inventory_quantities = verified.quantities.duplicate(true)
 	state.hand_occupancy = CombatWeaponHandling.initial_assignments(actor.equipment_refs,CombatDefinitionCatalog.load_default_fixture_catalog(),actor)

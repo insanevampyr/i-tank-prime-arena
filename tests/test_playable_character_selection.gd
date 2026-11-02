@@ -26,7 +26,8 @@ func _test_catalog_and_physical_profile() -> void:
 	_expect_equal(actor.display_name, "Vaelis Thorn", "Vaelis identity must remain distinct from the Guard.")
 	_expect_equal(actor.size_category, &"medium", "Vaelis's supplied 5 ft 7 in height must resolve to Medium.")
 	_expect_equal(actor.attributes, {"str": 9, "end": 6, "spd": 11, "dex": 9, "wis": 10, "int": 5, "wit": 3, "man": 0, "luk": 0, "app": 14}, "Vaelis attributes must match the supplied record.")
-	for expected: Array in [["hpm", 9], ["acc", 9], ["at", 1], ["init", 2], ["mr", 10], ["nal", 1], ["dt", 3], ["dp", 6], ["physical_soak", 3], ["sb", 2]]:
+	# #37A owner-approved premade split; historical profiles retain 3/6.
+	for expected: Array in [["hpm", 9], ["acc", 9], ["at", 1], ["init", 2], ["mr", 10], ["nal", 1], ["dt", 6], ["dp", 3], ["physical_soak", 3], ["sb", 2]]:
 		_expect_equal(actor.get_combat_stat(expected[0]), expected[1], "Vaelis derived %s must match the verified Mana chart/supplied allocation." % expected[0])
 	_expect_equal(actor.equipment_refs, PackedStringArray(["prime_v3_short_sword", "prime_v3_short_wand"]), "Vaelis must retain right-hand sword and left-hand wand as separate equipped definitions.")
 	_expect_equal(actor.equipment_stat_modifiers, {"mr": 0, "dt": 0, "dp": 0}, "Vaelis's no-armor loadout must apply no armor penalties.")

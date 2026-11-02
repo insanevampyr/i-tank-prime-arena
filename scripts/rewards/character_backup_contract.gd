@@ -79,6 +79,11 @@ static func validate_history(history: Dictionary, save_namespace: String) -> Dic
 		if not decoded.success: return fail(decoded.get("reason","invalid_character_document"))
 		if decoded.get("version") != 2: return fail("unsupported_character_version")
 		var payload: Dictionary = decoded.payload
+		if index == 0:
+			var baseline := String(payload.get("lineage",{}).get("baseline_digest",""))
+			if baseline.is_empty(): return fail("profile_baseline_missing")
+			starter = Admission.prepare_starter(&"vaelis_thorn",save_namespace,baseline)
+			if not starter.success: return fail(starter.get("reason","unsupported_authored_baseline"))
 		if payload.generation != index+1 or row.get("generation",payload.generation) != payload.generation: return fail("generation_gap")
 		if transactions.has(row.transaction_id): return fail("duplicate_transaction")
 		transactions[row.transaction_id] = true

@@ -17,7 +17,7 @@ attributes = {
 "spd": 11, "str": 9, "wis": 10, "wit": 3
 }
 combat_stats = {
-"acc": 9, "at": 1, "dp": 6, "dt": 3, "hpm": 9, "init": 2,
+"acc": 9, "at": 1, "dp": 3, "dt": 6, "hpm": 9, "init": 2,
 "mr": 10, "nal": 1, "physical_soak": 3, "rb": 0, "sb": 2,
 "running_skill_investment": 3, "running_scm": 0, "sr": 1, "ss": 9, "tb": 0, "hpb": 1
 }
@@ -31,7 +31,7 @@ running_profile = {
 source_refs = PackedStringArray("assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json", "assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.md", "PRIME-V3 pp. 17, 19-20, 43, 47-50, 53, 67, 69, 95-98, 105-106, 124, 130, 162, 174, 177")
 field_sources = {
 "attributes": "Supplied Vaelis record; creation rolls/FP allocation retained as owner-supplied data",
-"combat_stats": "PRIME-V3 p. 53 Mana Attribute Chart applied to supplied attributes; DEX split 3 DT / 6 DP supplied",
+"combat_stats": "PRIME-V3 p. 53 Mana Attribute Chart; owner-approved #37A premade DEX split 6 DT / 3 DP",
 "equipment": "PRIME-V3 pp. 124 and 130; supplied Vaelis right-hand Short Sword and left-hand Short Wand",
 "hpm": "Supplied Vaelis record; Elf base 4 plus recorded level-one HD/HPB result",
 "magic": "PRIME-V3 p. 250 Force Bolt and Force Shield; retained but unavailable in Task 34",

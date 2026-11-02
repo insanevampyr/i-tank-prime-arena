@@ -74,6 +74,7 @@ const CharacterBrowserStorageTests = preload("res://tests/test_character_browser
 const PlayableBrowserPersistenceTests = preload("res://tests/test_playable_browser_persistence.gd")
 const CharacterBackupTests = preload("res://tests/test_character_backups.gd")
 const CharacterBackupRestorationTests = preload("res://tests/test_character_backup_restoration.gd")
+const Task37AFoundationTests = preload("res://tests/test_task_37a_foundation.gd")
 
 
 func _initialize() -> void:
@@ -85,6 +86,7 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 37A allocation and defense policy foundation", "instance":Task37AFoundationTests.new()},
 		{"name":"Task 36L-Pass2 safe character backup restoration", "instance":CharacterBackupRestorationTests.new()},
 		{"name":"Task 36L-Pass1 character backup export and preview", "instance":CharacterBackupTests.new()},
 		{"name":"Task 36K-Pass2 playable browser persistence", "instance":PlayableBrowserPersistenceTests.new()},

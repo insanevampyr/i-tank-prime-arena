@@ -61,6 +61,11 @@ func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary
 # Shared source/lineage/hydration path. Browser callers supply fully decoded,
 # verified history only after asynchronous lock acquisition and inspection.
 func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary) -> Dictionary:
+	if history.get("success",false) and not history.get("generations",[]).is_empty():
+		var baseline := String(history.generations[0].payload.get("lineage",{}).get("baseline_digest",""))
+		if baseline.is_empty(): return _fail("profile_baseline_missing")
+		starter = Admission.prepare_starter(&"vaelis_thorn",mode,baseline)
+		if not starter.success: return starter
 	source = starter.source
 	profile_id = starter.profile_id
 	if not history.success or history.writer_locked or history.pending_write: return _fail("profile_history_or_lock_requires_review")
