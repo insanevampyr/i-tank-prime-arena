@@ -1,5 +1,60 @@
 # Task 36K browser storage and playable persistence verification
 
+## Task 36L-Pass2 restoration acceptance
+
+Owner acceptance of Pass1 file download/pickers/preview is still pending. Do not label either pass fully accepted from these automated results. No owner profile is used in the following tests.
+
+```powershell
+$godot = 'C:\Users\mxz\Desktop\GoDot\Godot_v4.7.2-stable_win64_console.exe'
+& $godot --headless --path . --script res://tests/test_runner.gd -- '--suite=Task 36L'
+./tests/browser/prepare_playable_web.ps1 -Godot $godot -Restore
+python -m http.server 8775 --bind 127.0.0.1 --directory "$env:TEMP/itank-arena-36k-playable-web/out"
+```
+
+Open `http://127.0.0.1:8775/index.html?test=restore-home-a` (fresh token for a fresh source/target). Prepare backup character, then Stage disposable restoration. The fixture exports real acknowledged source history, switches to a separate disposable destination database and supplies that generated input to the ordinary preview code. **This is not file-picker proof.** Click the rendered RESTORE, inspect identity/namespace/XP/Gold/inventory/checkpoint/version/generation, and CANCEL; then RESTORE again and explicitly confirm. Verify restored checkpoint pumps the fixture's manually driven controller, validates exact durable V2 bytes and live candidate, and records reload expectations. Reopen with `&restore_target=1`, then Load saved DEV character. With that tab still open, a second destination tab must reject loading under the held Web Lock. Test restoration failures uses separate disposable databases and explicit injected abort/quota/lost-ack/readback-mismatch faults; it also checks stale expected history. No browser security setting is changed.
+
+Focused native coverage exercises the actual preview/RESTORE/CANCEL/confirmation path, expected-head admission, prefix restoration, immutable original transactions, no duplicate grants, subsequent normal NEXT WAVE/publication, exact resource recovery, two-client convergence, lock contention/loss, stale/older/divergent rejection, incomplete staging, aborts and acknowledgement reconciliation. Existing Pass1 covers checksum, future versions, incomplete chains, duplicate receipts and namespace rejection; existing storage/desktop/browser/coordinator/projection/synchronization suites remain required. Inspect Godot output for SCRIPT ERROR/ERROR and resource warnings even if the process exits zero.
+
+Runtime user procedure: outside active combat/pending persistence, right-click CHAR, PREVIEW BACKUP using the platform file picker, inspect the destination classification, request RESTORE and confirm separately. Only an empty destination, exact match or exact prefix is eligible. Wrong namespace, older/divergent/corrupt/uncertain data cannot be forced through. VERIFY RESULT handles uncertain acknowledgement without replaying grants. An unchanged destination requires a new confirmation. Do not remove stale locks, staging files or saved generations manually to bypass a failure.
+
+Manual owner checks still required: ordinary desktop/Web file selection into preview; actual retained download; end-to-end restoration from that selected file; cancellation; exact resources and damaged equipment; exit/reopen; NORMAL/DEV isolation; rejected older/divergent data. Use disposable copies/profile namespaces first. Browser eviction, genuine quota denial, OS power loss and deliberate tampering are not proven by injected tests or checksums. No universal crash durability/authentication guarantee is claimed. Old desktop binaries do not understand restoration bundles and must not be used with restored data.
+
+Recorded actual Edge evidence (2026-10-30 local): source generation-3 DEV history (level 3, earned/available XP 300, Gold 75) restored into a distinct disposable database through preview, rendered RESTORE, explicit CANCEL then confirmation, real IDB publication and existing playable admission. Repeated exact-match restoration kept the original head/documents; reload restored exact resources/XP/items/growth/run identity. A competing tab was rejected with no starter/session replacement. Injected abort/quota/lost-ack/readback-mismatch cases and stale expected history passed against actual IDB. The final restored profile remained acknowledged/persistent after lease transfer. No browser error logs were reported. File input/download completion remains NOT RUN/NOT VERIFIED under the previously documented extension limitation; security settings were not changed. These tests use generated input in the isolated fixture, not a selected backup file.
+
+Pass2-specific changes: new `scripts/rewards/character_backup_restoration.gd`, `tests/test_character_backup_restoration.gd`, `tests/browser/character_backup_restoration_acceptance.gd` and three UID sidecars. Updated `scripts/rewards/character_save_storage.gd`, `character_browser_store.js`, `character_browser_storage.gd`, `character_backup_contract.gd`, `character_backup_reader.gd`, `scripts/ui/character_backup_actions.gd`, `arena_combat_controller.gd`, `tests/browser/character_backup_acceptance.gd`, `prepare_playable_web.ps1`, `tests/test_runner.gd`, this README and the persistence/storage architecture documents. Other Pass1 files remain preserved. Protection is local to the destination and its history; no global anti-cloning/rollback guarantee across devices or browser origins is claimed.
+
+## Task 36L-Pass1 backup acceptance (no restoration)
+
+Focused native coverage:
+
+```powershell
+$godot = 'C:\Users\mxz\Desktop\GoDot\Godot_v4.7.2-stable_win64_console.exe'
+& $godot --headless --path . --script res://tests/test_runner.gd -- '--suite=Task 36L'
+```
+
+The suite uses disposable cache storage, actual Vaelis selection, physical combat XP/growth, a verified SR purchase, collected/equipped item ownership and complete checkpoint history. It tests exact original V2 bytes, file output/readback, damaged shield representation, receipts/transaction uniqueness, namespace checks, malformed/tampered/oversized input, all destination comparisons, export after reload, and rejected unacknowledged/pending/failed storage. Native write counters and the inspection-only async transport prove ZERO profile writes; snapshots, RNG counts and history remain identical. The worn-shield record is an isolated valid data fixture, not a claim that Vaelis executed a shield Block.
+
+Disposable desktop UI (never selects real saves):
+
+```powershell
+& $godot --path . --script res://tests/manual_character_backup.gd -- --36l-isolated
+```
+
+Use EXPORT BACKUP, then DOWNLOAD / SAVE PREPARED BACKUP. Save to a new `.itankbackup.json` file. Use PREVIEW BACKUP to select it; verify character/namespace/XP/equipment/checkpoint/generation/date and READ ONLY. Existing backup files must not be overwritten. Closing/cancelling must change no profile. Right-click CHAR exposes these actions in the ordinary game outside active combat and pending persistence.
+
+Disposable Web UI:
+
+```powershell
+./tests/browser/prepare_playable_web.ps1 -Godot $godot -Backup
+python -m http.server 8775 --bind 127.0.0.1 --directory "$env:TEMP/itank-arena-36k-playable-web/out"
+```
+
+Open `http://127.0.0.1:8775/index.html?test=backup-pass1-home`. The test prefix isolates its IndexedDB database. Click Prepare backup character and wait for READY. Right-click CHAR, EXPORT, then DOWNLOAD / SAVE PREPARED BACKUP. Confirm the browser retained the downloaded file; the game's download-request message alone does not prove this. PREVIEW that file, then click Check preview zero writes: all checks must pass. Reload and Load saved DEV character, export/preview again. A separately created disposable desktop DEV backup should classify as divergent rather than merge. A NORMAL file selected under DEV must be rejected. Never test invalid/failed recovery against an owner profile.
+
+Recorded evidence (2026-10-30 local / 2026-10-31 UTC): actual Edge exported verified generation-3 DEV history with level/XP/equipment/checkpoint preview; reload restored exact resources and schema-12 convergence. This exposed and corrected a backup-only eligibility bug: a verified loaded profile has no new-write acknowledgement, which must not be mistaken for a pending write. Native and browser-transport regressions cover that distinction. Actual browser download was requested but file retention was NOT VERIFIED. Browser file chooser opened; selection/preview completion was NOT RUN because automation's extension file-URL permission was disabled. That permission was not changed. Native Save picker opening was observed; ordinary native picker completion was NOT RUN. Programmatic desktop output/exact readback and actual UI preview callbacks passed. These manual file-transfer checks remain owner acceptance work, not automated passes.
+
+Pass1 project inventory: new `scripts/rewards/character_backup_contract.gd`, `character_backup_reader.gd`, `scripts/ui/character_backup_actions.gd`, `character_backup_files.gd`, `tests/test_character_backups.gd`, `tests/manual_character_backup.gd`, `tests/browser/character_backup_acceptance.gd` and their UID sidecars; modified controller setup, test registration, disposable export preparation, this README and `docs/architecture/CHARACTER_PERSISTENCE_CONTRACT.md`. No restore/publication functionality, gameplay mutations, live save repair or format changes are included.
+
 ## Pass2 actual playable Edge procedure
 
 The game now enables verified Vaelis Web saving. **Do not use production profiles for destructive tests.** The separate acceptance export injects a disposable database factory before instantiating the real game scene. It uses the actual controller, buttons, session, source admission, projection, coordinator and JavaScriptBridge/IndexedDB; only test scenario defeat/resource fixtures are synthetic. Simulation time is explicitly driven in the fixture, so this is automated integration evidence, not a manual combat playtest or long-session performance test. The ordinary export does not contain these test controls or read a test database name from its URL.

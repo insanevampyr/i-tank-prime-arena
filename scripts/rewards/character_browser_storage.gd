@@ -25,7 +25,7 @@ func _init(test_transport: Callable = Callable(), test_database: String = "") ->
 	_handle = str(_bridge.create(JSON.stringify(config)))
 
 func begin(operation: String, arguments: Dictionary) -> Dictionary:
-	if _testing and operation == "publish" and not _test_publish_fault.is_empty():
+	if _testing and operation in ["publish","restore"] and not _test_publish_fault.is_empty():
 		arguments = arguments.duplicate(true)
 		arguments["fault"] = _test_publish_fault
 		_test_publish_fault = ""

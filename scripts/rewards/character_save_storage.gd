@@ -4,6 +4,8 @@ extends RefCounted
 const Contract = preload("res://scripts/rewards/character_save_contract.gd")
 const DEFAULT_ROOT := "user://character_documents"
 var _root: String
+var _writers := {}
+var _restore_fault := ""
 
 
 func _init(isolated_test_directory: String = "") -> void:
@@ -28,6 +30,11 @@ func read_profile(profile_id: String) -> Dictionary:
 	if not DirAccess.dir_exists_absolute(directory): return _failure("save_missing")
 	var dir := DirAccess.open(directory)
 	if dir == null: return _failure("directory_read_failed")
+	for name: String in dir.get_files():
+		if name.begins_with("restoration_") and name.ends_with(".bundle"):
+			var history := inspect_profile(profile_id)
+			if not history.success or history.generations.is_empty(): return _failure("restoration_history_requires_review")
+			return history.generations.back().duplicate(true)
 	var names: Array[String] = []
 	for name: String in dir.get_files():
 		if name.begins_with("generation_") and name.ends_with(".json"): names.append(name)
@@ -47,6 +54,13 @@ func read_profile(profile_id: String) -> Dictionary:
 
 
 func write_profile(profile_id: String, payload: Dictionary, transaction_id: String) -> Dictionary:
+	var guard := acquire_writer(profile_id)
+	if not guard.success: return guard
+	var result := _write_profile(profile_id,payload,transaction_id)
+	if not release_writer(profile_id,guard.owner).success: result["lock_release_failed"] = true
+	return result
+
+func _write_profile(profile_id: String, payload: Dictionary, transaction_id: String) -> Dictionary:
 	var status := get_storage_status()
 	if not status.success: return status
 	if not _valid_id(profile_id) or not _valid_id(transaction_id): return _failure("invalid_identifier")
@@ -71,7 +85,7 @@ func inspect_profile(profile_id: String) -> Dictionary:
 	if not _valid_id(profile_id) or _root.is_empty(): return _failure("invalid_profile_id")
 	var directory := _root.path_join(profile_id)
 	if not DirAccess.dir_exists_absolute(directory):
-		return {"success":true,"generations":[],"writer_locked":false,"pending_write":false,"profile_directory_exists":false}
+		return {"success":true,"generations":[],"writer_locked":DirAccess.dir_exists_absolute(_writer_path(profile_id)),"pending_write":false,"profile_directory_exists":false}
 	var dir := DirAccess.open(directory)
 	if dir == null: return _failure("directory_read_failed")
 	var records: Array = []
@@ -80,26 +94,45 @@ func inspect_profile(profile_id: String) -> Dictionary:
 	for name: String in dir.get_files():
 		if name.begins_with("generation_") and name.ends_with(".json"): names.append(name)
 	names.sort()
-	var next_generation := 1
+	var by_generation := {}
 	var transactions := {}
 	for name: String in names:
 		var record := _read_generation(directory.path_join(name),profile_id)
 		if record.get("success",false):
-			if int(record.payload.generation) != next_generation: rejected.append({"file":name,"reason":"generation_history_gap"})
-			if transactions.has(record.transaction_id): rejected.append({"file":name,"reason":"duplicate_transaction_in_history"})
-			transactions[record.transaction_id] = true
-			next_generation = int(record.payload.generation)+1
-			records.append(record)
+			by_generation[int(record.payload.generation)] = record
 		else:
 			rejected.append({"file":name,"reason":record.get("reason","")})
+	for name: String in dir.get_files():
+		if not name.begins_with("restoration_") or not name.ends_with(".bundle"): continue
+		var bundle := _read_restoration(directory.path_join(name),profile_id)
+		if not bundle.success:
+			rejected.append({"file":name,"reason":bundle.get("reason","")})
+			continue
+		for record: Dictionary in bundle.records:
+			var number := int(record.payload.generation)
+			if by_generation.has(number) and by_generation[number] != record: rejected.append({"file":name,"reason":"conflicting_restoration_generation"})
+			else: by_generation[number] = record
+	var numbers := by_generation.keys()
+	numbers.sort()
+	for number: int in numbers:
+		var record: Dictionary = by_generation[number]
+		if number != records.size()+1: rejected.append({"reason":"generation_history_gap"})
+		if transactions.has(record.transaction_id): rejected.append({"reason":"duplicate_transaction_in_history"})
+		transactions[record.transaction_id] = true
+		records.append(record)
 	return {"success":rejected.is_empty(),"reason":"" if rejected.is_empty() else "generation_recovery_required","profile_directory_exists":true,
-		"generations":records,"rejected_files":rejected,"writer_locked":DirAccess.dir_exists_absolute(directory.path_join("writer.lock")),
-		"pending_write":FileAccess.file_exists(directory.path_join("write.pending"))}
+		"generations":records,"rejected_files":rejected,"writer_locked":DirAccess.dir_exists_absolute(directory.path_join("writer.lock")) or DirAccess.dir_exists_absolute(_writer_path(profile_id)),
+		"pending_write":FileAccess.file_exists(directory.path_join("write.pending")) or FileAccess.file_exists(directory.path_join("restore.pending"))}
 
 
 func _write_locked(directory: String, profile_id: String, payload: Dictionary, transaction_id: String, text: String) -> Dictionary:
 	var dir := DirAccess.open(directory)
 	if dir == null: return _failure("directory_read_failed")
+	var history := inspect_profile(profile_id)
+	if not history.success: return _failure("generation_recovery_required")
+	if history.pending_write: return _failure("incomplete_write_requires_review")
+	for record: Dictionary in history.generations:
+		if record.transaction_id == transaction_id: return _failure("duplicate_transaction")
 	for name: String in dir.get_files():
 		if not name.begins_with("generation_") or not name.ends_with(".json"): continue
 		var prior := _read_generation(directory.path_join(name), profile_id)
@@ -134,6 +167,104 @@ func _write_locked(directory: String, profile_id: String, payload: Dictionary, t
 	if not published.get("success", false) or published.get("document") != text: return _failure("published_verification_failed")
 	return {"success": true, "generation": int(payload.generation), "transaction_id": transaction_id, "state": "filesystem_verified", "durable_power_loss_guaranteed": false}
 
+
+func _writer_path(profile: String) -> String:
+	return _root.path_join(profile+".writer.lock")
+
+func acquire_writer(profile: String) -> Dictionary:
+	var status := get_storage_status()
+	if not status.success: return status
+	if not _valid_id(profile): return _failure("invalid_profile_id")
+	if DirAccess.make_dir_recursive_absolute(_root) != OK: return _failure("storage_directory_unavailable")
+	if DirAccess.make_dir_absolute(_writer_path(profile)) != OK: return _failure("writer_locked")
+	var owner := Crypto.new().generate_random_bytes(16).hex_encode()
+	var marker := FileAccess.open(_writer_path(profile).path_join("owner"),FileAccess.WRITE)
+	if marker == null: return _failure("writer_identity_unavailable")
+	marker.store_string(owner)
+	marker.flush()
+	var error := marker.get_error()
+	marker.close()
+	if error != OK or FileAccess.get_file_as_string(_writer_path(profile).path_join("owner")) != owner: return _failure("writer_identity_unverified")
+	_writers[profile] = owner
+	return {"success":true,"owner":owner}
+
+func release_writer(profile: String, owner: String) -> Dictionary:
+	if not _owns_writer(profile,owner): return _failure("writer_ownership_required")
+	if DirAccess.remove_absolute(_writer_path(profile).path_join("owner")) != OK: return _failure("writer_release_failed")
+	if DirAccess.remove_absolute(_writer_path(profile)) != OK: return _failure("writer_release_failed")
+	_writers.erase(profile)
+	return {"success":true}
+
+func inspect_owned(profile: String, owner: String) -> Dictionary:
+	if not _owns_writer(profile,owner): return _failure("writer_ownership_required")
+	var history := inspect_profile(profile)
+	# Only this new outer guard is ours; legacy/stale locks remain a blocker.
+	if history.success: history.writer_locked = DirAccess.dir_exists_absolute(_root.path_join(profile).path_join("writer.lock"))
+	return history
+
+func _owns_writer(profile: String, owner: String) -> bool:
+	var path := _writer_path(profile).path_join("owner")
+	return _writers.get(profile) == owner and FileAccess.file_exists(path) and FileAccess.get_file_as_string(path) == owner
+
+func restore_history(profile: String, records: Array, expected: Array, owner: String) -> Dictionary:
+	var before := inspect_owned(profile,owner)
+	if not before.get("success",false) or before.writer_locked or before.pending_write: return _failure("restoration_destination_uncertain")
+	var actual := history_records(before)
+	if actual == records: return {"success":true,"state":"filesystem_verified","reconciled":true}
+	if actual != expected or records.size() <= actual.size() or records.slice(0,actual.size()) != actual: return _failure("restoration_history_conflict")
+	# Defense in depth at the publication boundary, using the same full validator.
+	var checked := CharacterBackupContract.validate_history({"success":true,"generations":records},"dev_normal" if profile.begins_with("dev_") else "normal")
+	if not checked.success or checked.payload.character_id != profile: return _failure("invalid_restoration_history")
+	var directory := _root.path_join(profile)
+	if DirAccess.make_dir_recursive_absolute(directory) != OK: return _failure("directory_create_failed")
+	var pending := directory.path_join("restore.pending")
+	var body := JSON.stringify(records,"",true,true)
+	var digest := body.sha256_text()
+	var destination := directory.path_join("restoration_%s.bundle" % digest)
+	if _restore_fault == "abort": return _failure("injected_restoration_abort")
+	var file := FileAccess.open(pending,FileAccess.WRITE)
+	if file == null: return _failure("restoration_output_unavailable")
+	file.store_string(JSON.stringify({"restoration_version":1,"body_json":body,"sha256":digest},"",true,true))
+	file.flush()
+	var error := file.get_error()
+	file.close()
+	if error != OK or _restore_fault == "interrupted": return _failure("restoration_incomplete_recovery_required")
+	var staged := _read_restoration(pending,profile)
+	if not staged.success or history_records({"generations":staged.records}) != records: return _failure("restoration_staging_mismatch")
+	if DirAccess.rename_absolute(pending,destination) != OK: return _failure("restoration_publication_failed")
+	if _restore_fault == "lost_ack": return _failure("restoration_acknowledgement_lost")
+	var after := inspect_owned(profile,owner)
+	if _restore_fault == "readback_mismatch" or not after.success or history_records(after) != records: return _failure("restoration_readback_mismatch")
+	return {"success":true,"state":"filesystem_verified","durable_power_loss_guaranteed":false}
+
+func inject_restoration_test_fault(fault: String) -> bool:
+	if _root == DEFAULT_ROOT or _root.is_empty(): return false
+	_restore_fault = fault
+	return true
+
+static func history_records(history: Dictionary) -> Array:
+	var records: Array = []
+	for row: Dictionary in history.get("generations",[]):
+		records.append({"generation":int(row.get("generation",row.get("payload",{}).get("generation",0))),"transaction_id":row.transaction_id,"document":row.document})
+	return records
+
+func _read_restoration(path: String, profile: String) -> Dictionary:
+	var file := FileAccess.open(path,FileAccess.READ)
+	if file == null: return _failure("restoration_unreadable")
+	if file.get_length() > 16*1024*1024: return _failure("restoration_size_limit")
+	var wrapper: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	if not wrapper is Dictionary or wrapper.size() != 3 or wrapper.get("restoration_version") != 1 or not wrapper.get("body_json") is String or wrapper.body_json.sha256_text() != wrapper.get("sha256"): return _failure("invalid_restoration_bundle")
+	if path.ends_with(".bundle") and path.get_file() != "restoration_%s.bundle" % wrapper.sha256: return _failure("restoration_filename_mismatch")
+	var rows: Variant = JSON.parse_string(wrapper.body_json)
+	if not rows is Array or rows.is_empty(): return _failure("invalid_restoration_records")
+	var records: Array = []
+	for row: Variant in rows:
+		if not row is Dictionary or not row.get("document") is String or not row.get("transaction_id") is String or not _valid_id(row.transaction_id): return _failure("invalid_restoration_record")
+		var decoded := Contract.decode(row.document)
+		if not decoded.success or decoded.payload.character_id != profile or decoded.payload.generation != records.size()+1 or row.get("generation") != decoded.payload.generation: return _failure("invalid_restoration_generation")
+		records.append({"success":true,"payload":decoded.payload,"transaction_id":row.transaction_id,"document":row.document})
+	return {"success":true,"records":records}
 
 func _read_generation(path: String, profile_id: String) -> Dictionary:
 	var file := FileAccess.open(path, FileAccess.READ)

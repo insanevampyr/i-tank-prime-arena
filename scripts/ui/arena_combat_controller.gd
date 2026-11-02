@@ -124,6 +124,7 @@ var _web_releases: Array = []
 var _browser_motion_paused := false
 var _browser_motion_was_processing := false
 var _browser_controls_locked := false
+var _backup_actions: CharacterBackupActions
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -197,6 +198,10 @@ func _ready() -> void:
 		_save_log_button.pressed.connect(_on_save_log_button_pressed)
 	_create_nac_settings_panel()
 	_create_rewards_panel()
+	_backup_actions = CharacterBackupActions.new()
+	_backup_actions.name = "CharacterBackupActions"
+	add_child(_backup_actions)
+	_backup_actions.setup(self,_character_selector)
 	_process_new_events()
 	_update_combat_movement_lock()
 	_update_presentation()
@@ -1022,13 +1027,13 @@ func _on_return_to_wave_one_pressed() -> void:
 	_update_presentation()
 
 
-func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}, restored_head: Dictionary = {}) -> Dictionary:
 	if _use_browser_character_persistence(): return _begin_browser_load(new_run,defeated_checkpoint)
 	var previous_motion := _player.capture_wave_entry_motion()
 	var previous_position := _player.position
 	var previous_fixture := _encounter_fixture_id
 	var previous := _session
-	var result := _prepare_encounter_candidate(new_run,defeated_checkpoint)
+	var result := _prepare_encounter_candidate(new_run,defeated_checkpoint,null,restored_head)
 	if not result.get("success",false):
 		_session = previous
 		_encounter_fixture_id = previous_fixture
@@ -1043,7 +1048,7 @@ func _restore_profile_visual_state(motion: Dictionary, previous_position: Vector
 	_player.restore_wave_entry_motion(motion)
 
 
-func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableBrowserPersistence = null) -> Dictionary:
+func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableBrowserPersistence = null, restored_head: Dictionary = {}) -> Dictionary:
 	var previous_session := _session
 	var requested_seed: int = previous_session._seed_value if new_run and previous_session != null else combat_seed
 	_session = ArenaCombatSession.new(requested_seed, null, _encounter_fixture_id, _player_character_id)
@@ -1056,6 +1061,9 @@ func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Di
 		_session = previous_session
 		_last_ui_message = "Character load blocked: %s" % persistent_setup.get("reason","invalid profile")
 		return persistent_setup
+	if not restored_head.is_empty() and (_session._playable_persistence == null or CharacterProfileProjection.fingerprint(_session._playable_persistence._prior) != CharacterProfileProjection.fingerprint(restored_head)):
+		_session = previous_session
+		return {"success":false,"reason":"restored_head_changed_before_admission"}
 	if persistent_setup.get("persistent",false): _encounter_fixture_id = _session._encounter_fixture_id
 	_session.configure_battlefield(ArenaBattlefield.create_task16_test_arena())
 	_session.set_opponent_behavior_enabled(true)
@@ -1142,7 +1150,24 @@ func _use_browser_character_persistence() -> bool:
 	return (OS.has_feature("web") or PlayableBrowserPersistence.test_factory.is_valid()) and not PlayableCharacterPersistence.test_nonpersistent and _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and _encounter_fixture_id not in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
 
 func _browser_transition_blocked() -> bool:
-	return not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
+	return (_backup_actions != null and _backup_actions.restoration_blocked) or not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
+
+func _load_backup_checkpoint(payload: Dictionary, lease: PlayableBrowserPersistence = null) -> Dictionary:
+	if _session == null or _session.is_encounter_active() or _browser_transition_blocked(): return {"success":false,"reason":"restoration_admission_not_safe"}
+	if payload.get("profile_namespace") != _session._reward_mode: return {"success":false,"reason":"restoration_namespace_changed"}
+	var previous_character := _player_character_id
+	var previous_fixture := _encounter_fixture_id
+	_player_character_id = Fixture.PLAYER_CHARACTER_VAELIS
+	_encounter_fixture_id = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+	var result := _begin_browser_load(false,{},lease,payload) if lease != null else _prepare_encounter_fixture(false,{},payload)
+	if not result.get("success",false) and result.get("state") != "pending":
+		_player_character_id = previous_character
+		_encounter_fixture_id = previous_fixture
+	if result.get("success",false):
+		_delta_us_remainder = 0.0
+		_update_combat_movement_lock()
+		_update_presentation()
+	return result
 
 func _browser_status_text() -> String:
 	if not _web_operation.is_empty(): return _web_operation.service.status().get("text","Progress not saved")
@@ -1151,12 +1176,15 @@ func _browser_status_text() -> String:
 func _can_cancel_browser_load() -> bool:
 	return not _web_operation.is_empty() and not _web_operation.get("lease_transferred",false) and _web_operation.get("phase") == "failed" and _web_operation.kind == "load" and _web_operation.service._prepared.is_empty()
 
-func _begin_browser_load(new_run: bool, defeated: Dictionary) -> Dictionary:
+func _begin_browser_load(new_run: bool, defeated: Dictionary, backup_lease: PlayableBrowserPersistence = null, restored_head: Dictionary = {}) -> Dictionary:
 	if not _web_operation.is_empty(): return {"success":false,"state":"pending"}
 	_freeze_browser_motion()
 	var service := PlayableBrowserPersistence.new()
 	var previous: PlayableBrowserPersistence = _session._playable_persistence as PlayableBrowserPersistence if _session != null else null
+	if backup_lease != null: previous = backup_lease
 	_web_operation = {"service":service,"phase":"loading","kind":"load","new_run":new_run,"defeated":defeated.duplicate(true),"previous":_session,"motion":_player.capture_wave_entry_motion(),"position":_player.position,"fixture":_encounter_fixture_id}
+	_web_operation["restored_head"] = restored_head.duplicate(true)
+	if backup_lease != null: _web_operation["backup_lease"] = backup_lease
 	var opened := service.open_browser("dev_normal" if _encounter_selector_index == 8 else "normal",previous,new_run,defeated)
 	_last_ui_message = "Loading character."
 	return opened
@@ -1204,7 +1232,7 @@ func _poll_browser_persistence() -> void:
 		_last_ui_message = service.status().text+". Press RETRY STORAGE."
 		return
 	if _web_operation.phase == "loading":
-		var built := _prepare_encounter_candidate(_web_operation.new_run,_web_operation.defeated,service)
+		var built := _prepare_encounter_candidate(_web_operation.new_run,_web_operation.defeated,service,_web_operation.get("restored_head",{}))
 		_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
 		_encounter_fixture_id = _web_operation.fixture
 		if not built.get("success",false) and built.get("state") != "pending":
@@ -1232,12 +1260,17 @@ func _adopt_browser_candidate() -> void:
 	var candidate: ArenaCombatSession = _web_operation.candidate
 	var previous: ArenaCombatSession = _web_operation.previous
 	var service: PlayableBrowserPersistence = _web_operation.service
+	if _web_operation.has("backup_lease"): _web_operation.backup_lease._owns_lease = false
 	if previous != null and previous._playable_persistence is PlayableBrowserPersistence:
 		var previous_service := previous._playable_persistence as PlayableBrowserPersistence
 		if previous_service.browser == service.browser: previous_service._owns_lease = false
 		else: _release_browser_service(previous_service)
 	_session = candidate
 	service._status["text"] = "Progress saved"
+	if _web_operation.has("backup_lease"):
+		# Lease transfer reports a pending storage status while it is in flight.
+		# The exact restored head was already verified before this admission.
+		service._status = {"persistent":true,"reason":"validated_profile_loaded","text":"Progress saved","generation":service.generation,"profile_namespace":service.mode}
 	_encounter_fixture_id = candidate._encounter_fixture_id
 	if _web_operation.kind == "next":
 		candidate._opponent_behavior_enabled = _web_operation.opponent_behavior
@@ -1276,6 +1309,9 @@ func _confirm_browser_character() -> void:
 func _cancel_browser_creation() -> void:
 	if _web_operation.is_empty(): return
 	_release_browser_service(_web_operation.service)
+	if _web_operation.has("backup_lease"):
+		var held: PlayableBrowserPersistence = _web_operation.backup_lease
+		if _session == null or held != _session._playable_persistence: _release_browser_service(held)
 	_player_character_id = _session._player_character_id
 	_encounter_fixture_id = _session._encounter_fixture_id
 	_encounter_selector_index = 8 if _session._reward_mode == "dev_normal" else _selector_index_for_fixture(_encounter_fixture_id,_session._reward_mode == "test")
@@ -1987,7 +2023,7 @@ func _update_rewards_panel(force_refresh: bool = false) -> void:
 		# Open once for each victory boundary, never for ordinary content refresh.
 		_combat_inventory_open = state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST
 	var visible := _combat_inventory_open and (
-		state == ArenaCombatSession.ENCOUNTER_RUNNING or (
+		state in [ArenaCombatSession.ENCOUNTER_READY, ArenaCombatSession.ENCOUNTER_RUNNING] or (
 			state == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME
 			and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST))
 	var was_visible := _rewards_panel.visible

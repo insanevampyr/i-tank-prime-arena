@@ -1,5 +1,9 @@
 # Task 36E: isolated local character-document storage
 
+## Task 36L-Pass2 batch restoration boundary
+
+Restoration reuses the current backends and validators. Native writers now share an ownership-marked per-profile guard; a restoration publishes an immutable version-1 transport bundle of exact original V2 documents through verified staging and one rename. Inspection rejects inconsistent overlaps, stale locks and incomplete staging. Subsequent ordinary generations retain their existing document format. No generation is removed. IndexedDB's new `restore` operation appends only a validated missing suffix and publishes its head atomically in the existing stores, with in-transaction expected-history/head comparison and fresh readback under Web Locks. Exact repeats are read-only reconciliation; older/divergent histories are rejected. Details and limitations are in the controlling Pass2 section of `CHARACTER_PERSISTENCE_CONTRACT.md`. Existing lower-pass statements about unchanged APIs describe their historical scope.
+
 ## Task 36K-Pass2 integration status
 
 Vaelis Web gameplay now uses the verified browser adapter; the controlling integration/retention boundaries are in `CHARACTER_PERSISTENCE_CONTRACT.md`. Desktop APIs remain synchronous and unchanged. Bridge disposal now rejects new requests and awaits authorized in-flight operations before closing/releasing leases, including when the engine terminates before polling completes. Disposable test-only faults can pause an uncommitted publication for real reload/tab-close tests; production databases cannot enable faults. Pass1 implementation results and Web-blocked statements below remain historical. Current browser transport checks: 37/37, including drained shutdown, plus separate actual playable Edge acceptance.

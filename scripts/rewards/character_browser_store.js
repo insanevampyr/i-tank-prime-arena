@@ -156,6 +156,57 @@
         return result("verified_committed", "publication_readback_verified", {generation: payload.generation, latest_generation: after.generation, transaction_id, document, strict_durability_requested: tx.durability === "strict", long_term_retention_guaranteed: false});
       } finally {lease.busy--;}
     }
+    async restore(args) {
+      const {profile, owner, records, expected, fault} = args;
+      const lease = this.lease(profile, owner);
+      if (fault && !this.testing) throw problem("test_fault_forbidden", "failed");
+      if (!Array.isArray(records) || !Array.isArray(expected) || !records.length || records.length > 4096) throw problem("invalid_restoration_records", "failed");
+      lease.busy++;
+      const same = (a,b) => a.length === b.length && a.every((r,i) => r.generation === b[i].generation && r.transaction_id === b[i].transaction_id && r.document === b[i].document);
+      try {
+        const ids = new Set();
+        for (let i=0;i<records.length;i++) {
+          const row=records[i];
+          if (!id(row.transaction_id) || ids.has(row.transaction_id) || row.generation !== i+1) throw problem("invalid_restoration_identity", "failed");
+          ids.add(row.transaction_id);
+          if ((await this.document(row.document,profile)).generation !== i+1) throw problem("invalid_restoration_generation", "failed");
+        }
+        const before=await this.inspect(profile);
+        if (same(before.generations,records)) return {...before,reconciled:true};
+        if (!same(before.generations,expected) || expected.length >= records.length || !same(expected,records.slice(0,expected.length))) throw problem("restoration_history_conflict", "failed");
+        if (fault === "quota") throw new DOMException("quota_exhausted", "QuotaExceededError");
+        if (fault === "denied") throw new DOMException("permission_denied", "NotAllowedError");
+        const db=await this.db();
+        let tx;
+        try {tx=db.transaction(["heads","generations","transactions"],"readwrite",{durability:"strict"});}
+        catch(error) {if (!(error instanceof TypeError)) throw error; tx=db.transaction(["heads","generations","transactions"],"readwrite");}
+        const done=completion(tx);
+        let rejection=null;
+        const read=tx.objectStore("generations").getAll(IDBKeyRange.bound([profile,0],[profile,Number.MAX_SAFE_INTEGER]));
+        const head=tx.objectStore("heads").get(profile);
+        let recordsReady=false, headReady=false;
+        const apply=()=>{
+          if(!recordsReady || !headReady)return;
+          if (!same(read.result,expected)) {rejection=problem("stale_generation","failed"); tx.abort(); return;}
+          const prior=expected.at(-1);
+          if(prior ? !head.result || head.result.generation !== prior.generation || head.result.transaction_id !== prior.transaction_id || head.result.document !== prior.document : !!head.result) {rejection=problem("current_pointer_changed","failed"); tx.abort(); return;}
+          for(let i=expected.length;i<records.length;i++) {
+            const row={profile,...records[i]};
+            tx.objectStore("generations").add(row);
+            tx.objectStore("transactions").add({...row,expected_generation:i});
+          }
+          tx.objectStore("heads").put({profile,...records.at(-1)});
+          if(fault === "abort") tx.abort();
+        };
+        read.onsuccess=()=>{recordsReady=true;apply();};
+        head.onsuccess=()=>{headReady=true;apply();};
+        try {await done;} catch(error) {throw rejection || error;}
+        if(fault === "lost_ack") return result("recovery_required","acknowledgement_lost");
+        const after=await this.inspect(profile);
+        if(fault === "readback_mismatch" || !same(after.generations,records)) throw problem("restoration_readback_mismatch");
+        return {...after,reason:"restoration_readback_verified"};
+      } finally {lease.busy--;}
+    }
     async reconcile(args) {
       const after = await this.inspect(args.profile);
       const prior = after.generations.find(r => r.transaction_id === args.transaction_id);
@@ -171,6 +222,7 @@
         if (operation === "transfer") return this.transfer(args.profile, args.owner, args.next_owner);
         if (operation === "inspect") return await this.inspect(args.profile);
         if (operation === "publish") return await this.publish(args);
+        if (operation === "restore") return await this.restore(args);
         if (operation === "reconcile") return await this.reconcile(args);
         return result("failed", "unknown_operation");
       } catch (error) {return failure(error);}

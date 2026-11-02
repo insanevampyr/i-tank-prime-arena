@@ -31,7 +31,24 @@ func _initialize() -> void:
 	if visible_lines < 5:
 		fail("Web export clips the persistence status line; re-export the corrected scene.")
 		return
-	print("PASS: ordinary Web PCK includes playable async persistence, recovery callbacks and visible storage status.")
+	call_deferred("verify_backup_controls")
+
+func verify_backup_controls() -> void:
+	var scene: Node = load("res://scenes/test_arena.tscn").instantiate()
+	root.add_child(scene)
+	var controller = scene.get_node("CombatController")
+	controller.set_physics_process(false)
+	controller._on_inventory_toggle_pressed()
+	await process_frame
+	var controls = controller._rewards_label.get_parent().get_node_or_null("CharacterBackupControls")
+	var valid: bool = controls != null and controls.is_visible_in_tree() and controls.get_index() == 1
+	if valid:
+		valid = controls.get_node("ExportBackup").text == "EXPORT BACKUP" and controls.get_node("PreviewRestoreBackup").text == "PREVIEW / RESTORE BACKUP"
+	scene.free()
+	if not valid:
+		fail("Exported playable scene must expose current backup controls in READY character management.")
+		return
+	print("PASS: ordinary Web PCK includes async persistence, storage status and visible READY backup controls.")
 	quit()
 
 func fail(reason: String) -> void:

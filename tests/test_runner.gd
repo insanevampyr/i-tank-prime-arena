@@ -72,6 +72,8 @@ const ReturnToWaveOneTests = preload("res://tests/test_return_to_wave_one.gd")
 const NewRunPolicyForceSsTests = preload("res://tests/test_new_run_policy_force_ss.gd")
 const CharacterBrowserStorageTests = preload("res://tests/test_character_browser_storage.gd")
 const PlayableBrowserPersistenceTests = preload("res://tests/test_playable_browser_persistence.gd")
+const CharacterBackupTests = preload("res://tests/test_character_backups.gd")
+const CharacterBackupRestorationTests = preload("res://tests/test_character_backup_restoration.gd")
 
 
 func _initialize() -> void:
@@ -83,6 +85,8 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 36L-Pass2 safe character backup restoration", "instance":CharacterBackupRestorationTests.new()},
+		{"name":"Task 36L-Pass1 character backup export and preview", "instance":CharacterBackupTests.new()},
 		{"name":"Task 36K-Pass2 playable browser persistence", "instance":PlayableBrowserPersistenceTests.new()},
 		{"name":"Task 36K-Pass1 browser storage boundary", "instance":CharacterBrowserStorageTests.new()},
 		{"name":"Task 36J-Fix3 new-run policy and Force SS", "instance":NewRunPolicyForceSsTests.new()},
