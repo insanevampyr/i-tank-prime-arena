@@ -1,5 +1,7 @@
 extends SceneTree
 
+const DormantAttributeTests = preload("res://tests/test_task_37c_dormant_attributes.gd")
+
 const CombatFoundationTests = preload("res://tests/test_combat_foundation.gd")
 const StrengthAdvancementTests = preload("res://tests/test_task_37b_strength.gd")
 const ReadyStrengthTests = preload("res://tests/test_task_37b_ready_advancement.gd")
@@ -89,6 +91,7 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 37C dormant universal attributes", "instance":DormantAttributeTests.new()},
 		{"name":"Task 37B READY character management", "instance":ReadyStrengthTests.new()},
 		{"name":"Task 37B permanent STR advancement", "instance":StrengthAdvancementTests.new()},
 		{"name":"Task 37A live allocation and defensive sequence", "instance":Task37ALiveTests.new()},

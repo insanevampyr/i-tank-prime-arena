@@ -146,12 +146,41 @@ func _test_prone_defense_eligibility() -> void:
 		CombatDodgeContext.SELECTION_RESOLVED, Vector2i(7_000_000, 0), 2_000_000, false,
 		true, true, "TASK17 excessive prone Dodge fixture", &"two_feet", &"fixture", true, true, true, 0
 	)
+	var illegal_simulation: CombatSimulation = illegal_dodge["simulation"]
+	var defender := illegal_simulation.get_actor_state(&"target")
+	_expect_equal(illegal_simulation.get_actor_definition(&"target").get_combat_stat("mr"), 12, "Prone defense fixture must retain walking MR 12; the crawl test above verifies its three-foot allowance.")
+	var one_foot_geometry := illegal_simulation._validate_resolved_dodge_context(illegal_attack, defender, legal_context)
+	_expect_true(one_foot_geometry.valid, "The one-foot maximum prone Dodge must pass geometry validation.")
+	var beyond_one_foot := CombatDodgeContext.new(
+		CombatDodgeContext.SELECTION_RESOLVED, Vector2i(6_000_001, 0), 1_000_001, false,
+		true, true, "TASK17 prone Dodge boundary fixture", &"beyond_one_foot", &"fixture", true, true, true, 0
+	)
+	_expect_equal(illegal_simulation._validate_resolved_dodge_context(illegal_attack, defender, beyond_one_foot).reason, "dodge_exceeds_half_mr", "Half of the three-foot crawl allowance must round down to a one-foot Dodge limit.")
+	var excessive_geometry := illegal_simulation._validate_resolved_dodge_context(illegal_attack, defender, illegal_context)
+	_expect_true(not excessive_geometry.valid, "The requested two-foot prone Dodge must fail geometry validation.")
+	_expect_equal(excessive_geometry.reason, "dodge_exceeds_half_mr", "Excessive prone Dodge must report the exact geometry rejection independently of defense selection.")
 	var illegal_result := (illegal_dodge["simulation"] as CombatSimulation).resolve_pending_defense(illegal_attack.attack_instance_id, "illegal_prone_dodge", illegal_context)
 	_expect_true(illegal_result.get("success", false), "An excessive prone Dodge must resolve as an ineligible attempt: %s" % illegal_result.get("reason", "unknown"))
 	var illegal_resolution: CombatDefenseResolution = (illegal_dodge["simulation"] as CombatSimulation).get_defense_resolution(illegal_result.get("defense_resolution_id", ""))
 	if illegal_resolution == null:
 		return
-	_expect_equal(illegal_resolution.attempts[0].eligibility_reason, "dodge_exceeds_half_mr", "Prone Dodge must reject displacement beyond half of the approved crawl MR.")
+	_expect_equal(illegal_resolution.successful_defense_type, &"physical_soak", "The approved planner must select eligible Physical Soak instead of the ineligible Dodge.")
+	_expect_equal(illegal_resolution.status, CombatDefenseResolution.STATUS_DEFENDED, "Successful Physical Soak must resolve the defense.")
+	var attempted_count := 0
+	var found_dodge := false
+	for attempt: CombatDefenseAttempt in illegal_resolution.attempts:
+		if attempt.eligibility == CombatDefenseAttempt.ATTEMPTED:
+			attempted_count += 1
+			_expect_equal(attempt.defense_type, &"physical_soak", "Only Physical Soak may be attempted in this fixture.")
+			_expect_equal(attempt.success, true, "The selected Physical Soak must succeed.")
+		else:
+			_expect_equal(attempt.eligibility, CombatDefenseAttempt.ELIGIBLE_NOT_SELECTED, "Successful Soak must stop subsequent defensive attempts.")
+			_expect_equal(attempt.eligibility_reason, "prior_defense_succeeded", "Unattempted defenses must retain the successful-defense termination reason.")
+		if attempt.defense_type == CombatDefenseProfile.DODGE:
+			found_dodge = true
+			_expect_equal(attempt.eligibility, CombatDefenseAttempt.ELIGIBLE_NOT_SELECTED, "Dodge must not be attempted after successful Soak.")
+	_expect_true(found_dodge, "Resolution must retain the unattempted Dodge record without assuming its array position.")
+	_expect_equal(attempted_count, 1, "Exactly one defensive attempt must occur before termination on successful Soak.")
 
 	for defense_type: StringName in [&"weapon_block", &"shield_block", &"physical_soak"]:
 		var fixture := _make_defense_simulation(1_211, defense_type, PackedStringArray(["prone", "held"]))

@@ -1,0 +1,357 @@
+<!doctype html><meta charset="utf-8"><title>ITank Prime 37C Attribute Audit</title><style>body{font:16px/1.5 system-ui;max-width:1150px;margin:40px auto;padding:0 24px;color:#172334}table{border-collapse:collapse;width:100%;margin:16px 0 30px}th,td{border:1px solid #b9c4cf;padding:8px;text-align:left;vertical-align:top}th{background:#e8eef4}h2{margin-top:45px}code{overflow-wrap:anywhere}nav a{margin-right:16px}small{color:#465568}</style><h1>ITank Prime Character Attribute Audit</h1><p>Audit only at main 22cbcd3. Printed V3 mechanics, confirmed owner rulings and current implementation are distinguished below. No runtime change is authorized. The charts are transcribed in full; missing universal calculations are not represented as implemented.</p><nav><a href="#STR">STR</a><a href="#END">END</a><a href="#SPD">SPD</a><a href="#DEX">DEX</a><a href="#WIS">WIS</a><a href="#INT">INT</a><a href="#WIT">WIT</a><a href="#MAN">MAN</a><a href="#LUK">LUK</a><a href="#APP">APP</a></nav>
+<h2 id="STR">STR</h2><p><b>MATCH / MISSING</b> — PrimeV3StrengthChart.derived: exact SB/PPG/MWC for 1-20. 0 and 21-35 deliberately gated; static authored exceptions must not be overwritten.</p><p>Definitions pp. 19. SB adds to melee and thrown damage, not shot projectiles. PPG governs grip/push contests. Each 10 lb over MWC reduces MR by 1; each 20 lb reduces both dodges by 1. Partial-weight rounding is not specified here.</p><p>Derived fields: Strength Bonus (SB); Push, Pull &amp; Grip (PPG); Max Weight Capacity (MWC)</p>
+<p>Column order: [&#x27;SB&#x27;, &#x27;PPG&#x27;, &#x27;MWC&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>DEAD</td><td>DEAD</td><td>MISSING / deliberately gated</td><td>53, 55</td></tr>
+<tr><td>1</td><td>0-5-25</td><td>0-5-25</td><td>MATCH [0, 5, 25]</td><td>53, 55</td></tr>
+<tr><td>2</td><td>0-5-50</td><td>0-5-50</td><td>MATCH [0, 5, 50]</td><td>53, 55</td></tr>
+<tr><td>3</td><td>1-5-75</td><td>1-5-75</td><td>MATCH [1, 5, 75]</td><td>53, 55</td></tr>
+<tr><td>4</td><td>1-6-100</td><td>1-6-100</td><td>MATCH [1, 6, 100]</td><td>53, 55</td></tr>
+<tr><td>5</td><td>1-6-150</td><td>1-6-150</td><td>MATCH [1, 6, 150]</td><td>53, 55</td></tr>
+<tr><td>6</td><td>1-7-175</td><td>1-7-175</td><td>MATCH [1, 7, 175]</td><td>53, 55</td></tr>
+<tr><td>7</td><td>1-7-200</td><td>1-7-200</td><td>MATCH [1, 7, 200]</td><td>53, 55</td></tr>
+<tr><td>8</td><td>2-8-225</td><td>2-8-225</td><td>MATCH [2, 8, 225]</td><td>53, 55</td></tr>
+<tr><td>9</td><td>2-8-250</td><td>2-8-250</td><td>MATCH [2, 8, 250]</td><td>53, 55</td></tr>
+<tr><td>10</td><td>2-9-300</td><td>2-9-300</td><td>MATCH [2, 9, 300]</td><td>53, 55</td></tr>
+<tr><td>11</td><td>2-9-325</td><td>2-9-325</td><td>MATCH [2, 9, 325]</td><td>53, 55</td></tr>
+<tr><td>12</td><td>3-10-350</td><td>3-10-350</td><td>MATCH [3, 10, 350]</td><td>53, 55</td></tr>
+<tr><td>13</td><td>3-10-375</td><td>3-10-375</td><td>MATCH [3, 10, 375]</td><td>53, 55</td></tr>
+<tr><td>14</td><td>3-11-400</td><td>3-11-400</td><td>MATCH [3, 11, 400]</td><td>53, 55</td></tr>
+<tr><td>15</td><td>3-11-450</td><td>3-11-450</td><td>MATCH [3, 11, 450]</td><td>53, 55</td></tr>
+<tr><td>16</td><td>4-12-475</td><td>4-12-475</td><td>MATCH [4, 12, 475]</td><td>53, 55</td></tr>
+<tr><td>17</td><td>4-12-500</td><td>4-12-500</td><td>MATCH [4, 12, 500]</td><td>53, 55</td></tr>
+<tr><td>18</td><td>4-13-525</td><td>4-13-525</td><td>MATCH [4, 13, 525]</td><td>53, 55</td></tr>
+<tr><td>19</td><td>4-13-550</td><td>4-13-550</td><td>MATCH [4, 13, 550]</td><td>53, 55</td></tr>
+<tr><td>20</td><td>5-14-600</td><td>5-14-600</td><td>MATCH [5, 14, 600]</td><td>53, 55</td></tr>
+<tr><td>21</td><td>5-15-625</td><td>5-15-625</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>22</td><td>5-15-650</td><td>5-15-650</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>23</td><td>5-15-675</td><td>5-15-675</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>24</td><td>6-15-700</td><td>6-15-700</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>25</td><td>6-15-750</td><td>6-15-750</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>26</td><td>6-16-775</td><td>6-16-775</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>27</td><td>6-16-800</td><td>6-16-800</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>28</td><td>7-17-825</td><td>7-17-825</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>29</td><td>7-17-850</td><td>7-17-850</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>30</td><td>7-18-900</td><td>7-18-900</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>31</td><td>7-18-925</td><td>7-18-925</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>32</td><td>8-18-950</td><td>8-18-950</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>33</td><td>8-18-975</td><td>8-18-975</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>34</td><td>8-19-1000</td><td>8-19-1000</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+<tr><td>35</td><td>8-19-1050</td><td>8-19-1050</td><td>MISSING / deliberately gated</td><td>54, 56</td></tr>
+</table>
+<h2 id="END">END</h2><p><b>MISSING</b> — CombatActorDefinition stores authored NAL/physical_soak/HPB. No universal END lookup or END purchase. Existing damage/soak consumers use those values.</p><p>Definitions pp. 19. NAL applies to eligible physical damage, not Specials/tek; printed minimum one damage. PS cannot combine with dodge on the same strike; no piercing, surprise or back-attack soak. HPB contributes at level gains.</p><p>Derived fields: Natural Armor Level (NAL); Physical Soak (PS); Hit Point Bonus (HPB)</p>
+<p>Column order: [&#x27;NAL&#x27;, &#x27;PS&#x27;, &#x27;HPB&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>DEAD</td><td>DEAD</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>0-1-1</td><td>0-1-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>0-2-1</td><td>0-2-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>1-3-1</td><td>1-3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>1-3-1</td><td>1-3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>1-3-1</td><td>1-3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>1-4-2</td><td>1-4-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>1-4-2</td><td>1-4-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>2-4-2</td><td>2-4-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>2-5-2</td><td>2-5-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>2-5-3</td><td>2-5-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>2-6-3</td><td>2-6-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>2-7-3</td><td>2-7-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>2-8-3</td><td>2-8-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>3-8-4</td><td>3-8-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>3-9-4</td><td>3-9-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>3-9-5</td><td>3-9-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>3-10-5</td><td>3-10-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>4-10-6</td><td>4-10-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>4-10-7</td><td>4-10-7</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>4-10-7</td><td>4-10-7</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>4-11-8</td><td>4-11-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>5-11-8</td><td>5-11-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>5-11-8</td><td>5-11-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>5-12-9</td><td>5-12-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>5-12-9</td><td>5-12-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>6-13-9</td><td>6-13-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>6-13-10</td><td>6-13-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>6-14-10</td><td>6-14-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>6-14-10</td><td>6-14-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>7-14-11</td><td>7-14-11</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>7-15-11</td><td>7-15-11</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>7-15-11</td><td>7-15-11</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>8-16-12</td><td>8-16-12</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="SPD">SPD</h2><p><b>MISSING</b> — Authored MR/AT feed movement and action scheduler. No universal SPD lookup or SPD purchase.</p><p>Definitions pp. [19, 20]. MR is per five-second turn, not per Act; compatible movement can accompany Acts. Continuous 5/AT scheduling is an approved Arena implementation, not a new chart formula.</p><p>Derived fields: Movement Rate (MR); Action Total (AT)</p>
+<p>Column order: [&#x27;MR&#x27;, &#x27;AT&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>0-0</td><td>0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>3-1</td><td>3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>4-1</td><td>4-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>4-1</td><td>4-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>4-1</td><td>4-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>6-1</td><td>6-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>6-1</td><td>6-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>6-1</td><td>6-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>8-1</td><td>8-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>8-1</td><td>8-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>10-1</td><td>10-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>10-1</td><td>10-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>12-2</td><td>12-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>12-2</td><td>12-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>14-2</td><td>14-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>14-2</td><td>14-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>16-2</td><td>16-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>18-3</td><td>18-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>18-3</td><td>18-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>20-3</td><td>20-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>22-3</td><td>22-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>22-3</td><td>22-3</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>24-4</td><td>24-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>26-4</td><td>26-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>28-4</td><td>28-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>30-4</td><td>30-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>34-4</td><td>34-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>36-5</td><td>36-5</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>36-5</td><td>36-5</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>36-5</td><td>36-5</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>40-5</td><td>40-5</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>44-5</td><td>44-5</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>48-6</td><td>48-6</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>50-6</td><td>50-6</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>60-6</td><td>60-6</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>60-10</td><td>60-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="DEX">DEX</h2><p><b>MATCH</b> — PrimeV3DexChart has exact ACC 0-35 in both modes. DexAllocation and CharacterDevelopment track locked/pending/source-qualified points. Standard starter policy currently supports only the explicit pool9/6DT/3DP policy; general authoring is separate. DEX buying stays blocked.</p><p>Definitions pp. 20. DT+DP allocation pool equals DEX when fully assigned; pending points remain unspent. ACC uses the printed lookup. Dodge displacement is up to floor(MR/2), charged against remaining MR. Existing approved allocation and defense rulings remain distinct from printed rules.</p><p>Derived fields: Dodge Touch (DT); Dodge Projectile (DP); Accuracy (ACC)</p>
+<p>Column order: [&#x27;ACC&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>ACC = 0</td><td>ACC = 0</td><td>MATCH ACC 0; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>1</td><td>5</td><td>5</td><td>MATCH ACC 5; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>2</td><td>5</td><td>5</td><td>MATCH ACC 5; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>3</td><td>6</td><td>6</td><td>MATCH ACC 6; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>4</td><td>6</td><td>6</td><td>MATCH ACC 6; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>5</td><td>7</td><td>7</td><td>MATCH ACC 7; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>6</td><td>7</td><td>7</td><td>MATCH ACC 7; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>7</td><td>8</td><td>8</td><td>MATCH ACC 8; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>8</td><td>8</td><td>8</td><td>MATCH ACC 8; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>9</td><td>9</td><td>9</td><td>MATCH ACC 9; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>10</td><td>9</td><td>9</td><td>MATCH ACC 9; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>11</td><td>10</td><td>10</td><td>MATCH ACC 10; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>12</td><td>10</td><td>10</td><td>MATCH ACC 10; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>13</td><td>11</td><td>11</td><td>MATCH ACC 11; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>14</td><td>12</td><td>12</td><td>MATCH ACC 12; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>15</td><td>13</td><td>13</td><td>MATCH ACC 13; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>16</td><td>14</td><td>14</td><td>MATCH ACC 14; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>17</td><td>15</td><td>15</td><td>MATCH ACC 15; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>18</td><td>16</td><td>16</td><td>MATCH ACC 16; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>19</td><td>17</td><td>17</td><td>MATCH ACC 17; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>20</td><td>18</td><td>18</td><td>MATCH ACC 18; DT/DP allocated separately</td><td>53, 55</td></tr>
+<tr><td>21</td><td>18</td><td>18</td><td>MATCH ACC 18; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>22</td><td>19</td><td>19</td><td>MATCH ACC 19; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>23</td><td>19</td><td>19</td><td>MATCH ACC 19; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>24</td><td>20</td><td>20</td><td>MATCH ACC 20; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>25</td><td>20</td><td>20</td><td>MATCH ACC 20; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>26</td><td>21</td><td>21</td><td>MATCH ACC 21; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>27</td><td>22</td><td>22</td><td>MATCH ACC 22; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>28</td><td>23</td><td>23</td><td>MATCH ACC 23; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>29</td><td>24</td><td>24</td><td>MATCH ACC 24; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>30</td><td>25</td><td>25</td><td>MATCH ACC 25; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>31</td><td>26</td><td>26</td><td>MATCH ACC 26; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>32</td><td>27</td><td>27</td><td>MATCH ACC 27; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>33</td><td>28</td><td>28</td><td>MATCH ACC 28; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>34</td><td>29</td><td>29</td><td>MATCH ACC 29; DT/DP allocated separately</td><td>54, 56</td></tr>
+<tr><td>35</td><td>30</td><td>30</td><td>MATCH ACC 30; DT/DP allocated separately</td><td>54, 56</td></tr>
+</table>
+<h2 id="WIS">WIS</h2><p><b>MISSING</b> — SS/Mana are authored; CharacterLevelProgression.growth_terms uses WIS for level gains. No universal SS/MSL/MR/H lookup or WIS purchase.</p><p>Definitions pp. [20, 21]. Mana casts require SS; ability activations normally do not. Learning OSF requires the specified SS/training/failure rules; HSF learning differs. MR/H belongs to Mana mode only. Preserve * as unlimited MSL, not an arbitrary integer.</p><p>Derived fields: Special Success (SS); Max Special Level (MSL); Mana Recovery per Hour (MR/H)</p>
+<p>Column order: {&#x27;mana&#x27;: [&#x27;SS&#x27;, &#x27;MSL&#x27;, &#x27;MR/H&#x27;], &#x27;regular&#x27;: [&#x27;SS&#x27;, &#x27;MSL&#x27;]}</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>DEAD</td><td>DEAD</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>0-0-4</td><td>0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>1-0-4</td><td>1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>2-1-4</td><td>2-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>3-1-4</td><td>3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>4-1-4</td><td>4-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>5-2-6</td><td>5-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>6-2-6</td><td>6-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>7-2-6</td><td>7-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>8-3-6</td><td>8-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>9-3-6</td><td>9-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>10-3-6</td><td>10-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>11-4-8</td><td>11-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>12-4-8</td><td>12-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>13-4-10</td><td>13-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>14-5-10</td><td>14-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>15-5-10</td><td>15-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>16-5-10</td><td>16-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>17-6-10</td><td>17-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>18-6-10</td><td>18-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>19-6-10</td><td>19-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>19-*-12</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>19-*-13</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>19-*-13</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>19-*-14</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>19-*-15</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>19-*-20</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>19-*-20</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>19-*-20</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>19-*-20</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>19-*-25</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>19-*-30</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>19-*-35</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>19-*-40</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>19-*-45</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>19-*-50</td><td>19-*</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="INT">INT</h2><p><b>MISSING</b> — Authored JSON includes S#/SCM/MIUR; live Vaelis actor omits these fields. Running profile has a separate SCM field. No universal INT lookup/skill budget management.</p><p>Definitions pp. [21, 67]. S# is a skill-investment budget, not a count of distinct spells. SCM helps every applicable skill check. MIUR limits magic-item complexity. Additional skill investments add exactly one under the owner-confirmed p.67 erratum; automatic-skill exceptions remain separate.</p><p>Derived fields: Skill Number (S#); Skill Check Modifier (SCM); Magic Item Use Rating (MIUR)</p>
+<p>Column order: [&#x27;S#&#x27;, &#x27;SCM&#x27;, &#x27;MIUR&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>DEAD</td><td>DEAD</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>22-0-0</td><td>22-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>24-0-0</td><td>24-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>26-0-0</td><td>26-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>28-0-0</td><td>28-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>30-0-1</td><td>30-0-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>32-0-1</td><td>32-0-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>34-0-1</td><td>34-0-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>36-0-1</td><td>36-0-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>38-1-1</td><td>38-1-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>40-1-2</td><td>40-1-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>42-1-2</td><td>42-1-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>44-1-2</td><td>44-1-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>46-1-2</td><td>46-1-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>48-1-2</td><td>48-1-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>50-2-3</td><td>50-2-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>52-2-3</td><td>52-2-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>54-2-3</td><td>54-2-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>56-2-3</td><td>56-2-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>58-2-3</td><td>58-2-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>60-2-4</td><td>60-2-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>62-3-4</td><td>62-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>64-3-4</td><td>64-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>66-3-4</td><td>66-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>68-3-4</td><td>68-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>70-3-4</td><td>70-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>72-3-4</td><td>72-3-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>74-4-4</td><td>74-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>76-4-4</td><td>76-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>78-4-4</td><td>78-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>80-4-4</td><td>80-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>82-4-4</td><td>82-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>84-4-4</td><td>84-4-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>86-5-4</td><td>86-5-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>88-5-4</td><td>88-5-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>90-5-4</td><td>90-5-4</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="WIT">WIT</h2><p><b>MISSING</b> — INIT is authored; automatic lookup for MNS/MRF/RCL absent. Source-specific fear/initiative behavior is not proof of a universal WIT engine.</p><p>Definitions pp. [21, 22]. Mana WIT columns are INIT/MNS/RCL; Regular columns are INIT/MRF/RCL. MNS counts individual non-auto Specials; MRF counts fields. They are not interchangeable. RCL is not general SR.</p><p>Derived fields: Initiative (INIT); Max Number of Specials (MNS); Max Regular Fields (MRF); Resist Control Loss (RCL)</p>
+<p>Column order: {&#x27;mana&#x27;: [&#x27;INIT&#x27;, &#x27;MNS&#x27;, &#x27;RCL&#x27;], &#x27;regular&#x27;: [&#x27;INIT&#x27;, &#x27;MRF&#x27;, &#x27;RCL&#x27;]}</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>DEAD</td><td>DEAD</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>1-2-2</td><td>1-0-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>1-3-2</td><td>1-0-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>2-4-2</td><td>2-0-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>2-5-3</td><td>2-0-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>3-6-3</td><td>3-1-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>3-8-4</td><td>3-1-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>4-10-4</td><td>4-2-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>4-12-5</td><td>4-2-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>5-14-5</td><td>5-3-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>5-16-6</td><td>5-3-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>6-18-7</td><td>6-4-7</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>6-20-8</td><td>6-4-8</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>7-22-9</td><td>7-5-9</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>7-24-10</td><td>7-5-10</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>8-26-11</td><td>8-6-11</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>8-28-12</td><td>8-6-12</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>9-30-13</td><td>9-7-13</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>9-34-14</td><td>9-7-14</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>10-38-15</td><td>10-8-15</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>10-45-16</td><td>10-8-16</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>11-50-17</td><td>11-9-17</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>11-55-17</td><td>11-9-17</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>12-60-17</td><td>12-10-
+17</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>12-65-17</td><td>12-10-
+17</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>13-70-17</td><td>13-11-17</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>13-*-18</td><td>13-*-18</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>14-*-18</td><td>14-*-18</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>14-*-19</td><td>14-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>15-*-19</td><td>15-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>15-*-19</td><td>15-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>16-*-19</td><td>16-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>16-*-19</td><td>16-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>17-*-19</td><td>17-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>17-*-19</td><td>17-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>18-*-19</td><td>18-*-19</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="MAN">MAN</h2><p><b>MISSING</b> — Live actor stores MAN but omits AP/KP persuasion statistics. Owner allocation design is not implemented. No live effective persuasion values to assert.</p><p>Definitions pp. [22, 23]. Owner-approved pool rule, not a missing printed chart filled by inference. Base AP+KP=permanent MAN. STR/INT modifiers are separate: +1 to persuasion roll per complete six STR/INT, capped at +3, literal p.22 wording. Ability Points are a different resource.</p><p>Derived fields: Aggressive Persuasion (AP); Kindly Persuasion (KP)</p>
+<p>OWNER APPROVED: Base AP+KP=permanent MAN. Standard newly created characters split 50/50, balancing odd points; confirmed permanent points cannot be redistributed. Temporary positive MAN contributions are separate, automatically balanced and source-qualified. No manual temporary allocation. Preserve historical and authored exceptions. A deterministic tie-breaker is proposed in the companion architecture; none is activated.</p>
+<h2 id="LUK">LUK</h2><p><b>MISSING</b> — Combat consumes authored RB; no complete lookup, RR/G or durable ToF grant/spend system. Do not treat ToF as a replaceable derived scalar.</p><p>Definitions pp. 23. RB permits beneficial +/- modification on eligible attribute-related rolls but never changes natural 1/20 critical identity. RR/G is per game, not per round. ToF is accumulated entitlement: preserve grants/spending history rather than replacing the pool with the current chart cell.</p><p>Derived fields: Roll Bonus (RB); Re-Rolls per Game (RR/G); Twists of Fate (ToF)</p>
+<p>Column order: [&#x27;RB&#x27;, &#x27;RR/G&#x27;, &#x27;ToF&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>0-0+1</td><td>0-0+1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>0-0-0</td><td>0-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>1-0-0</td><td>1-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>1-0-0</td><td>1-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>1-0+1</td><td>1-0+1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>1-0-0</td><td>1-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>1-0-0</td><td>1-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>1-0-0</td><td>1-0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>2-1+1</td><td>2-1+1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>2-1-0</td><td>2-1-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>3-2-0</td><td>3-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>3-2-1</td><td>3-2-1</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>3-2-0</td><td>3-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>4-2-0</td><td>4-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>4-2-0</td><td>4-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>4-2-1</td><td>4-2-1</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>4-2-0</td><td>4-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>5-2-0</td><td>5-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>5-2-0</td><td>5-2-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>5-2-1</td><td>5-2-1</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>6-3-0</td><td>6-3-0</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>7-3-1</td><td>7-3-1</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>8-5-1</td><td>8-5-1</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2 id="APP">APP</h2><p><b>MISSING / OWNER CLARIFIED</b> — Authored JSON has PAR/CHA, live Vaelis actor does not. No universal APP derivation or purchase. Owner confirms PAR above 10 is supernatural attraction; use all printed values through 18, without extra mechanics.</p><p>Definitions pp. [23, 24]. APP is excluded from p.102 EXPC purchases. CHA discount is 2% per point capped at CHA 10/20%; racial compatibility matters. Description calls PAR 0-10; high-score chart entries exceed 10: owner confirms these represent supernatural attraction and must not be capped.</p><p>Derived fields: Personal Appearance Rating (PAR); Charisma (CHA)</p>
+<p>Column order: [&#x27;PAR&#x27;, &#x27;CHA&#x27;]</p><table><tr><th>Score</th><th>Book Mana</th><th>Book Regular</th><th>Current game lookup / status</th><th>V3 pages</th></tr>
+<tr><td>0</td><td>0-0</td><td>0-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>1</td><td>1-0</td><td>1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>2</td><td>1-0</td><td>1-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>3</td><td>2-0</td><td>2-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>4</td><td>2-0</td><td>2-0</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>5</td><td>3-1</td><td>3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>6</td><td>3-1</td><td>3-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>7</td><td>4-1</td><td>4-1</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>8</td><td>4-2</td><td>4-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>9</td><td>5-2</td><td>5-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>10</td><td>5-2</td><td>5-2</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>11</td><td>6-3</td><td>6-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>12</td><td>6-3</td><td>6-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>13</td><td>7-3</td><td>7-3</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>14</td><td>7-4</td><td>7-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>15</td><td>8-4</td><td>8-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>16</td><td>8-4</td><td>8-4</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>17</td><td>9-5</td><td>9-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>18</td><td>9-5</td><td>9-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>19</td><td>10-5</td><td>10-5</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>20</td><td>10-6</td><td>10-6</td><td>MISSING shared lookup (authored values may match)</td><td>53, 55</td></tr>
+<tr><td>21</td><td>11-6</td><td>11-6</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>22</td><td>11-6</td><td>11-6</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>23</td><td>12-7</td><td>12-7</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>24</td><td>12-7</td><td>12-7</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>25</td><td>13-7</td><td>13-7</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>26</td><td>13-8</td><td>13-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>27</td><td>14-8</td><td>14-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>28</td><td>14-8</td><td>14-8</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>29</td><td>15-9</td><td>15-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>30</td><td>15-9</td><td>15-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>31</td><td>16-9</td><td>16-9</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>32</td><td>16-10</td><td>16-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>33</td><td>17-10</td><td>17-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>34</td><td>17-10</td><td>17-10</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+<tr><td>35</td><td>18-11</td><td>18-11</td><td>MISSING shared lookup (authored values may match)</td><td>54, 56</td></tr>
+</table>
+<h2>Final independent audit results</h2><p>3 November 2026: PASS 648 fresh PDF-to-catalog comparisons; PASS 192 freshly regenerated STR/DEX comparisons; PASS 47 terminology names checked against fresh definitions. Four printed chart pages re-inspected. No chart correction. Historical stop questions are resolved, not active blockers. The MAN allocation is an owner ruling, not a printed numeric column.</p><h2>Resistances</h2><p>SR Special Resistance and TB Tolerance Bonus are independent character statistics, neither primaries nor derived attributes. V3 p.24 governs them, racial starts appear on p.43, and advancement rates on p.102. No primary formula is inferred.</p><table><tr><th>Stat</th><th>Printed mechanic</th><th>Current code and gate</th></tr><tr><td>SR</td><td>Eligible unwanted Specials, d20 at or below SR, not surprised; may precede/follow Dodge or Soak subject to source exceptions.</td><td>Stored/advancement supported; general resistance resolution missing. Existing Arena automatic-attempt ruling is distinct from printed optional wording.</td></tr><tr><td>TB</td><td>Add to applicable tolerance skill target. END may govern the skill; TB itself is independent.</td><td>Stored; legacy talent_bonus identifier is a terminology mismatch. TB0 to 1 price absent. Preserve historical identifiers; future display mapping can correct the label safely.</td></tr></table><h2>Terminology verification</h2><table><tr><th>ABBREVIATION</th><th>EXACT V3 NAME</th><th>GOVERNING ATTRIBUTE</th><th>BOOK PAGE</th><th>CODE/DOCUMENT STATUS</th></tr><tr><td>STR</td><td>Strength</td><td>Primary attribute</td><td>19</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>END</td><td>Endurance</td><td>Primary attribute</td><td>19</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>SPD</td><td>Speed</td><td>Primary attribute</td><td>19</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>DEX</td><td>Dexterity</td><td>Primary attribute</td><td>20</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>WIS</td><td>Wisdom</td><td>Primary attribute</td><td>20</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>INT</td><td>Intelligence</td><td>Primary attribute</td><td>21</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>WIT</td><td>Wits</td><td>Primary attribute</td><td>21</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>MAN</td><td>Mannerisms</td><td>Primary attribute</td><td>22</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>LUK</td><td>Luck</td><td>Primary attribute</td><td>23</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>APP</td><td>Appearance</td><td>Primary attribute</td><td>23</td><td>MATCH: ten stored primary keys; CON is not one of them.</td></tr><tr><td>PAR</td><td>Personal Appearance Rating</td><td>APP</td><td>[23, 24]</td><td>Personal Appearance Rating verified; never Physical Attraction Rating; chart through 18.</td></tr><tr><td>CHA</td><td>Charisma</td><td>APP</td><td>[23, 24]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>DT</td><td>Dodge Touch</td><td>DEX</td><td>20</td><td>MATCH naming/dependency; allocation ledger implemented; negative ruling not implemented.</td></tr><tr><td>DP</td><td>Dodge Projectile</td><td>DEX</td><td>20</td><td>MATCH naming/dependency; allocation ledger implemented; negative ruling not implemented.</td></tr><tr><td>ACC</td><td>Accuracy</td><td>DEX</td><td>20</td><td>MATCH: shared DEX ACC lookup 0-35, Mana/Regular.</td></tr><tr><td>NAL</td><td>Natural Armor Level</td><td>END</td><td>19</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>PS</td><td>Physical Soak</td><td>END</td><td>19</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>HPB</td><td>Hit Point Bonus</td><td>END</td><td>19</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>S#</td><td>Skill Number</td><td>INT</td><td>[21, 67]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>SCM</td><td>Skill Check Modifier</td><td>INT</td><td>[21, 67]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>MIUR</td><td>Magic Item Use Rating</td><td>INT</td><td>[21, 67]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>RB</td><td>Roll Bonus</td><td>LUK</td><td>23</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>RR/G</td><td>Re-Rolls per Game</td><td>LUK</td><td>23</td><td>Exact printed label preserved; proposed Arena RR/W is owner-approved, not implemented.</td></tr><tr><td>ToF</td><td>Twists of Fate</td><td>LUK</td><td>23</td><td>Twists of Fate verified; no runtime entitlement ledger. Never Touch of Fate.</td></tr><tr><td>AP</td><td>Aggressive Persuasion</td><td>MAN</td><td>[22, 23]</td><td>Authored persuasion fields; no live effective calculation. AP is not Ability Points.</td></tr><tr><td>KP</td><td>Kindly Persuasion</td><td>MAN</td><td>[22, 23]</td><td>Authored persuasion fields; no live effective calculation. AP is not Ability Points.</td></tr><tr><td>MR</td><td>Movement Rate</td><td>SPD</td><td>[19, 20]</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>AT</td><td>Action Total</td><td>SPD</td><td>[19, 20]</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>SB</td><td>Strength Bonus</td><td>STR</td><td>19</td><td>MATCH: shared STR lookup 1-20; PPG/MWC are not initially registered in live Vaelis stats.</td></tr><tr><td>PPG</td><td>Push, Pull &amp; Grip</td><td>STR</td><td>19</td><td>MATCH: shared STR lookup 1-20; PPG/MWC are not initially registered in live Vaelis stats.</td></tr><tr><td>MWC</td><td>Max Weight Capacity</td><td>STR</td><td>19</td><td>MATCH: shared STR lookup 1-20; PPG/MWC are not initially registered in live Vaelis stats.</td></tr><tr><td>SS</td><td>Special Success</td><td>WIS</td><td>[20, 21]</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>MSL</td><td>Max Special Level</td><td>WIS</td><td>[20, 21]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>MR/H</td><td>Mana Recovery per Hour</td><td>WIS</td><td>[20, 21]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>INIT</td><td>Initiative</td><td>WIT</td><td>[21, 22]</td><td>Live authored statistic/consumer exists; this is not a complete universal primary lookup.</td></tr><tr><td>MNS</td><td>Max Number of Specials</td><td>WIT</td><td>[21, 22]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>MRF</td><td>Max Regular Fields</td><td>WIT</td><td>[21, 22]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>RCL</td><td>Resist Control Loss</td><td>WIT</td><td>[21, 22]</td><td>Source label verified; universal runtime lookup missing.</td></tr><tr><td>SR</td><td>Special Resistance</td><td>Independent resistance</td><td>24</td><td>Stored as sr; not derived from WIS by a fabricated formula.</td></tr><tr><td>TB</td><td>Tolerance Bonus</td><td>Independent; applicable tolerance skill</td><td>24</td><td>MISMATCH: catalog identifier talent_bonus and Rules Ledger Talent Bonus. Flag only; no identifier/save migration.</td></tr><tr><td>AP (resource)</td><td>Ability Points</td><td>Ability-user level progression</td><td>24, 72</td><td>Separate shared resource, not MAN persuasion AP.</td></tr><tr><td>HPM</td><td>Hit Points Max</td><td>Racial start, HD, END-derived HPB, recorded growth</td><td>16, 17, 44, 72</td><td>Authored baseline plus recorded level growth; no rerolls.</td></tr><tr><td>HPC</td><td>Hit Points Current</td><td>Current health state</td><td>17</td><td>Resource expenditure, not primary-derived maximum.</td></tr><tr><td>BM</td><td>Blood Max</td><td>Racial/authored source</td><td>16, 44</td><td>No invented END-to-BM formula.</td></tr><tr><td>BC</td><td>Blood Current</td><td>Current blood state</td><td>16</td><td>Distinct resource; source-defined loss impacts STR/END.</td></tr><tr><td>Mana Max</td><td>Mana Max</td><td>WIS and event-time level growth</td><td>21, 24, 72</td><td>Current growth implemented; WIS purchase effect still gated.</td></tr><tr><td>Mana Current</td><td>Mana Current</td><td>Current Mana state</td><td>24</td><td>Not automatically refilled by maximum changes.</td></tr></table><h2>Current approved rulings and architecture</h2><p>See <a href="TASK_37C_TERMINOLOGY_AND_LUCK_RULINGS.md">consolidated rulings and Resistances audit</a> and <a href="TASK_37C_FINDINGS_AND_ENGINE_PROPOSAL.md">engine architecture and code findings</a>. Printed V3 data and owner-approved Arena adaptations remain distinct.</p><ul><li>Time Sense SI +1 progression is a confirmed erratum; automatic-skill exceptions retained.</li><li>DEX/MAN confirmed allocations are locked; negative reductions use higher-first ordering and the approved tie-breaks. MAN standard positive splits are 50/50; authored history is preserved.</li><li>PAR above 10 uses printed values through 18. Attribute caps require actual source eligibility, not EXPC or chart presence.</li><li>Temporary ToF has separate spent/unspent source-qualified history; no reactivation farming. RR/G stays in source, Arena RR/W automatically rerolls an eligible first critical failure, never chains the replacement, and does not falsely reset within a wave.</li><li>Permanent +1 WIS grants +1 Mana Max without refill; permanent WIS loss and temporary WIS do not change existing Mana values. Level gains remain event-time history.</li><li>Whole-pound encumbrance: zero at MWC; positive E gives MR penalty floor(E/10)+1, Dodge penalties floor(E/20)+1. Signed DT/DP remain unclamped; effective MR has zero floor. Modifiers apply once.</li></ul><h2>Missing implementation and genuine gates</h2><p>Most universal charts and Resistances consumers, MAN support, signed allocation losses, durable Luck ledgers and event-time purchase/growth hydration need implementation. V2 record extensions require an explicit compatibility design; no migrations have run. TB zero-price, fractional weights, missing item weights and undefined future recovery/reroll interactions remain gated. A dormant lookup/descriptor phase can proceed only after owner authorization.</p><h2>Future read-only Character Sheet</h2><p>Separate Primaries, Derived Attributes, Resistances and Resources. Read admitted authoritative state and source-qualified effective modifiers; show unavailable rather than fabricated zero. Inspection must neither mutate nor save state, spend resources, draw RNG, or create progression.</p>
