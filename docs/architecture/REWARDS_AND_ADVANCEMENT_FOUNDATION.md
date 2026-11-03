@@ -158,13 +158,35 @@ identities). Callers must supply authority-verified grant/source identities and
 eligibility; these helpers do not attest those facts themselves. No live XP
 purchase or equipment/Special activation calls them in Pass 1.
 
-Keep the next integration atomic: authoritative actor/session commands, save V2
-development extension and continuity validators, projection/hydration, wave
-checkpoints, backup validation, then minimal confirmation/preferences controls.
+The subsequent live integration connects authoritative actor/session commands,
+the optional save V2 development extension and continuity validators,
+projection/hydration, wave checkpoints and backup validation/restoration.
 Temporary allocation activation identity and permanent receipt identity must
 survive every relevant boundary without being hidden in unrelated fields.
 The defense resolver must recheck eligibility before each actual attempt, stop
 after a success, preserve existing NAC limits/trigger rules, and record choices
-in deterministic history. Until that integration is approved and validated,
-there is no new player-facing preference/allocation control and the isolated
-records are not accepted as permanent gameplay save fields.
+in deterministic history. Player-facing preference/allocation controls remain
+hidden and DEX purchases remain disabled.
+
+### Task 37A live boundary
+
+`ArenaCombatSession.request_character_development(kind, command, request_id)`
+uses the existing persistence mutation guard and safe-downtime authority before
+publishing a character-change checkpoint. `CombatSimulation` validates immutable
+commands and source facts. `CharacterDevelopment` replays the record; confirmed
+allocations cannot be refunded or redistributed. Standard creation uses explicit
+policy opt-in, not a universal rewrite of fixtures. Unsupported permanent DEX
+growth still fails source projection rather than fabricating purchase history.
+
+Actual positive DEX effects receive separate source/activation contributions.
+Run-qualified identities prevent action-ID reuse in later circuits from reusing
+an old customization lock. Reapplying the same activation preserves that lock.
+DT/DP equipment penalties and explicit effect modifiers remain independent.
+
+`resolve_pending_defense` consumes the accepted planner using actual eligibility
+and effective targets. Automatic Force Bolt executes after ACC at the preferred
+NAC slot; early Block success skips its cost. A qualifying reaction cancels only
+that unresolved strike and never refunds an Act or cancels committed siblings.
+Actor-targeted automatic reactions exclude released projectiles. See the Rules
+Ledger for the approved but deferred object-targeted projectile interception and
+default -2 ACC rule. No unfinished UI or new projectile simulation is included.

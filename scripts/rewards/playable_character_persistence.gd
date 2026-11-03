@@ -165,6 +165,8 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 	if recovery.is_empty(): session.simulation.configure_nac_automation(&"player",VaelisForceFixture.default_nac_automation_settings())
 	var p: Dictionary = candidate.permanent
 	state.progression = {"exp_type":source.progression_policy.exp_type,"level":p.level,"expm":candidate.xp.earned,"expc":candidate.xp.unspent,"run_earned_xp":p.xp_baseline.earned,"run_spent_xp":p.xp_baseline.spent,"award_ids":[],"history":[],"base_hpm":source.combat_stats.hpm,"base_resource_maxima":source.resource_maxima.duplicate(true)}
+	if p.has("development"): state.progression["development"] = p.development.duplicate(true)
+	state.progression["development_run_id"] = run_id
 	for award: Dictionary in p.award_receipts: state.progression.award_ids.append(award.award_id)
 	for record: Dictionary in p.growth:
 		var restored := record.duplicate(true)
@@ -176,8 +178,11 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 		for field: String in Boundary.PLAYER_FIELDS:
 			if field == "conditions": state.conditions = PackedStringArray(recovery.player.conditions)
 			else: state.set(field,recovery.player[field].duplicate(true) if recovery.player[field] is Dictionary or recovery.player[field] is Array else recovery.player[field])
+		if recovery.player.has("development"): state.progression["development"] = recovery.player.development.duplicate(true)
 		state.position_microfeet = Vector2i(recovery.player_position[0],recovery.player_position[1])
 		if not session.get_battlefield().is_position_legal(&"player",state.position_microfeet,{"player":state.position_microfeet}).get("legal",false): return _fail("recovery_position_illegal")
+	var synced := session.simulation._sync_temporary_dex(&"player")
+	if not synced.success: return synced
 	return {"success":true}
 
 func restore_ledger(ledger: ArenaRewardLedger) -> void:
@@ -496,6 +501,7 @@ func _capture(session: ArenaCombatSession, phase: String) -> Dictionary:
 		var value: Variant = state.get(field)
 		player[field] = Array(value) if value is PackedStringArray else (value.duplicate(true) if value is Dictionary or value is Array else value)
 	player["awareness"] = String(state.awareness)
+	if state.progression.has("development"): player["development"] = state.progression.development.duplicate(true)
 	var retain: bool = phase != "entry" and not recovery.is_empty() and recovery.wave_id == session._current_reward_wave_id()
 	var opening: Dictionary = recovery.opening.duplicate(true) if retain else {}
 	var positions: Dictionary = recovery.enemy_positions.duplicate(true) if retain else {}

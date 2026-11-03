@@ -1095,6 +1095,18 @@ func get_player_inventory_entries() -> Array[Dictionary]:
 		entries.append(entry)
 	return entries
 
+func request_character_development(kind: String, command: Dictionary, request_id: String) -> Dictionary:
+	if request_id.is_empty(): return _failure("missing_request_id")
+	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("development_requires_safe_downtime")
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
+	var stable_id := request_id
+	if _playable_persistence != null: stable_id = "%s/%s/development/%s" % [_playable_persistence.profile_id,_playable_persistence.run_id,request_id]
+	var result := simulation.request_character_development(Fixture.PLAYER_ID,stable_id,kind,command)
+	if result.success: result["persistence"] = _checkpoint_character("character_changed")
+	return result
+
 
 func request_player_weapon_handling(definition_id: StringName, operation: String, request_id: String = "") -> Dictionary:
 	if _playable_persistence != null:
@@ -1335,6 +1347,8 @@ func _build_player_equipment_profiles(refs: PackedStringArray, catalog: CombatDe
 		old_protection.exact_type_responses if old_protection != null else {}, sources,
 		old_protection.special_field_responses if old_protection != null else {}
 	)
+	var authored := old_defense if old_defense != null else Fixture.make_player_defense_profile(_player_character_id)
+	if authored != null: defense.defensive_nacs = authored.defensive_nacs.duplicate()
 	return {"success": true, "attack": attack, "defense": defense, "protection": protection, "state": state}
 
 
@@ -2513,20 +2527,7 @@ func _request_actor_attack(attacker_id: StringName, target_id: StringName, input
 	elif attacker_id == Fixture.OPPONENT_ID:
 		_active_opponent_attack_id = attack_id
 	_active_attack_ids_by_actor[String(attacker_id)] = attack_id
-	if target_id == Fixture.PLAYER_ID and attacker_id != Fixture.PLAYER_ID:
-		_try_automatic_force_bolt_against(attacker_id)
 	return result
-
-
-func _try_automatic_force_bolt_against(threat_actor_id: StringName) -> void:
-	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
-		return
-	var settings := simulation.get_nac_automation(Fixture.PLAYER_ID)
-	if not bool(settings.get("automatic_enabled", false)) or not bool(settings.get("offensive_triggers_enabled", true)):
-		return
-	# A concrete hostile physical declaration against Vaelis is authoritative
-	# perceived danger. Mere distance/proximity never reaches this boundary.
-	request_player_special(VaelisForce.FORCE_BOLT_ID, threat_actor_id, true, true)
 
 
 func _get_attack_definition_for_actor(actor_id: StringName) -> CombatAttackDefinition:
@@ -2772,8 +2773,6 @@ func _run_rare_human_warrior_behavior() -> void:
 	var result := _rare_human_warrior_ai.evaluate_and_submit()
 	var selected_action := String(result.get("selected_action", "idle"))
 	_opponent_behavior_status = "wave_five_boss_%s" % selected_action
-	if result.get("action_started", false) and ["spear_melee", "throw_spear", "unarmed_attack"].has(selected_action):
-		_try_automatic_force_bolt_against(RareHumanWarriorFixture.ACTOR_ID)
 
 
 func _run_gargoyle_tactical_selection(actor_id: StringName, target_id: StringName) -> Dictionary:
@@ -3429,6 +3428,7 @@ func _failure(reason: String) -> Dictionary:
 
 
 func _resolve_ready_attack_pipeline() -> void:
+	simulation.defensive_dodge_environment_resolver = _make_dodge_environment
 	var changed := true
 	while changed:
 		changed = false

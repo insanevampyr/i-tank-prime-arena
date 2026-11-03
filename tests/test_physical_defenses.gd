@@ -440,8 +440,13 @@ func _test_automatic_dodge_pending_and_exclusivity_refinement() -> void:
 		ineligible["attack_id"], "automatic_ineligible_fallback", no_legal_destination
 	)
 	var ineligible_resolution: CombatDefenseResolution = ineligible["simulation"].get_defense_resolution(ineligible_result["defense_resolution_id"])
-	_expect_equal(ineligible_resolution.attempts[0].eligibility_reason, "no_legal_dodge_destination", "A considered but environmentally ineligible Dodge must not roll.")
-	_expect_equal(ineligible_resolution.attempts[1].eligibility, CombatDefenseAttempt.ATTEMPTED, "An ineligible Dodge must not exclude the next legal Physical Soak.")
+	_expect_equal(ineligible_resolution.attempts[0].defense_type, CombatDefenseProfile.PHYSICAL_SOAK, "#37A must select the only eligible Dodge/Soak candidate at the first preference slot.")
+	_expect_equal(ineligible_resolution.attempts[0].eligibility, CombatDefenseAttempt.ATTEMPTED, "An ineligible Dodge must not exclude legal Physical Soak.")
+	var fallback_rolls := 0
+	for attempt: CombatDefenseAttempt in ineligible_resolution.attempts:
+		if attempt.natural_roll != null: fallback_rolls += 1
+		if attempt.defense_type == CombatDefenseProfile.DODGE: _expect_equal(attempt.natural_roll,null,"Environmentally ineligible Dodge must consume no roll.")
+	_expect_equal(fallback_rolls,1,"Only the selected successful Soak may consume a defense roll.")
 	_expect_equal(ineligible_resolution.successful_defense_type, CombatDefenseProfile.PHYSICAL_SOAK, "Legal Physical Soak must remain available after an ineligible Dodge is skipped.")
 
 	var attempted := _build_pending_attack(
@@ -532,7 +537,8 @@ func _make_actor(
 ) -> CombatActorDefinition:
 	var stats := {
 		"hpm": 20, "acc": 20, "at": at_value, "init": init_value, "mr": 10,
-		"nal": 1, "dt": 4, "dp": 4, "physical_soak": 5, "rb": 0,
+		# Prefer Dodge in Dodge-specific fixtures under #37A's higher-value rule.
+		"nal": 1, "dt": 4, "dp": 4, "physical_soak": 3, "rb": 0,
 	}
 	stats.merge(stat_overrides, true)
 	var equipment := PackedStringArray(["fixture_weapon"])

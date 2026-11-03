@@ -15,7 +15,8 @@ static func validate(value: Dictionary, actor: CombatActorDefinition = null) -> 
 	var random := DeterministicCombatRng.new(0)
 	if not random.restore_wave_entry(value.rng): return _fail("invalid_entry_rng")
 	if value.rng.seed != value.seed: return _fail("entry_rng_seed_mismatch")
-	if not value.player is Dictionary or value.player.size() != PLAYER_FIELDS.size() or not value.player.has_all(PLAYER_FIELDS): return _fail("invalid_entry_player")
+	if not value.player is Dictionary or value.player.size() != PLAYER_FIELDS.size()+(1 if value.player.has("development") else 0) or not value.player.has_all(PLAYER_FIELDS): return _fail("invalid_entry_player")
+	if value.player.has("development") and (not value.player.development is Dictionary or not CharacterDevelopment.inspect(CharacterSaveContract._normalize_json_numbers(value.player.development)).success): return _fail("invalid_entry_development")
 	for key: String in ["resources","ability_daily_remaining","timed_stat_effects","pending_called_shot","held_materials","persistent_damage_shields","nac_automation_settings"]:
 		if not value.player[key] is Dictionary: return _fail("invalid_entry_player_field")
 	if not value.player.conditions is Array or not value.player.awareness is String or not _integer(value.player.current_hpc,-1000000): return _fail("invalid_entry_player_field")

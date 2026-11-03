@@ -2,6 +2,28 @@
 
 ## Task 36L-Pass2 — confirmed restoration (controlling)
 
+### Task 37A optional development extension
+
+Save Contract V2 remains V2. Optional `permanent.development` is a version-1
+record with exactly `version`, authored `baseline` (DEX/DT/DP) and ordered
+immutable `commands` (ID/kind/payload). It explicitly carries confirmed
+allocations and defense preferences rather than concealing them in purchases.
+The same record is present in `recovery.player.development` when enabled.
+Missing records stay missing for legacy profiles; first authorized live use
+initializes from the actual source allocation, including historical 3/6.
+
+Validation normalizes JSON integer representations, replays every command,
+validates source identity and enforces history-prefix continuity. Hydration
+applies permanent DT/DP/ACC before rebuilding equipment and reconciles temporary
+contributions against restored actual effects. Activation identity is qualified
+by authorized run ID. No effect, RNG, XP, item or resource refill is generated.
+Unsupported permanent DEX growth remains source-gated. Schema-12's existing
+progression dictionary carries this state; no top-level schema change occurs.
+
+Full-history backup export/preview and transactional restore reuse these same
+validators. They do not rewrite older generations or invent allocation history.
+Focused tests use disposable storage only; owner saves remain untouched.
+
 Pass1 export/preview remains read-only. A validated preview now offers a separate RESTORE request and explicit RESTORE/CANCEL confirmation naming Vaelis, namespace, level/XP/Gold, inventory/equipment, original generation and secured checkpoint. This is the owner's authorized restoration policy, not a new Prime rule. Only a known empty destination, an exact match (idempotent no-op), or an exact destination prefix is eligible. Older, divergent, corrupt, unsupported and uncertain destinations remain blocked. NORMAL/DEV isolation is unchanged; no cloning, merging, rollback, new starter grants or reward replay is permitted.
 
 `CharacterBackupRestoration` reuses the complete backup validator and existing playable admission. It acquires native writer ownership or the namespace-specific Web Lock before requesting confirmation. Cancellation releases only its own lock and leaves character documents/gameplay untouched. Confirmation revalidates the backup and exact destination; storage also compares expected history at publication. The original document/transaction identities remain immutable. Success requires complete fresh readback and validation. Lost acknowledgement/readback errors leave the old live session frozen and offer VERIFY RESULT: an exact committed history can be admitted, an unchanged destination requires a new confirmation, and uncertain/corrupt staging remains blocked. No queued browser job is treated as a save.

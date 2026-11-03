@@ -47,6 +47,50 @@ var _reward_state: Dictionary = {}
 var _retired_actor_ids: Dictionary = {}
 var _weapon_handling_catalog: CombatDefinitionCatalog
 var _combat_started: bool = false
+var defensive_dodge_environment_resolver: Callable
+
+func request_character_development(actor_id: StringName, request_id: String, kind: String, command: Dictionary) -> Dictionary:
+	var state := get_actor_state(actor_id)
+	var actor := get_actor_definition(actor_id)
+	if state == null or actor == null: return _failure("unknown_actor")
+	if _arena_wave_state.get("state") != "between_wave_downtime": return _failure("development_requires_safe_downtime")
+	if state.current_hpc == null or int(state.current_hpc) <= 0 or not state.current_action_instance_id.is_empty(): return _failure("actor_not_development_eligible")
+	for resolution: CombatDefenseResolution in _defense_resolutions.values():
+		if resolution.defender_id == actor_id and resolution.status in [CombatDefenseResolution.STATUS_RESOLVING,CombatDefenseResolution.STATUS_PENDING_DODGE_DISPLACEMENT]: return _failure("active_defense_resolution")
+	var record: Dictionary = state.progression.get("development",{})
+	if record.is_empty():
+		var initial := CharacterDevelopment.create(int(actor.attributes.get("dex",-1)),int(actor.base_combat_stats.get("dt",-1)),int(actor.base_combat_stats.get("dp",-1)))
+		if not initial.success: return initial
+		record = initial.record
+	if kind == "allocation":
+		match command.get("op",""):
+			"allocate": pass
+			"grant":
+				if command.get("dex") != actor.attributes.get("dex"): return _failure("permanent_dex_growth_not_authorized")
+			"customize":
+				var effect: Dictionary = state.timed_stat_effects.get(command.get("source",""),{})
+				if command.get("safe_downtime") != true or _dex_activation(state,effect) != command.get("activation") or int(effect.get("stat_modifiers",{}).get("dex",0)) <= 0: return _failure("temporary_dex_source_unavailable")
+			_: return _failure("allocation_source_operation_not_player_command")
+	var proposed := CharacterDevelopment.append(record,request_id,kind,command)
+	if not proposed.success: return proposed
+	state.progression["development"] = proposed.record
+	_apply_development_base(actor_id)
+	state.revision += 1
+	_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(),&"character_development_committed",_get_actor_initiative(String(actor_id)),actor_id,actor_id,{"request_id":request_id,"kind":kind,"command":command.duplicate(true)})
+	return _success()
+
+func _apply_development_base(actor_id: StringName) -> void:
+	var actor := get_actor_definition(actor_id)
+	var state := get_actor_state(actor_id)
+	if actor == null or state == null or not state.progression.has("development"): return
+	var checked := CharacterDevelopment.inspect(state.progression.development)
+	if not checked.success: return
+	var totals: Dictionary = DexAllocation.validate(checked.allocation).totals
+	actor.base_combat_stats.dt = totals.dt
+	actor.base_combat_stats.dp = totals.dp
+	actor.base_combat_stats.acc = PrimeV3DexChart.accuracy(totals.dex,"mana" if actor.progression_policy.get("resource_mode") == "mana" else "regular")
+	actor.apply_equipment_stat_modifiers(actor.equipment_stat_modifiers)
 var _opening_sequence_complete: bool = false
 var _current_opening_rank: int = 0
 var _opening_rank_count: int = 0
@@ -1510,8 +1554,9 @@ func start_verified_timed_stat_effect_action(
 	if effect_id.is_empty() or duration_us <= 0 or typeof(modifiers) != TYPE_DICTIONARY:
 		return _failure("timed_stat_effect_invalid")
 	for field_name: Variant in (modifiers as Dictionary):
-		if not ["sb", "nal", "dt", "dp"].has(String(field_name)) or typeof((modifiers as Dictionary)[field_name]) != TYPE_INT:
+		if not ["sb", "nal", "dt", "dp", "dex"].has(String(field_name)) or typeof((modifiers as Dictionary)[field_name]) != TYPE_INT:
 			return _failure("timed_stat_modifier_invalid")
+	if (modifiers as Dictionary).has("dex") and int(modifiers.dex) < 0: return _failure("negative_dex_policy_unverified")
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -1594,6 +1639,9 @@ func start_verified_special_action(
 		var effect: Dictionary = definition.extension_metadata.get("timed_stat_effect", {})
 		if effect.is_empty():
 			return _failure("timed_stat_effect_unresolved")
+		var modifiers: Variant = effect.get("stat_modifiers", {})
+		if not modifiers is Dictionary: return _failure("timed_stat_modifier_invalid")
+		if modifiers.has("dex") and (typeof(modifiers.dex) != TYPE_INT or int(modifiers.dex) < 0): return _failure("negative_or_unverified_dex_modifier")
 		if target_state.timed_stat_effects.has(String(effect.get("effect_id", ""))):
 			return _failure("timed_stat_effect_already_active")
 	if kind == "persistent_damage_shield":
@@ -1814,7 +1862,7 @@ func start_nac_projectile_special(
 	_next_attack_sequence += 1
 	var attack := CombatAttackInstance.new(
 		attack_instance_id, definition, "", actor_id, target_id, resolved_location,
-		clock.get_elapsed_us(), int(actor_definition.get_combat_stat("acc")), int(location_context["location_acc_modifier"]),
+		clock.get_elapsed_us(), int(get_effective_actor_combat_stat(actor_id,"acc")), int(location_context["location_acc_modifier"]),
 		roll_bonus, false, StringName(location_context.get("size_relationship", "")),
 		StringName(location_context.get("attacker_size_category", "")), StringName(location_context.get("target_size_category", "")),
 		int(location_context.get("tiny_target_dodge_bonus", 0))
@@ -1889,7 +1937,7 @@ func start_physical_attack(
 		and not attacker_state.hand_occupancy.values().has(strike_weapon_ref):
 			return _failure("weapon_not_in_hand")
 	var attacker_definition: CombatActorDefinition = _actor_definitions[attacker_key]
-	var base_acc_value: Variant = attacker_definition.get_combat_stat("acc")
+	var base_acc_value: Variant = get_effective_actor_combat_stat(attacker_id,"acc")
 	if base_acc_value == null:
 		return _failure("unresolved_actor_acc")
 	var roll_bonus_value: Variant = attacker_definition.get_combat_stat("rb")
@@ -2077,6 +2125,8 @@ func resolve_pending_defense(
 	_refresh_actor_movement_budgets()
 	if _dodge_needs_context(attack, defender_state, defender_definition, profile) and dodge_context == null:
 		return _failure("dodge_context_unresolved")
+	var planned_order := _plan_defensive_sources(attack,defender_state,defender_definition,profile,dodge_context)
+	if not planned_order.success: return planned_order
 
 	var defense_resolution_id := _make_defense_resolution_id(_next_defense_sequence)
 	_next_defense_sequence += 1
@@ -2104,18 +2154,25 @@ func resolve_pending_defense(
 			"defense_resolution_id": defense_resolution_id,
 			"attack_instance_id": attack_instance_id,
 			"profile_id": String(profile.profile_id),
-			"priority": Array(profile.priority),
+			"priority": Array(planned_order.order),
 			"request_id": request_id,
 		},
 		attack.result_event_id
 	)
 	resolution.start_event_id = started.event_id
+	resolution.priority = planned_order.order
 	var previous_event_id := started.event_id
 	var dodge_or_soak_attempted := false
 	var resolution_locked := false
 	var generic_critical_policy := CombatCriticalTriggerPolicy.new()
 
-	for defense_key: String in profile.priority:
+	for defense_key: String in planned_order.order:
+		if defense_key == "nac":
+			if not resolution_locked and _resolve_defensive_nacs(attack,profile):
+				resolution.status = CombatDefenseResolution.STATUS_DEFENDED
+				resolution.successful_defense_type = &"nac"
+				resolution_locked = true
+			continue
 		var defense_type := StringName(defense_key)
 		var attempt := CombatDefenseAttempt.new(defense_type)
 		attempt.parent_event_id = previous_event_id
@@ -2234,10 +2291,103 @@ func resolve_pending_defense(
 	)
 	resolution.final_event_id = resolved.event_id
 	if resolution.status == CombatDefenseResolution.STATUS_DEFENDED:
-		var trajectory_outcome := "miss" if resolution.successful_defense_type == CombatDefenseProfile.DODGE else "blocked"
-		_resolve_automatic_thrown_weapon_landing(attack, trajectory_outcome, resolved.event_id)
+		if resolution.successful_defense_type != &"nac":
+			var trajectory_outcome := "miss" if resolution.successful_defense_type == CombatDefenseProfile.DODGE else "blocked"
+			_resolve_automatic_thrown_weapon_landing(attack, trajectory_outcome, resolved.event_id)
 		_finalize_deferred_critical_consequences(attack)
 	return _success({"defense_resolution_id": defense_resolution_id, "status": resolution.status})
+
+func _plan_defensive_sources(attack: CombatAttackInstance, state: CombatActorState, actor: CombatActorDefinition, profile: CombatDefenseProfile, context: CombatDodgeContext) -> Dictionary:
+	var order: Array = ["nac"]
+	for key: String in profile.priority:
+		var category := "soak" if key == "physical_soak" else ("block" if key in ["weapon_block","shield_block"] else key)
+		if not order.has(category): order.append(category)
+	if state.progression.has("development"):
+		var saved := CharacterDevelopment.inspect(state.progression.development)
+		if not saved.success: return saved
+		order = saved.preferences
+	var facts := {}
+	for pair: Array in [["dodge",CombatDefenseProfile.DODGE],["soak",CombatDefenseProfile.PHYSICAL_SOAK]]:
+		var eligible := _evaluate_defense_eligibility(attack,state,actor,profile,pair[1],context,false)
+		facts[pair[0]] = {"eligible":eligible.eligible,"value":0 if eligible.base_target == null else int(eligible.base_target)+int(eligible.target_modifier)}
+	var blocks: Array = []
+	for key: String in profile.priority:
+		if key not in ["weapon_block","shield_block"]: continue
+		var eligible := _evaluate_defense_eligibility(attack,state,actor,profile,StringName(key),context,false)
+		blocks.append({"source":key,"eligible":eligible.eligible})
+	var plan := DefensivePreferences.plan(order,facts,blocks,[{"source":"defensive_nacs","eligible":not profile.defensive_nacs.is_empty() and not _active_defenses_restricted(state)}])
+	if not plan.success: return plan
+	var result := PackedStringArray()
+	var chosen := ""
+	for choice: Dictionary in plan.choices:
+		if choice.kind in ["dodge","soak"]: chosen = choice.kind
+	var first := "dodge" if order.find("dodge") < order.find("soak") else "soak"
+	for category: String in order:
+		if category == "block":
+			for block: Dictionary in blocks: result.append(block.source)
+		elif category == "nac":
+			if not profile.defensive_nacs.is_empty(): result.append("nac")
+		else:
+			var selected := category
+			if not chosen.is_empty() and chosen != first: selected = "soak" if category == "dodge" else "dodge"
+			result.append("physical_soak" if selected == "soak" else selected)
+	return _success({"order":result})
+
+func _resolve_defensive_nacs(incoming: CombatAttackInstance, profile: CombatDefenseProfile) -> bool:
+	# Physical projectiles are independent after release. Object-targeted NAC
+	# interception needs a separate projectile target/delivery implementation.
+	if incoming.delivery_class != &"hand_held" or incoming.is_special_attack: return false
+	if not defensive_dodge_environment_resolver.is_valid(): return false
+	var state := get_actor_state(incoming.target_id)
+	if state == null or int(state.current_hpc) <= 0 or _active_defenses_restricted(state): return false
+	var settings := get_nac_automation(incoming.target_id)
+	if not settings.get("automatic_enabled",false) or not settings.get("emergency_defense_enabled",true): return false
+	var seen := {}
+	for source: Dictionary in profile.defensive_nacs:
+		var special := StringName(source.get("special_id",""))
+		if special != &"force_bolt" or seen.has(String(special)) or not settings.get("priority",PackedStringArray()).has(String(special)): continue
+		seen[String(special)] = true
+		var line_of_sight: Variant = null
+		if _attack_final_line_of_sight_resolver.is_valid(): line_of_sight = _attack_final_line_of_sight_resolver.call(incoming.target_id,incoming.attacker_id)
+		var request := "defensive_nac:%s:%s" % [incoming.attack_instance_id,special]
+		var cast := start_nac_projectile_special(incoming.target_id,incoming.attacker_id,source.definition,request,special,int(source.mana_cost),&"torso",line_of_sight,true,true)
+		_record_resolved_event(clock.get_elapsed_us(),&"defensive_nac_evaluated",_get_actor_initiative(String(incoming.target_id)),incoming.target_id,incoming.attacker_id,{"incoming_attack_id":incoming.attack_instance_id,"special_id":String(special),"request_id":request,"result":cast.duplicate(true)})
+		if not cast.get("success",false) or not cast.has("attack_instance_id"): continue
+		var reaction := get_attack(cast.attack_instance_id)
+		if reaction.status == CombatAttackInstance.STATUS_PENDING_DEFENSE:
+			var environment: CombatDodgeEnvironment = defensive_dodge_environment_resolver.call(reaction)
+			resolve_pending_defense_automatically(reaction.attack_instance_id,request+":defense",environment)
+		if reaction.status != CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED: continue
+		var damage := resolve_nac_projectile_damage(reaction.attack_instance_id,request+":damage",false)
+		if not damage.get("success",false): continue
+		var attacker := get_actor_definition(incoming.attacker_id)
+		var defender := get_actor_definition(incoming.target_id)
+		var target_size := _size_category_rank(attacker.size_category)
+		var source_size := _size_category_rank(defender.size_category)
+		if source_size < 0 or target_size < 0: continue
+		if target_size > source_size:
+			# A larger attacker is not granted an interruption, but damage or
+			# actual knockback can still remove the current strike's legality.
+			var definition: CombatAttackDefinition = _attack_definitions.get(String(incoming.attack_definition_id))
+			if definition == null: continue
+			var legal := _evaluate_final_attack_legality(incoming,definition)
+			if legal.success: continue
+			incoming.status = CombatAttackInstance.STATUS_FINAL_LEGALITY_FAILED
+			incoming.final_legality_reason = String(legal.reason)
+			incoming.revision += 1
+			_state_revision += 1
+			var lost := _record_resolved_event(clock.get_elapsed_us(),&"defensive_nac_strike_no_longer_legal",_get_actor_initiative(String(incoming.target_id)),incoming.target_id,incoming.attacker_id,{"attack_instance_id":incoming.attack_instance_id,"reason":incoming.final_legality_reason,"accuracy_rerolled":false},String(damage.event_id))
+			incoming.result_event_id = lost.event_id
+			return true
+		# Owner ruling: only this incoming unresolved strike is canceled. Its Act,
+		# prior strikes/defenses, ACC event and spent time remain authoritative.
+		incoming.status = CombatAttackInstance.STATUS_INTERRUPTED
+		incoming.revision += 1
+		_state_revision += 1
+		var stopped := _record_resolved_event(clock.get_elapsed_us(),&"defensive_nac_strike_interrupted",_get_actor_initiative(String(incoming.target_id)),incoming.target_id,incoming.attacker_id,{"attack_instance_id":incoming.attack_instance_id,"reaction_attack_id":reaction.attack_instance_id,"act_time_refunded":false,"remaining_strikes_canceled":false},String(damage.event_id))
+		incoming.result_event_id = stopped.event_id
+		return true
+	return false
 
 
 func resolve_pending_defense_automatically(
@@ -2596,7 +2746,7 @@ func _apply_force_shield_attacker_knockback(attack: CombatAttackInstance, knockb
 	}, parent_event_id)
 
 
-func resolve_nac_projectile_damage(attack_instance_id: String, request_id: String) -> Dictionary:
+func resolve_nac_projectile_damage(attack_instance_id: String, request_id: String, interrupt_executing_action: bool = true) -> Dictionary:
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_special_damage_request_ids.has(request_id):
@@ -2629,7 +2779,7 @@ func resolve_nac_projectile_damage(attack_instance_id: String, request_id: Strin
 		"hpc_after": int(target_state.current_hpc), "damage_applied": true,
 	}, parent_event_id, PackedStringArray(), {"hpc": damage_roll})
 	_apply_special_projectile_knockback(attack, event.event_id)
-	_schedule_nac_physical_action_interruption(attack, event.event_id)
+	if interrupt_executing_action: _schedule_nac_physical_action_interruption(attack, event.event_id)
 	return _success({"final_damage": damage_roll, "event_id": event.event_id})
 
 
@@ -2985,14 +3135,80 @@ func get_effective_actor_combat_stat(actor_id: StringName, field_name: String) -
 		return null
 	var total := int(value)
 	var state: CombatActorState = _actor_states[actor_key]
+	if field_name in ["dt","dp","acc"] and state.progression.has("development"):
+		var development := CharacterDevelopment.inspect(state.progression.development)
+		if not development.success: return null
+		var allocated := DexAllocation.derived(development.allocation,"mana" if get_actor_definition(actor_id).progression_policy.get("resource_mode") == "mana" else "regular")
+		if not allocated.success: return null
+		if field_name in ["dt","dp"]: total = int(allocated[field_name])+int(get_actor_definition(actor_id).equipment_stat_modifiers.get(field_name,0))
+		else: total = int(allocated.acc)
 	var effect_ids: Array = state.timed_stat_effects.keys()
 	effect_ids.sort()
+	if field_name == "acc":
+		var dex := int(get_actor_definition(actor_id).attributes.get("dex",0))
+		var modified := false
+		for effect_key: Variant in effect_ids:
+			var modifiers: Dictionary = state.timed_stat_effects[effect_key].get("stat_modifiers",{})
+			if modifiers.has("dex"):
+				if typeof(modifiers.dex) != TYPE_INT or int(modifiers.dex) < 0: return null
+				dex += int(modifiers.dex)
+				modified = true
+		if modified:
+			var derived_acc: Variant = PrimeV3DexChart.accuracy(dex,"mana" if get_actor_definition(actor_id).progression_policy.get("resource_mode") == "mana" else "regular")
+			if derived_acc == null: return null
+			total = int(derived_acc)
 	for effect_key: Variant in effect_ids:
 		var active_effect: Dictionary = state.timed_stat_effects[effect_key]
 		var modifiers: Dictionary = active_effect.get("stat_modifiers", {})
 		if modifiers.has(field_name):
 			total += int(modifiers[field_name])
 	return total
+
+func _dex_activation(state: CombatActorState, effect: Dictionary) -> String:
+	var action := String(effect.get("source_action_instance_id",""))
+	if action.is_empty(): return ""
+	var run := String(state.progression.get("development_run_id",""))
+	return action if run.is_empty() else run+"/"+action
+
+func _sync_temporary_dex(actor_id: StringName) -> Dictionary:
+	var state := get_actor_state(actor_id)
+	var actor := get_actor_definition(actor_id)
+	var active := {}
+	for id: String in state.timed_stat_effects:
+		var effect: Dictionary = state.timed_stat_effects[id]
+		var mods: Dictionary = effect.get("stat_modifiers",{})
+		if not mods.has("dex"): continue
+		if typeof(mods.dex) != TYPE_INT or mods.dex < 0: return _failure("negative_dex_policy_unverified")
+		if mods.dex == 0 or mods.has("dt") or mods.has("dp"): continue
+		active[id] = effect
+	if active.is_empty() and not state.progression.has("development"): return _success()
+	var record: Dictionary = state.progression.get("development",{})
+	if record.is_empty():
+		var initial := CharacterDevelopment.create(int(actor.attributes.get("dex",-1)),int(actor.base_combat_stats.get("dt",-1)),int(actor.base_combat_stats.get("dp",-1)))
+		if not initial.success: return initial
+		record = initial.record
+	var inspected := CharacterDevelopment.inspect(record)
+	if not inspected.success: return inspected
+	var sources: Dictionary = DexAllocation.validate(inspected.allocation).totals.sources
+	var ids: Array = sources.keys()
+	ids.sort()
+	for id: String in ids:
+		for activation: String in sources[id]:
+			if not sources[id][activation].active: continue
+			if active.has(id) and _dex_activation(state,active[id]) == activation: continue
+			var removed := CharacterDevelopment.append(record,"expire:%s:%s:%d" % [id,activation,record.commands.size()],"allocation",{"op":"remove","source":id,"activation":activation})
+			if not removed.success: return removed
+			record = removed.record
+	ids = active.keys()
+	ids.sort()
+	for id: String in ids:
+		var activation := _dex_activation(state,active[id])
+		if sources.get(id,{}).get(activation,{}).get("active",false): continue
+		var applied := CharacterDevelopment.append(record,"activate:%s:%s:%d" % [id,activation,record.commands.size()],"allocation",{"op":"activate","source":id,"activation":activation,"points":int(active[id].stat_modifiers.dex)})
+		if not applied.success: return applied
+		record = applied.record
+	state.progression["development"] = record
+	return _success()
 
 
 func _effective_stats_snapshot(actor_id: StringName, field_names: Array) -> Dictionary:
@@ -4079,6 +4295,7 @@ func _apply_timed_stat_effect(
 		"source_action_instance_id": action.action_instance_id,
 		"successful_hit_knockback_microfeet": int(effect_definition.get("successful_hit_knockback_microfeet", 0)),
 	}
+	_sync_temporary_dex(actor_state.actor_id)
 	_add_actor_condition(actor_state, effect_id)
 	var applied := _record_resolved_event(
 		clock.get_elapsed_us(),
@@ -4118,6 +4335,7 @@ func _resolve_timed_stat_effect_expire_due(event: CombatEvent) -> void:
 	var modifier_names: Array = (active_effect.get("stat_modifiers", {}) as Dictionary).keys()
 	var stats_before := _effective_stats_snapshot(actor_state.actor_id, modifier_names)
 	actor_state.timed_stat_effects.erase(effect_id)
+	_sync_temporary_dex(actor_state.actor_id)
 	_remove_actor_condition(actor_state, effect_id)
 	actor_state.revision += 1
 	_state_revision += 1
@@ -4517,6 +4735,11 @@ func _evaluate_defense_eligibility(
 		"base_target": null,
 		"target_modifier": profile.get_modifier(defense_type),
 	}
+	# A nested reaction may have incapacitated the defender since planning.
+	# Keep resolved attempts; never start a fresh active defense afterward.
+	if defender_state.current_hpc != null and int(defender_state.current_hpc) <= 0:
+		result["reason"] = "defender_incapacitated"
+		return result
 	if _active_defenses_restricted(defender_state):
 		result["reason"] = "defender_unaware_or_surprised"
 		return result

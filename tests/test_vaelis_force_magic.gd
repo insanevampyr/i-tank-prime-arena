@@ -236,7 +236,11 @@ func _test_automatic_danger_boundary_and_settings() -> void:
 	_expect_equal(_count_events(session, &"nac_special_committed"), events_before, "Proximity alone must not trigger automatic Force Bolt.")
 	var attack := session._request_actor_attack(Fixture.OPPONENT_ID, Fixture.PLAYER_ID, "task34b_danger", &"torso")
 	_expect_true(attack.get("success", false), "The opponent's physical declaration must be legal in the danger fixture.")
-	_expect_equal(_count_events(session, &"nac_special_committed"), events_before + 1, "A perceived hostile physical declaration may trigger exactly one automatic Force Bolt.")
+	_expect_equal(_count_events(session, &"nac_special_committed"), events_before, "#37A: declaration alone must not activate a defensive NAC.")
+	_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).resources.get("mana"),20,"No defensive Mana is spent before incoming ACC/defense evaluation.")
+	var incoming_action := session.simulation.get_action(attack.action_instance_id)
+	session.advance_by(int(incoming_action.final_effect_due_at_us)-session.simulation.clock.get_elapsed_us())
+	_expect_equal(_count_events(session, &"nac_special_committed"), events_before + 1, "A legal incoming hit reaching the NAC slot may trigger exactly one automatic Force Bolt.")
 	_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).automatic_nac_uses_this_round, 1, "Automatic use must remain separately budgeted while sharing the global NAC cap.")
 	_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).resources.get("mana"), 18, "Automatic Force Bolt must commit the same two Mana as manual activation.")
 	_expect_true(session.get_actor_state(Fixture.PLAYER_ID).current_action_instance_id.is_empty(), "Automatic zero-Act Force Bolt must not occupy Vaelis's ordinary action slot.")
@@ -279,10 +283,11 @@ func _test_force_replay_and_digest() -> void:
 		automatic_session.configure_player_nac_automation({
 			"profile": "Aggressive", "automatic_enabled": true,
 			"minimum_mana_reserve": 0, "automatic_nac_budget": 1,
-			"emergency_defense_enabled": false, "offensive_triggers_enabled": true,
+			"emergency_defense_enabled": true, "offensive_triggers_enabled": true,
 			"ally_protection_enabled": false, "priority": PackedStringArray(["force_bolt"]),
 		})
 		automatic_session._request_actor_attack(Fixture.OPPONENT_ID, Fixture.PLAYER_ID, "task34c_auto_replay", &"torso")
+		automatic_session.advance_by(2_500_000)
 	_expect_equal(_event_signature(automatic_first), _event_signature(automatic_second), "Automatic danger-triggered Force Bolt must replay with identical authoritative logging.")
 	_expect_equal(Digest.compute(automatic_first.get_state_snapshot()), Digest.compute(automatic_second.get_state_snapshot()), "Automatic NAC resources and combat state must produce identical digests.")
 

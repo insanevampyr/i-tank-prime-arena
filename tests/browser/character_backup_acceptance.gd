@@ -30,7 +30,7 @@ func _process(delta: float) -> void:
 			controller._collect_loot_button.pressed.emit()
 			await settle()
 			await remember_backup()
-			line("READY: right-click CHAR: VAELIS, then EXPORT BACKUP / PREVIEW BACKUP. Use the actual download and file picker. Restoration requires separate explicit confirmation.")
+			line("READY: use SAVE CHARACTER / LOAD CHARACTER. SAVE FILE downloads the prepared file; SELECT SAVE FILE opens the read-only preview. Loading requires separate CONFIRM LOAD confirmation.")
 	elif command == "check":
 		var actions := controller._backup_actions
 		for index in range(1200):

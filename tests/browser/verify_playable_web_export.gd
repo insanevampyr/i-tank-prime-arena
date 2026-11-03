@@ -22,6 +22,14 @@ func _initialize() -> void:
 		if not methods.has(required):
 			fail("Stale Web export: missing %s. Re-export the ordinary Web preset before browser acceptance." % required)
 			return
+	var development := ResourceLoader.load("res://scripts/combat/character_development.gd", "", ResourceLoader.CACHE_MODE_IGNORE) as Script
+	var engine := ResourceLoader.load("res://scripts/combat/combat_simulation.gd", "", ResourceLoader.CACHE_MODE_IGNORE) as Script
+	var engine_methods: Array[String] = []
+	if engine != null:
+		for method: Dictionary in engine.get_script_method_list(): engine_methods.append(String(method.name))
+	if development == null or not engine_methods.has("request_character_development") or not engine_methods.has("_resolve_defensive_nacs"):
+		fail("Stale Web export: missing Task 37A live development/defensive NAC integration.")
+		return
 	var scene := (ResourceLoader.load("res://scenes/test_arena.tscn", "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene).get_state()
 	var visible_lines := 0
 	for index in range(scene.get_node_count()):
@@ -43,12 +51,12 @@ func verify_backup_controls() -> void:
 	var controls = controller._rewards_label.get_parent().get_node_or_null("CharacterBackupControls")
 	var valid: bool = controls != null and controls.is_visible_in_tree() and controls.get_index() == 1
 	if valid:
-		valid = controls.get_node("ExportBackup").text == "EXPORT BACKUP" and controls.get_node("PreviewRestoreBackup").text == "PREVIEW / RESTORE BACKUP"
+		valid = controls.get_node("ExportBackup").text == "SAVE CHARACTER" and controls.get_node("PreviewRestoreBackup").text == "LOAD CHARACTER" and controller._backup_actions._dialog.title == "Save / Load Character"
 	scene.free()
 	if not valid:
 		fail("Exported playable scene must expose current backup controls in READY character management.")
 		return
-	print("PASS: ordinary Web PCK includes async persistence, storage status and visible READY backup controls.")
+	print("PASS: ordinary Web PCK includes live development/defensive NAC integration, async persistence, storage status and visible READY backup controls.")
 	quit()
 
 func fail(reason: String) -> void:

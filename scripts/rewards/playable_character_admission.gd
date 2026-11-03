@@ -8,6 +8,7 @@ const Profiles = preload("res://scripts/rewards/character_profile_projection.gd"
 const Coordinator = preload("res://scripts/rewards/character_persistence_coordinator.gd")
 const VAELIS_RECORD := "res://assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json"
 const RULES := "prime_v3_arena_starter_v1"
+const STANDARD_STARTERS := {"vaelis_thorn":"standard_pool9_dt6_dp3"}
 
 static func audit(character: StringName) -> Dictionary:
 	if character == Fixture.PLAYER_CHARACTER_GUARD:
@@ -23,6 +24,9 @@ static func audit(character: StringName) -> Dictionary:
 	var loadout: CombatLoadoutDefinitionResource = load("res://data/loadouts/vaelis_thorn_short_sword_wand.tres")
 	var actor := Fixture.make_player_actor(character)
 	if source == null or loadout == null or actor == null: return _fail("vaelis_definition_unavailable")
+	if STANDARD_STARTERS.has(String(character)):
+		var standard := CharacterDevelopment.starting(STANDARD_STARTERS[String(character)],int(actor.attributes.get("dex",-1)))
+		if not standard.success or actor.base_combat_stats.dt != standard.state.baseline.dt or actor.base_combat_stats.dp != standard.state.baseline.dp: return _fail("standard_starting_allocation_mismatch")
 	for key: String in source.attributes:
 		if record.attributes.get(key.to_upper()) != source.attributes[key]: return _fail("vaelis_attribute_source_mismatch")
 	var stat_sources := {"hpm":"HPM","acc":"ACC","at":"AT","mr":"MR_ft","dt":"DT","dp":"DP","init":"INIT","sb":"SB","hpb":"HPB","nal":"NAL","physical_soak":"PS","ss":"SS","rb":"RB"}

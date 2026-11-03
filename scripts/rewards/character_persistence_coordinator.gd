@@ -144,6 +144,10 @@ static func _validate_receipts(payload: Dictionary) -> Dictionary:
 	return {"success":true}
 
 static func _validate_continuity(current: Dictionary, candidate: Dictionary) -> Dictionary:
+	var old_development: Dictionary = current.get("permanent",{}).get("development",{})
+	var new_development: Dictionary = candidate.get("permanent",{}).get("development",{})
+	if not old_development.is_empty() or not new_development.is_empty():
+		if not CharacterDevelopment.continuity(old_development,new_development): return _result("conflict","development_history_changed")
 	if not current.has("settlements"): return _result("blocked","legacy_settlement_history_unavailable")
 	for receipt: Dictionary in current.settlements:
 		if not candidate.settlements.has(receipt): return _result("conflict","settlement_history_changed")

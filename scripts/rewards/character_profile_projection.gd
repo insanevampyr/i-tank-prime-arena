@@ -76,6 +76,9 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 	if evidence.has("equipment_state"):
 		if evidence.equipment_state != {"hands":state.hand_occupancy,"handling":state.weapon_handling}: return _fail("equipment_state_source_mismatch")
 		payload["equipment_state"] = evidence.equipment_state.duplicate(true)
+	if state.progression.has("development"):
+		if not state.progression.development is Dictionary or not CharacterDevelopment.validate_source(state.progression.development,source): return _fail("development_source_mismatch")
+		payload.permanent["development"] = state.progression.development.duplicate(true)
 	var candidate := hydrate(payload, source, String(payload.character_id), String(payload.rules_revision), verifier)
 	if not candidate.get("success",false): return candidate
 	var reconstructed: CombatActorDefinition = candidate.actor_definition
@@ -108,7 +111,8 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	for mode: Variant in lineage.mode_history:
 		if mode != save_namespace: return _fail("nonproduction_lineage")
 	var p: Dictionary = payload.permanent
-	if not _keys(p,PERMANENT_FIELDS) or not p.growth is Array or not p.resource_maxima is Dictionary or not p.inventory_quantities is Dictionary or not p.equipment_refs is Array or not p.xp_baseline is Dictionary or not p.award_receipts is Array: return _fail("invalid_permanent_fields")
+	if not _keys(p,PERMANENT_FIELDS+(["development"] if p.has("development") else [])) or not p.growth is Array or not p.resource_maxima is Dictionary or not p.inventory_quantities is Dictionary or not p.equipment_refs is Array or not p.xp_baseline is Dictionary or not p.award_receipts is Array: return _fail("invalid_permanent_fields")
+	if p.has("development") and not CharacterDevelopment.validate_source(p.development,source): return _fail("development_source_mismatch")
 	for ref: Variant in p.equipment_refs:
 		if not ref is String or ref.is_empty(): return _fail("invalid_equipment_reference")
 	if payload.base_attributes != source.attributes: return _fail("attribute_history_unverified")
@@ -163,6 +167,12 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	for maximum: Variant in p.resource_maxima.values():
 		if not Contract._integer(maximum,0): return _fail("invalid_resource_maximum")
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	if p.has("development"):
+		var development := CharacterDevelopment.inspect(p.development)
+		var allocation: Dictionary = DexAllocation.validate(development.allocation).totals
+		actor.base_combat_stats.dt = allocation.dt
+		actor.base_combat_stats.dp = allocation.dp
+		actor.base_combat_stats.acc = PrimeV3DexChart.accuracy(allocation.dex,"mana" if actor.progression_policy.get("resource_mode") == "mana" else "regular")
 	var legality := catalog.validate_actor_equipment(actor)
 	if not legality.get("success",false): return _fail("equipment_illegal")
 	var armor_modifiers := catalog.calculate_armor_stat_modifiers(actor.equipment_refs)
@@ -171,6 +181,7 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	var ownership := _ownership(payload,actor,catalog)
 	if not ownership.get("success",false): return ownership
 	if payload.has("recovery"):
+		if p.get("development",{}) != payload.recovery.get("player",{}).get("development",{}): return _fail("recovery_development_generation_mismatch")
 		var recovery_validation := CharacterWaveCheckpoint.validate(payload.recovery,actor)
 		if not recovery_validation.success: return recovery_validation
 		var ledger: Dictionary = payload.recovery.ledger

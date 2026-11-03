@@ -34,6 +34,11 @@ func run() -> Array[String]:
 		c._on_inventory_toggle_pressed()
 		var ready_controls := c._rewards_label.get_parent().get_node("CharacterBackupControls")
 		check(ready_controls.is_visible_in_tree() and ready_controls.get_index() == 1,"Loaded READY character must expose backup controls before expandable inventory sections.")
+		check(ready_controls.get_node("ExportBackup").text == "SAVE CHARACTER" and ready_controls.get_node("PreviewRestoreBackup").text == "LOAD CHARACTER","Actual safe-state controls must use player-facing Save/Load labels.")
+		check(c._backup_actions._dialog.title == "Save / Load Character" and c._backup_actions._dialog.get_ok_button().text == "CANCEL","Save/Load dialog must have a clear title and no-change exit.")
+		var modal_labels: Array[String] = []
+		for node: Node in c._backup_actions._dialog.find_children("*","Button",true,false): modal_labels.append(node.text)
+		check(modal_labels.has("SAVE CHARACTER") and modal_labels.has("SELECT SAVE FILE"),"Modal must offer the same Save action and clear file-selection label.")
 		check(session.get_state_snapshot() == ready_before,"Opening character management must not mutate the admitted character.")
 		c._on_inventory_toggle_pressed()
 		session.set_opponent_behavior_enabled(false)
@@ -59,7 +64,8 @@ func run() -> Array[String]:
 		var controls := c._rewards_label.get_parent().get_node("CharacterBackupControls")
 		check(controls.is_visible_in_tree() and controls.get_node("ExportBackup").is_visible_in_tree() and controls.get_node("PreviewRestoreBackup").is_visible_in_tree(),"Actual downtime panel must expose both backup buttons outside collapsed sections.")
 		controls.get_node("ExportBackup").pressed.emit()
-		check(c._backup_actions.last_result.get("state") == "export_ready" and c._backup_actions._dialog.visible,"Visible EXPORT BACKUP button must open the existing verified export path.")
+		check(c._backup_actions.last_result.get("state") == "export_ready" and c._backup_actions._dialog.visible,"Visible SAVE CHARACTER button must open the existing verified export path.")
+		check(c._backup_actions._download_button.text == "SAVE FILE" and c._backup_actions._dialog.dialog_text.contains("to your computer"),"Prepared file must clearly explain the final disk/download action.")
 		c._backup_actions._dialog.hide()
 		check(service._last_ack,"Fixture must end with a verified committed checkpoint.")
 		var before := session.get_state_snapshot()
@@ -83,9 +89,17 @@ func run() -> Array[String]:
 			_test_contract(exported,history)
 			var preview := Reader.new().begin_preview(readback.text,"dev_normal",storage)
 			check(preview.get("success",false) and preview.classification == "exact_match" and preview.read_only,"Desktop preview compares without restoration.")
-			c._backup_actions._namespace = "dev_normal"
-			c._backup_actions.preview_text(readback.text)
-			check(c._backup_actions.last_result.get("classification") == "exact_match" and c._backup_actions._dialog.dialog_text.contains("READ ONLY"),"Actual character-actions preview exposes comparison and no restore control.")
+			c._backup_actions._picker.use_native_dialog = false # Headless file dialog; real file_selected signal still routes through production code.
+			c._backup_actions._picker.current_dir = root
+			controls.get_node("PreviewRestoreBackup").pressed.emit()
+			check(c._backup_actions._picker.file_mode == FileDialog.FILE_MODE_OPEN_FILE and c._backup_actions._picker.title == "Select Save File" and c._backup_actions._picker.visible,"LOAD CHARACTER must invoke the existing file picker.")
+			c._backup_actions._picker.hide()
+			c._backup_actions._picker.file_selected.emit(output)
+			check(c._backup_actions.last_result.get("classification") == "exact_match" and c._backup_actions._dialog.dialog_text.contains("READ ONLY") and c._backup_actions._dialog.dialog_text.contains("separate confirmation"),"Selected file must produce a clear read-only preview through the existing file handler.")
+			check(c._backup_actions._restore_button.text == "CONFIRM LOAD","Compatible preview must retain a separately confirmed load action.")
+			c._backup_actions._picker.canceled.emit()
+			check(c._backup_actions._dialog.dialog_text == "File selection canceled. Your character was not changed.","File picker cancellation must explain that no change occurred.")
+			_test_ui_messages(c._backup_actions)
 			c._backup_actions._dialog.hide()
 			_test_browser(exported,history,service)
 		check(session.get_state_snapshot() == before and service._prior == service_before and session.simulation.random.get_draw_count() == draw_count,"Backup/preview cannot mutate session, progression, RNG or history.")
@@ -108,6 +122,25 @@ func run() -> Array[String]:
 	PlayableCharacterPersistence.test_run_id = ""
 	helper._remove_fixture(root)
 	return failures
+
+func _test_ui_messages(actions: CharacterBackupActions) -> void:
+	var expected := {
+		"divergent_history":"does not match your character's history",
+		"backup_older_than_destination":"older than your saved progress",
+		"namespace_mismatch":"NORMAL and DEV NORMAL characters are separate",
+		"backup_checksum_mismatch":"damaged, incomplete",
+		"unsupported_backup_version":"compatible game version",
+		"backup_output_already_exists":"Choose a new filename",
+		"profile_in_use_or_acquiring":"another window or tab",
+		"quota_exhausted":"Storage is full",
+		"permission_denied":"Permission",
+		"admitted_acknowledged_character_required":"has not been verified",
+	}
+	for reason: String in expected:
+		actions._show_result({"success":false,"reason":reason})
+		check(actions._dialog.dialog_text.contains(expected[reason]) and not actions._dialog.dialog_text.contains(reason),"Failure %s must have accurate player language without raw reason codes." % reason)
+		check(actions.last_result.reason == reason,"Presentation must retain original diagnostic reason %s." % reason)
+	check(actions._comparison_text("divergent_history") != actions._comparison_text("backup_older_than_destination"),"Conflicting and older saves must remain distinct explanations.")
 
 func _test_contract(exported: Dictionary, history: Dictionary) -> void:
 	var text: String = exported.text

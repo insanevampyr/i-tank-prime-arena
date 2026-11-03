@@ -1,5 +1,17 @@
 # Task 36K browser storage and playable persistence verification
 
+## Task 37A isolated development verification
+
+Run `./tests/browser/prepare_playable_web.ps1 -Development`, then serve
+`$env:TEMP/itank-arena-36k-playable-web/out` on a separate loopback port.
+Open `index.html?test=development37-final` in Edge and click **Verify 37A
+development**. This uses the actual controller, source-backed combat, session
+command and IndexedDB acknowledgement with a disposable database. Require all
+PASS lines and `37A COMPLETE: verify`. Reload the page and click **Reload 37A
+development**; require exact development/resource readback and schema 12.
+No production origin, profile or storage clearing is required. This harness
+does not expose unfinished allocation/preference controls in the shipped game.
+
 ## Task 36L-Pass2 restoration acceptance
 
 Owner acceptance of Pass1 file download/pickers/preview is still pending. Do not label either pass fully accepted from these automated results. No owner profile is used in the following tests.

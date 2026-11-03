@@ -217,12 +217,14 @@ static func make_player_defense_profile(player_character_id: StringName, actor_i
 	if player_character_id == PLAYER_CHARACTER_GUARD:
 		return make_defense_profile(actor_id)
 	if player_character_id == PLAYER_CHARACTER_VAELIS:
-		return CombatDefenseProfile.new(
+		var profile := CombatDefenseProfile.new(
 			&"vaelis_thorn_defenses",
 			PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]),
 			{}, null, null,
 			PackedStringArray(["PRIME-V3 pp. 19-20; supplied Vaelis DT/DP allocation; no armor or shield"])
 		)
+		profile.defensive_nacs = [{"special_id":&"force_bolt","mana_cost":VaelisForceFixture.FORCE_BOLT_MANA_COST,"definition":VaelisForceFixture.make_force_bolt_attack_definition(VAELIS_WAND_REF)}]
+		return profile
 	return null
 
 

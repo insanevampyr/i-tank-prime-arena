@@ -13,6 +13,7 @@ var modifiers: Dictionary
 var weapon_block: CombatBlockDefinition
 var shield_block: CombatBlockDefinition
 var source_refs: PackedStringArray
+var defensive_nacs: Array[Dictionary] = []
 
 
 func _init(
@@ -47,7 +48,7 @@ func get_modifier(defense_type: StringName) -> int:
 
 
 func to_dictionary() -> Dictionary:
-	return {
+	var result := {
 		"profile_id": String(profile_id),
 		"priority": Array(priority),
 		"modifiers": modifiers.duplicate(true),
@@ -55,3 +56,8 @@ func to_dictionary() -> Dictionary:
 		"shield_block": null if shield_block == null else shield_block.to_dictionary(),
 		"source_refs": Array(source_refs),
 	}
+	if not defensive_nacs.is_empty():
+		result["defensive_nacs"] = []
+		for source: Dictionary in defensive_nacs:
+			result.defensive_nacs.append({"special_id":String(source.special_id),"mana_cost":source.mana_cost,"definition":source.definition.to_dictionary()})
+	return result

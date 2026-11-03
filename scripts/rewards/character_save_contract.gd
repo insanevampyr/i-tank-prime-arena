@@ -20,6 +20,8 @@ static func validate(payload: Dictionary) -> Dictionary:
 		legacy.erase("equipment_state")
 		legacy.erase("run_history")
 		var result := validate(legacy)
+		if payload.get("permanent",{}) is Dictionary and payload.permanent.has("development"):
+			if not payload.permanent.development is Dictionary or not CharacterDevelopment.inspect(_normalize_json_numbers(payload.permanent.development)).success: result.errors.append("invalid_character_development")
 		if payload.has("run_history"):
 			var runs: Variant = payload.run_history
 			var seen_runs := {}
@@ -163,6 +165,10 @@ static func validate_replacement(current: Dictionary, candidate: Dictionary) -> 
 		return {"success": false, "reason": "profile_version_transition_requires_verified_migration"}
 	if candidate.generation != current.generation + 1:
 		return {"success": false, "reason": "stale_or_nonsequential_generation"}
+	var previous_development: Dictionary = current.get("permanent",{}).get("development",{})
+	var next_development: Dictionary = candidate.get("permanent",{}).get("development",{})
+	if not previous_development.is_empty() or not next_development.is_empty():
+		if not CharacterDevelopment.continuity(previous_development,next_development): return {"success":false,"reason":"development_history_changed"}
 	for checkpoint: Variant in current.secured_checkpoints:
 		if not candidate.secured_checkpoints.has(checkpoint): return {"success": false, "reason": "secured_checkpoint_removed"}
 	var receipt_map := {}

@@ -706,14 +706,65 @@ historical Arena default; it is not represented as a manuscript quotation.
 `DefensivePreferences.plan` validates preference/source identities and plans
 that selection using supplied authoritative eligibility facts, preserving the
 per-Special/per-Block input order and performing no RNG or resource mutations.
-It is NOT yet connected to the live defense/NAC resolver; existing runtime
-defense behavior remains unchanged in this bounded pass.
+This describes the accepted foundation. The controlling live integration below
+now connects it to authoritative combat resolution.
 
-**Deferred together:** live defense/NAC integration, early-success execution,
-player preference/allocation controls, and the approved versioned V2 development
-extension through projection/hydration/checkpoints/backup continuity. The local
-allocation record version 1 is an isolated model serialization, not a new save
-format or an enabled permanent-save field. No editable gameplay controls or
-unpersisted character changes are enabled. DEX buying stays blocked. Save
-Contract V2 and simulation schema 12 are unchanged. Existing fixtures do not
-acquire fabricated allocation histories. No full character creator is added.
+Player preference/allocation controls and DEX purchases remain disabled. The
+live integration below supersedes the former runtime/persistence deferrals.
+
+## Task 37A live integration — controlling owner rulings
+
+**OWNER-APPROVED ARENA OVERRIDE:** All combatants use their validated legal
+NAC/Dodge/Block/Soak preference order. Independent weapon/shield Block sources
+retain source order. The first Dodge/Soak slot chooses the higher eligible
+effective value, with preference breaking ties, and allows only one actual
+Dodge/Soak attempt. Eligibility is checked at execution; success stops further
+attempts and expenditure. Prime V3 p. 31 remains the printed reference, not the
+source of this freely ordered Arena sequence.
+
+Automatic defensive Force Bolt now executes in the preferred NAC slot **after
+incoming ACC**, never simply at declaration. A miss never reaches this slot.
+A successful earlier Block spends no Force Bolt Mana. Failed Block may allow
+one legal NAC attempt, retaining existing SS/ACC, focus, range/LOS, Mana and
+shared five-NAC limit. A qualifying hit interrupts **only the current unresolved
+incoming strike**. Committed siblings, completed defenses/damage and spent Act
+time remain intact. Final legality is rechecked after reaction displacement.
+The profile supplies the verified Special; core eligibility has no Vaelis/NPC
+identity exception. No new Special, trigger or extra defense is granted.
+
+**OWNER-APPROVED PROJECTILE RULE, PARTIALLY DEFERRED:** Before release, a legal
+NAC can affect the attacker and interrupt release. After release, a projectile
+continues independently: affecting its thrower cannot cancel it. An eligible
+NAC may instead affect the actual projectile, with default -2 ACC for an ordinary
+physical projectile; an established projectile-specific modifier replaces that
+default. Projectiles have no inherent Block, Dodge, Soak or SR; explicit effects
+may grant defenses. Interception applies the NAC's actual effect, not automatic
+destruction. The current engine has actor-targeted NACs, not independently
+targetable projectile objects. Object targeting and automatic pre-release
+defensive scheduling are deferred; no speculative projectile system is added.
+Released thrown/magic attacks do not trigger the attacker-targeted automatic
+Force Bolt branch. Existing legal manual before-release use remains available.
+
+`CharacterDevelopment` stores an optional version-1 immutable command record in
+schema-12 `progression.development` and Save Contract V2 `permanent.development`;
+the matching wave-entry record is explicit. Legacy profiles without it remain
+unchanged. Source-bound validation and prefix continuity prevent history
+rewrites/removal. Projection, hydration, checkpoint readback, backups and
+transactional restoration validate the same record. No new save format or
+simulation schema is introduced.
+
+Authoritative safe-downtime commands validate pending points, confirmation,
+unique request identity and actual actor/source eligibility. Permanent grants
+require an already-authorized positive actor DEX change; no DEX purchase path is
+enabled. Persistent source validation still rejects unsupported permanent DEX
+growth without its verified progression integration. Temporary positive DEX is
+isolated by source and run-qualified activation identity, with automatic odd
+points to DT; confirmed customization stays locked for that activation. Expiry
+removes only its contribution. Explicit DT/DP modifiers remain separate.
+Negative DEX and unknown source/stacking policies remain gated. No RNG/resource
+recovery is introduced by allocation or persistence.
+
+The explicit reusable standard policy is pool 9 -> DT 6 / DP 3. Only opted-in
+production starter Vaelis uses it today; historical 3/6 definitions and Guard/NPC
+data remain supported unchanged. No general creator or player preference UI is
+added. Automated validation is separate from owner gameplay acceptance.
