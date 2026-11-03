@@ -990,7 +990,7 @@ func configure_reward_mode(mode: String) -> Dictionary:
 	var player_definition := simulation.get_actor_definition(Fixture.PLAYER_ID)
 	if player_definition == null:
 		return _failure("reward_player_unavailable")
-	var result := _reward_ledger.configure(mode, Fixture.PLAYER_ID, player_definition.level)
+	var result := _reward_ledger.configure(mode, Fixture.PLAYER_ID, player_definition.level,int(player_definition.progression_policy.get("initial_expc",0)))
 	if not result.get("success", false):
 		return result
 	_reward_mode = mode
@@ -1033,28 +1033,63 @@ func get_character_advancement_options() -> Array[Dictionary]:
 	return _reward_ledger.get_purchase_options(simulation)
 
 
+func get_character_advancement_eligibility() -> Dictionary:
+	# Shared by presentation and the authoritative command; querying never mutates state.
+	if not _encounter_state in [ENCOUNTER_READY, ENCOUNTER_BETWEEN_WAVE_DOWNTIME] or _encounter_active:
+		return {"success":false,"reason":"advancement_requires_safe_character_management"}
+	if _reward_mode == ArenaRewardLedger.MODE_TEST:
+		return {"success":false,"reason":"test_mode_advancement_prohibited"}
+	var player := simulation.get_actor_state(Fixture.PLAYER_ID)
+	if player == null or player.current_hpc == null or int(player.current_hpc) <= 0:
+		return {"success":false,"reason":"player_not_eligible_for_advancement"}
+	if not player.current_action_instance_id.is_empty() or simulation.has_unresolved_combat_work():
+		return {"success":false,"reason":"advancement_requires_resolved_actions"}
+	var enemies := _wave_enemy_actor_ids()
+	for event: CombatEvent in simulation.get_resolved_events_from(_reward_event_cursor).get("events",[]):
+		if String(event.event_type) in ["physical_damage_resolved","verified_special_damage_resolved","force_bolt_damage_resolved"] and enemies.has(String(event.target_actor_id)) and int(event.payload.get("hpc_before",0)) > 0 and int(event.payload.get("hpc_after",1)) <= 0:
+			return {"success":false,"reason":"advancement_requires_settled_rewards"}
+	if _playable_persistence != null:
+		var safe := _playable_persistence.mutation_guard()
+		if not safe.success: return safe
+		if _playable_persistence is PlayableBrowserPersistence:
+			if not _playable_persistence._owns_lease or _playable_persistence.pending_or_unsecured() or _playable_persistence._browser_result.get("state") not in ["loaded","verified_committed"]:
+				return {"success":false,"reason":"persistent_character_storage_not_ready"}
+		if _encounter_state == ENCOUNTER_READY:
+			var entry: Dictionary = _playable_persistence._prior.get("recovery",{})
+			if _playable_persistence.generation < 1 or entry.get("phase") != "entry" or entry.get("run_id") != _playable_persistence.run_id or entry.get("wave_id") != _current_reward_wave_id() or _playable_persistence.mode != _reward_mode:
+				return {"success":false,"reason":"advancement_requires_verified_wave_entry"}
+	elif _encounter_state == ENCOUNTER_READY and _character_persistence != null and _character_persistence.requires_checkpoint():
+		return {"success":false,"reason":"advancement_requires_verified_wave_entry"}
+	return {"success":true}
+
+
 func request_character_advancement(
 	purchase_kind: StringName,
 	target_id: StringName,
 	request_id: String = ""
 ) -> Dictionary:
-	if _playable_persistence != null:
-		var safe := _playable_persistence.mutation_guard()
-		if not safe.success: return safe
-	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
-		return _failure("advancement_requires_between_wave_downtime")
-	if _reward_mode == ArenaRewardLedger.MODE_TEST:
-		return _failure("test_mode_advancement_prohibited")
-	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
-	if player_state == null or player_state.current_hpc == null or int(player_state.current_hpc) <= 0:
-		return _failure("player_not_eligible_for_advancement")
+	var eligible := get_character_advancement_eligibility()
+	if not eligible.success: return _failure(eligible.reason)
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id == &"str":
+		var prefix := "%s/starter_admission/%s/" % [_playable_persistence.profile_id,_playable_persistence.run_id]
+		var suffix := "/request_"+stable_request_id.sha256_text()
+		for prior: Dictionary in _playable_persistence._prior.get("purchases",[]):
+			if prior.get("purchase_kind") == "attribute" and prior.get("target_id") == "str" and String(prior.purchase_id).begins_with(prefix) and String(prior.purchase_id).ends_with(suffix): return _failure("duplicate_advancement_request")
 	var result := _reward_ledger.purchase_advancement(
 		simulation, stable_request_id, purchase_kind, target_id
 	)
-	if result.get("success", false): result["persistence"] = _checkpoint_character("character_changed")
+	if result.get("success", false):
+		if _encounter_state == ENCOUNTER_READY and _playable_persistence != null:
+			# A READY purchase updates the same unfinished entry, never a wave settlement.
+			var authorized := _authorized_entry_write
+			_authorized_entry_write = true
+			result["persistence"] = _playable_persistence.checkpoint(self,"entry")
+			_authorized_entry_write = authorized
+		else:
+			result["persistence"] = _checkpoint_character("character_changed")
 	return result
 
 

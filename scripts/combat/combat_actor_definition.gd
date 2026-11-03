@@ -119,6 +119,27 @@ func apply_verified_resistance_advancement(
 	}
 
 
+func apply_verified_strength_advancement(expected_current_value: int, target_value: int, validate_equipment: bool = true) -> Dictionary:
+	if typeof(attributes.get("str")) != TYPE_INT: return {"success":false,"reason":"source_strength_unresolved"}
+	if attributes.str != expected_current_value: return {"success":false,"reason":"stale_advancement_value"}
+	if target_value != expected_current_value+1: return {"success":false,"reason":"advancement_must_increase_one_point"}
+	var before := PrimeV3StrengthChart.derived(expected_current_value)
+	var after := PrimeV3StrengthChart.derived(target_value)
+	if not before.success or not after.success: return {"success":false,"reason":"strength_chart_or_mortal_limit_unverified"}
+	for field: String in ["sb","ppg","mwc"]:
+		if (field == "sb" or base_combat_stats.has(field)) and base_combat_stats.get(field) != before[field]: return {"success":false,"reason":"strength_derived_source_mismatch"}
+	if validate_equipment:
+		var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+		var equipment := catalog.validate_equipment_strength(target_value,equipment_refs)
+		if not equipment.success: return {"success":false,"reason":"advancement_equipment_unverified","issues":equipment.issues}
+	# Commit only after all values/equipment have been checked. No actor state,
+	# hand assignment, temporary effect or resource is modified here.
+	attributes.str = target_value
+	for field: String in ["sb","ppg","mwc"]: base_combat_stats[field] = after[field]
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return {"success":true,"value_before":expected_current_value,"value_after":target_value,"derived_before":before,"derived_after":after}
+
+
 func to_dictionary() -> Dictionary:
 	var snapshot := {
 		"actor_id": String(actor_id),

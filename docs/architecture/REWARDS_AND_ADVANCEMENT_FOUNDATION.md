@@ -143,6 +143,53 @@ An exact registered weapon, armor or shield uses one atomic transaction. The pro
 Only identified Health Potions (`1d10+2 HPC`) and Mana Potions (`3d6+2 Mana`) are usable. Their rolls use the continuing combat RNG and ordered events record draws, quantity and capped resource values. Other potion IDs, abstract Random Drop item categories, battlefield dropping and encumbrance remain visible but unavailable. Thrown/dropped Boar Spear state remains exclusively under its existing world-item and retrieval transaction.
 # Task 37A Pass 1 integration boundary
 
+## Task 37B STR purchase
+
+`get_character_advancement_eligibility()` is the single session policy used by
+the purchase button and authoritative request: READY and downtime permit legal
+purchases only with resolved combat/rewards and ready persistence. READY writes
+the same verified unfinished wave-entry checkpoint under scoped entry authority;
+downtime retains the existing character-change checkpoint. Active combat,
+unresolved work, TEST and pending/failed storage remain blocked before mutation.
+Reload does not refill resources or mark an unfinished wave secured.
+
+The existing `ArenaRewardLedger.purchase_advancement` and session checkpoint
+path support the source-verified `attribute/str` purchase. `PrimeV3StrengthChart`
+contains printed STR rows 1-20 (V3 pp. 53/55); `CombatActorDefinition` applies a
+validated permanent +1 and SB/PPG/MWC projection. Current STR 9 -> 10 costs
+3,000 EXPC (p. 102) and changes PPG 8 -> 9 and MWC 250 -> 300 lb, with SB 2
+unchanged. No new primary-attribute or Special purchase is enabled.
+
+Current hand state, items, damage/resources and effects remain separate. Existing
+equipment is checked through the catalog before application; stronger STR may
+make an owned item eligible but never grants or equips it. A holding-state
+threshold that cannot roundtrip must first be resolved explicitly by the player.
+An existing two-handed grip remains valid when only one hand is required.
+
+The ledger carries the authored initial EXPC balance from session admission and
+profile reloading; it is neither a reward nor an earned-XP award. Affordability,
+remaining balance and future XP continuity account for it once. Zero-baseline
+Vaelis histories preserve existing arithmetic. EXPM never decreases.
+
+No save/simulation version change: existing immutable purchase records reconstruct
+STR and its derived values during candidate hydration. Authored base attributes
+stay immutable. Final equipment validation follows all replayed purchases, rather
+than incorrectly requiring later gear to be legal before earlier STR increases.
+Source identity, receipt prefixes, equipment-instance ownership, generation
+checks, Web Locks and acknowledged readback are unchanged. Backup preview is
+still read-only and restoration still requires confirmation. New and legacy
+profiles use the same validated admission; no history is rewritten.
+New STR receipt identities append the request digest within the existing
+profile/run namespace, retaining exactly-once rejection after reloading. The
+existing purchase record shape and historical receipt identities are unchanged.
+
+Tests: `--suite="Task 37B"` covers generic actor transactions, costs, caps, source
+gates, temporary SB effects, exact resources, starting EXPC, snapshots/replay,
+observers, actual Desktop selection/UI purchase, reload, NEXT WAVE and isolated
+transactional backup restoration. Browser instructions are in tests/browser.
+
+### Historical Task 37A foundation
+
 The premade Vaelis baseline is now DT 6 / DP 3 at DEX 9. Admission explicitly
 accepts only the current definition or the exact historical 3/6 definition;
 existing profiles keep their original lineage, allocation and starter-item

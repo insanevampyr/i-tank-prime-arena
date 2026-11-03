@@ -1,5 +1,29 @@
 # Task 36K browser storage and playable persistence verification
 
+## Task 37B permanent STR acceptance
+
+READY regression: build with `prepare_playable_web.ps1 -Strength`, use a new
+`?test=str37b-ready-<unique>` token, click **Prepare funded entry**, then reload.
+Click **Load READY purchase UI**, click the ordinary canvas **CONFIRM XP
+PURCHASE**, and click **Verify manual purchase**. Require all assertions, then
+reload and click **Reload purchased STR** to verify durable EXPC, STR and exact
+entry resources. Test storage is isolated; do not use an owner profile/database.
+
+Build with `./tests/browser/prepare_playable_web.ps1 -Strength` and serve
+`$env:TEMP/itank-arena-36k-playable-web/out` on a separate loopback port. Open
+`index.html?test=str37b-final`, click **Verify STR purchase**, and require every
+assertion plus `37B COMPLETE: buy`. The disposable test uses actual physical
+defeats/rewards, the existing UI confirmation and actual IndexedDB publication;
+it does not inject XP. Reload the page and click **Reload purchased STR**.
+Require STR 10, SB 2, one 3,000-EXPC receipt, exact checkpoint resources and
+`37B COMPLETE: reload`. No owner database or profile is used or cleared.
+
+Owner ordinary play: in NORMAL or DEV NORMAL safe READY or downtime with at least 3,000
+EXPC, expand CHARACTER ADVANCEMENT, select STR 9 -> 10, inspect PPG/MWC/SB and
+cost/balance, then CONFIRM XP PURCHASE once. Verify STR 10, SB still 2 and the
+balance reduced by 3,000. Exit/reopen and verify retained STR, resources and gear.
+An unaffordable option must be disabled; DEX/other unfinished purchases stay hidden.
+
 ## Task 37A isolated development verification
 
 Run `./tests/browser/prepare_playable_web.ps1 -Development`, then serve

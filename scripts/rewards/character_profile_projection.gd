@@ -124,7 +124,7 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	if not _keys(b,["expm","expc","earned","spent"]): return _fail("xp_baseline_invalid")
 	for value: Variant in b.values():
 		if not Contract._integer(value,0): return _fail("xp_baseline_invalid")
-	if b.expm != policy.initial_expm or b.expc != policy.initial_expc or b.spent > b.earned or payload.xp.earned != b.expm+b.earned or payload.xp.unspent != b.expc+b.earned-b.spent: return _fail("xp_baseline_mismatch")
+	if b.expm != policy.initial_expm or b.expc != policy.initial_expc or b.spent > b.expc+b.earned or payload.xp.earned != b.expm+b.earned or payload.xp.unspent != b.expc+b.earned-b.spent: return _fail("xp_baseline_mismatch")
 	var award_total := 0
 	var award_ids := {}
 	for receipt: Variant in p.award_receipts:
@@ -141,7 +141,9 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 			if not Contract._integer(purchase[field],0): return _fail("invalid_purchase_record")
 		var preview := Advancement.make_purchase_preview(StringName(purchase.purchase_kind),StringName(purchase.target_id),purchase.value_before,purchase.value_after)
 		if not preview.available or preview.cost != purchase.cost or preview.source_ref != purchase.source_ref: return _fail("unsupported_or_inconsistent_purchase")
-		var applied := actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
+		# Isolated history replay: equipment is validated after ALL purchases, so
+		# later acquired equipment need not have been legal at an earlier STR.
+		var applied := actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
 		if not applied.success: return _fail("purchase_application_failed")
 		purchase_cost += int(purchase.cost)
 	if purchase_cost != b.spent: return _fail("purchase_spending_mismatch")
@@ -221,7 +223,7 @@ static func _ownership(payload: Dictionary, actor: CombatActorDefinition, catalo
 					if count != 0: return _fail("invalid_saved_grip")
 				elif handling.get(ref) == CombatWeaponHandling.ONE_HAND_HOLD:
 					if required != 2 or count != 1: return _fail("invalid_saved_grip")
-				elif count != required: return _fail("invalid_saved_grip")
+				elif count < required or count > weapon.base_hands_required: return _fail("invalid_saved_grip")
 			elif shield != null and (count != shield.hand_occupancy or (shield.hand_occupancy == 1 and hands.left != ref)): return _fail("invalid_saved_shield_hand")
 	for item: Dictionary in payload.items:
 		if not _keys(item,["instance_id","definition_id","quantity","provenance","equipped_slots","mutable_state"]) or not item.provenance.has_all(["origin_id","source_ref"]) or not item.provenance.origin_id is String or item.provenance.origin_id.is_empty() or not item.provenance.source_ref is String or item.provenance.source_ref.is_empty(): return _fail("item_provenance_unverified")

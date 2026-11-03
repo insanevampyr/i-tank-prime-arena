@@ -1,4 +1,4 @@
-param([string]$Godot = 'C:\Users\mxz\Desktop\GoDot\Godot_v4.7.2-stable_win64_console.exe', [switch]$Backup, [switch]$Restore, [switch]$Development)
+param([string]$Godot = 'C:\Users\mxz\Desktop\GoDot\Godot_v4.7.2-stable_win64_console.exe', [switch]$Backup, [switch]$Restore, [switch]$Development, [switch]$Strength)
 $ErrorActionPreference = 'Stop'
 $sourceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'itank-arena-36k-playable-web'
@@ -11,13 +11,14 @@ foreach ($folder in @('scripts','data','scenes')) {
 New-Item -ItemType Directory -Path (Join-Path $testRoot 'assets/Character Choices') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json') -Destination (Join-Path $testRoot 'assets/Character Choices') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'playable_persistence_acceptance.gd') -Destination $testRoot -Force
-if ($Backup -or $Restore -or $Development) {
+if ($Backup -or $Restore -or $Development -or $Strength) {
     New-Item -ItemType Directory -Path (Join-Path $testRoot 'tests/browser') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'playable_persistence_acceptance.gd') -Destination (Join-Path $testRoot 'tests/browser') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'character_backup_acceptance.gd') -Destination (Join-Path $testRoot 'tests/browser') -Force
     if ($Restore) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'character_backup_restoration_acceptance.gd') -Destination (Join-Path $testRoot 'tests/browser') -Force }
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'tests/test_playable_vaelis_persistence.gd') -Destination (Join-Path $testRoot 'tests') -Force
     if ($Development) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'character_development_acceptance.gd') -Destination (Join-Path $testRoot 'tests/browser') -Force }
+    if ($Strength) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'strength_advancement_acceptance.gd') -Destination (Join-Path $testRoot 'tests/browser') -Force }
 }
 @'
 config_version=5
@@ -37,11 +38,12 @@ renderer/rendering_method="gl_compatibility"
 [node name="WebAcceptance" type="Node"]
 script = ExtResource("1")
 '@ | Set-Content -LiteralPath (Join-Path $testRoot 'main.tscn')
-if ($Backup -or $Restore -or $Development) {
+if ($Backup -or $Restore -or $Development -or $Strength) {
     $mainPath = Join-Path $testRoot 'main.tscn'
     (Get-Content -LiteralPath $mainPath -Raw).Replace('res://playable_persistence_acceptance.gd','res://tests/browser/character_backup_acceptance.gd') | Set-Content -LiteralPath $mainPath
     if ($Restore) { (Get-Content -LiteralPath $mainPath -Raw).Replace('res://tests/browser/character_backup_acceptance.gd','res://tests/browser/character_backup_restoration_acceptance.gd') | Set-Content -LiteralPath $mainPath }
     if ($Development) { (Get-Content -LiteralPath $mainPath -Raw).Replace('res://tests/browser/character_backup_acceptance.gd','res://tests/browser/character_development_acceptance.gd') | Set-Content -LiteralPath $mainPath }
+    if ($Strength) { (Get-Content -LiteralPath $mainPath -Raw).Replace('res://tests/browser/character_backup_acceptance.gd','res://tests/browser/strength_advancement_acceptance.gd') | Set-Content -LiteralPath $mainPath }
 }
 @'
 [preset.0]

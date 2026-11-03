@@ -139,6 +139,12 @@ func validate_actor_equipment(actor: CombatActorDefinition) -> Dictionary:
 	return _validation_result(issues)
 
 
+func validate_equipment_strength(strength: int, equipment_refs: PackedStringArray) -> Dictionary:
+	var issues: Array[Dictionary] = []
+	_validate_equipment_refs(issues,strength,equipment_refs)
+	return _validation_result(issues)
+
+
 func instantiate_actor(character_id: StringName, loadout_id: StringName, actor_id: StringName, display_name: String) -> Dictionary:
 	var validation := validate_character_loadout(character_id, loadout_id)
 	if not validation["success"]:

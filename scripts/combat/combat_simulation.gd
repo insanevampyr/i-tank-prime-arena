@@ -49,6 +49,13 @@ var _weapon_handling_catalog: CombatDefinitionCatalog
 var _combat_started: bool = false
 var defensive_dodge_environment_resolver: Callable
 
+func has_unresolved_combat_work() -> bool:
+	for action: CombatActionInstance in _actions.values():
+		if action.status in [CombatActionInstance.STATUS_IN_PROGRESS, CombatActionInstance.STATUS_AWAITING_DEPENDENCIES]: return true
+	for attack: CombatAttackInstance in _attacks.values():
+		if attack.status in [CombatAttackInstance.STATUS_EXECUTING, CombatAttackInstance.STATUS_PENDING_DEFENSE, CombatAttackInstance.STATUS_PENDING_DODGE_DISPLACEMENT, CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED]: return true
+	return false
+
 func request_character_development(actor_id: StringName, request_id: String, kind: String, command: Dictionary) -> Dictionary:
 	var state := get_actor_state(actor_id)
 	var actor := get_actor_definition(actor_id)
@@ -3336,10 +3343,17 @@ func apply_verified_character_advancement(
 	if state.current_hpc == null or int(state.current_hpc) <= 0:
 		return _failure("actor_incapacitated")
 	var expected_target := &"sr" if purchase_kind == &"special_resistance" else (
-		&"tb" if purchase_kind == &"talent_bonus" else &""
+		&"tb" if purchase_kind == &"talent_bonus" else (&"str" if purchase_kind == &"attribute" else &"" )
 	)
 	if expected_target == &"" or target_id != expected_target:
 		return _failure("unsupported_advancement_purchase")
+	if target_id == &"str":
+		if not state.current_action_instance_id.is_empty(): return _failure("advancement_requires_idle_actor")
+		# An optional one-hand carry is not silently converted into an attack grip.
+		for ref: String in state.weapon_handling:
+			if state.weapon_handling[ref] != CombatWeaponHandling.ONE_HAND_HOLD: continue
+			var weapon := CombatDefinitionCatalog.load_default_fixture_catalog().get_weapon(StringName(ref))
+			if weapon != null and weapon.effective_hands_required(target_value) != 2: return _failure("stow_or_regrip_before_strength_purchase")
 	var preserved_state := {
 		"current_hpc": state.current_hpc,
 		"resources": state.resources.duplicate(true),
@@ -3347,9 +3361,7 @@ func apply_verified_character_advancement(
 		"equipment_refs": Array(state.equipment_refs),
 		"inventory_quantities": state.inventory_quantities.duplicate(true),
 	}
-	var applied := definition.apply_verified_resistance_advancement(
-		String(target_id), expected_current_value, target_value
-	)
+	var applied := definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
 	if not applied.get("success", false):
 		return applied
 	state.revision += 1
@@ -3360,6 +3372,7 @@ func apply_verified_character_advancement(
 		"target_id": String(target_id),
 		"value_before": expected_current_value,
 		"value_after": target_value,
+		"derived_changes": applied.get("derived_after",{}),
 		"preserved_state": preserved_state,
 		"current_state": {
 			"current_hpc": state.current_hpc,

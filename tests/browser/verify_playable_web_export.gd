@@ -30,6 +30,22 @@ func _initialize() -> void:
 	if development == null or not engine_methods.has("request_character_development") or not engine_methods.has("_resolve_defensive_nacs"):
 		fail("Stale Web export: missing Task 37A live development/defensive NAC integration.")
 		return
+	var actor_script := ResourceLoader.load("res://scripts/combat/combat_actor_definition.gd", "", ResourceLoader.CACHE_MODE_IGNORE) as Script
+	var strength_method := false
+	if actor_script != null:
+		for method: Dictionary in actor_script.get_script_method_list():
+			if method.name == "apply_verified_strength_advancement": strength_method = true
+	if not strength_method:
+		fail("Stale Web export: missing Task 37B permanent STR implementation.")
+		return
+	var session_script := ResourceLoader.load("res://scripts/combat/arena_combat_session.gd", "", ResourceLoader.CACHE_MODE_IGNORE) as Script
+	var safe_management := false
+	if session_script != null:
+		for method: Dictionary in session_script.get_script_method_list():
+			if method.name == "get_character_advancement_eligibility": safe_management = true
+	if not safe_management:
+		fail("Stale Web export: missing shared READY advancement eligibility.")
+		return
 	var scene := (ResourceLoader.load("res://scenes/test_arena.tscn", "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene).get_state()
 	var visible_lines := 0
 	for index in range(scene.get_node_count()):
@@ -56,7 +72,7 @@ func verify_backup_controls() -> void:
 	if not valid:
 		fail("Exported playable scene must expose current backup controls in READY character management.")
 		return
-	print("PASS: ordinary Web PCK includes live development/defensive NAC integration, async persistence, storage status and visible READY backup controls.")
+	print("PASS: ordinary Web PCK includes permanent STR, live development/defensive NAC integration, async persistence, storage status and visible READY Save/Load controls.")
 	quit()
 
 func fail(reason: String) -> void:

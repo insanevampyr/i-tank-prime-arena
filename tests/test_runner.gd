@@ -1,6 +1,8 @@
 extends SceneTree
 
 const CombatFoundationTests = preload("res://tests/test_combat_foundation.gd")
+const StrengthAdvancementTests = preload("res://tests/test_task_37b_strength.gd")
+const ReadyStrengthTests = preload("res://tests/test_task_37b_ready_advancement.gd")
 const SyncFoundationTests = preload("res://tests/test_sync_foundation.gd")
 const PrimeMovementTests = preload("res://tests/test_prime_movement.gd")
 const CombatActorActionTests = preload("res://tests/test_combat_actor_actions.gd")
@@ -87,6 +89,8 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 37B READY character management", "instance":ReadyStrengthTests.new()},
+		{"name":"Task 37B permanent STR advancement", "instance":StrengthAdvancementTests.new()},
 		{"name":"Task 37A live allocation and defensive sequence", "instance":Task37ALiveTests.new()},
 		{"name":"Task 37A allocation and defense policy foundation", "instance":Task37AFoundationTests.new()},
 		{"name":"Task 36L-Pass2 safe character backup restoration", "instance":CharacterBackupRestorationTests.new()},

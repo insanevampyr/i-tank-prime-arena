@@ -712,6 +712,65 @@ now connects it to authoritative combat resolution.
 Player preference/allocation controls and DEX purchases remain disabled. The
 live integration below supersedes the former runtime/persistence deferrals.
 
+## Task 37B — permanent STR purchase (printed Prime rule)
+
+**PRINTED PRIME:** p. 102 prices an Attribute (except APP), SR or TB increase
+of one point using the existing current-value brackets. STR 9 -> 10 therefore
+costs **3,000 EXPC**, not EXPM. The p. 102 introduction permits choosing when to
+spend; no attribute SS roll or field-study requirement is added. The p. 52/53
+mortal limit blocks permanent purchases above 20 unless a separately verified
+exception is integrated. This pass grants no immortal or magical exception.
+
+**DERIVED VALUES:** p. 19 defines STR's SB, PPG and MWC, in that order; p. 52
+explains chart ordering. Mana p. 53 and Regular p. 55 STR rows agree. At 9 the
+row is 2/8/250; at 10 it is 2/9/300. Thus SB remains 2, PPG becomes 9 and MWC
+300 lb. Eligible physical damage still uses the existing SB pipeline; no generic
+extra damage, accuracy, attack, MR, HPC, Mana, AP or daily-use award is added.
+`PrimeV3StrengthChart` transcribes rows 1-20. Unknown/nonchart derived baselines
+fail closed rather than overwriting unexplained bonuses.
+
+**RUNTIME:** The existing optional, confirmed EXPC transaction in safe READY
+(pre-combat) or between-wave downtime now
+supports only `attribute/str` in addition to already supported resistance
+purchases. It rechecks current value, +1, funds, source-derived values, living/
+idle state and registered equipment requirements before committing. Exactly-once
+request and receipt identities remain unchanged. Ownership, hand assignment,
+equipment condition and active effects are preserved; no equipment is granted
+or automatically equipped. Optional one-hand carrying must be stowed or legally
+re-gripped first if a STR threshold would invalidate that saved carrying state.
+An existing legal two-handed grip may remain when one hand becomes sufficient.
+
+**37B READY CORRECTION:** UI and authoritative command share a safe-management
+gate. Combat, unresolved actions/strikes, unsettled defeat rewards, TEST, and
+pending/failed browser storage or missing writer ownership reject before spending.
+A loaded persistent READY character requires a validated entry for the same run,
+wave and namespace. A purchase publishes an updated entry, preserving exact
+resources and leaving that wave unfinished; it does not publish a victory.
+The prior downtime-only rejection was an implementation mismatch with the
+already available READY management UI, not a printed prohibition on pre-combat
+EXPC spending. Printed p.102's purchase costs and progression rules are unchanged.
+
+**ACCOUNTING / PERSISTENCE:** Authored initial EXPC plus earned EXPC minus spent
+EXPC is the available balance; starting EXPC is not a reward. No baseline or
+award is counted twice. The existing V2 purchase records store the paid STR
+increase while `base_attributes` remains the immutable authored baseline.
+New STR receipt IDs include a namespaced caller-request fingerprint so replaying
+the original request after reload is rejected; old receipts are never rewritten.
+Hydration replays purchases into an isolated candidate and validates the final
+equipment after the complete history, so later acquired gear is not tested
+against an earlier STR. Existing saves with no STR receipts remain unchanged.
+Projection, generation continuity, Desktop/Web readback and backup restoration
+reuse existing checks. Save Contract V2 and simulation schema 12 are unchanged.
+
+**BOUNDARY:** DEX, other primary attributes, Specials, respec and unfinished
+controls remain disabled. STR is shown in the existing advancement selector
+with current/next value, exact EXPC cost, balance and an explicit purchase button.
+Current resources are not refilled. Existing explicit SB effects remain separate
+from permanent STR; no new temporary STR Special is introduced. PPG/MWC values
+are accurate data, not a new push/grapple or encumbrance system. Complete carried
+weights and encumbrance integration remain gated under the existing inventory
+boundary. No manuscript, reward formula, enemy or combat timing change is made.
+
 ## Task 37A live integration — controlling owner rulings
 
 **OWNER-APPROVED ARENA OVERRIDE:** All combatants use their validated legal

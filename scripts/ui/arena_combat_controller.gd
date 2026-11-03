@@ -1999,12 +1999,14 @@ func _on_purchase_advancement_pressed() -> void:
 	)
 	if result.get("success", false):
 		var purchase: Dictionary = result.get("purchase", {})
-		_last_ui_message = "%s increased to %s for %s XP." % [
+		_last_ui_message = "%s increased to %s for %s EXPC." % [
 			String(purchase.get("target_id", "stat")).to_upper(),
 			purchase.get("value_after", "?"), purchase.get("cost", "?"),
 		]
 	else:
-		_last_ui_message = "Advancement blocked: %s" % _friendly_reason(String(result.get("reason", "rejected")))
+		var reason := String(result.get("reason", "rejected"))
+		_last_ui_message = "Not enough available EXPC for this purchase." if reason == "insufficient_xp" else ("Stow or re-grip the held weapon before increasing STR." if reason == "stow_or_regrip_before_strength_purchase" else "Advancement blocked: %s" % _friendly_reason(reason))
+		_append_log("Advancement rejected: %s" % reason)
 	_update_rewards_panel(true)
 	_update_presentation()
 
@@ -2100,7 +2102,7 @@ func _rebuild_advancement_options() -> void:
 	var restore_index := 0
 	for index in range(_advancement_options.size()):
 		var option: Dictionary = _advancement_options[index]
-		var cost_text := "cost unresolved" if option.get("cost") == null else "%s XP" % option.get("cost")
+		var cost_text := "cost unresolved" if option.get("cost") == null else "%s EXPC" % option.get("cost")
 		var current_text := "?" if option.get("current_value") == null else str(option.get("current_value"))
 		var target_text := "?" if option.get("target_value") == null else str(option.get("target_value"))
 		_advancement_option.add_item("%s %s: %s -> %s (%s)" % [
@@ -2128,19 +2130,23 @@ func _update_rewards_panel_text(
 	var availability := "No verified purchase selected"
 	if not option.is_empty():
 		availability = (
-			"READY — explicit confirmation spends %s XP" % option.get("cost", "?")
+			"READY — explicit confirmation spends %s EXPC" % option.get("cost", "?")
 			if option.get("available", false)
 			else "UNAVAILABLE — %s" % _friendly_reason(String(option.get("blocked_reason", "unavailable")))
 		)
 	var history_lines := PackedStringArray()
 	for purchase: Dictionary in rewards.get("purchase_records", []):
-		history_lines.append("• %s %s -> %s (%s XP)" % [
+		history_lines.append("• %s %s -> %s (%s EXPC)" % [
 			String(purchase.get("target_id", "stat")).to_upper(), purchase.get("value_before", "?"),
 			purchase.get("value_after", "?"), purchase.get("cost", "?"),
 		])
 	var item := _selected_inventory_entry()
 	var inventory_text := "No collected or equipped items"
 	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "str":
+		var before := PrimeV3StrengthChart.derived(int(option.current_value))
+		var after := PrimeV3StrengthChart.derived(int(option.target_value))
+		if before.success and after.success: availability += "\nSTR %s -> %s | SB %s -> %s | PPG %s -> %s | MWC %s -> %s lb. No resource refill or automatic equipment change." % [option.current_value,option.target_value,before.sb,after.sb,before.ppg,after.ppg,before.mwc,after.mwc]
 	var progression := _session.get_actor_state(Fixture.PLAYER_ID).progression
 	var policy := player_actor.progression_policy
 	if not policy.is_empty():
@@ -2175,7 +2181,9 @@ func _update_rewards_panel_text(
 		"\n".join(history_lines) if not history_lines.is_empty() else "None",
 	]
 	if _purchase_advancement_button != null:
-		_purchase_advancement_button.disabled = option.is_empty() or not option.get("available", false) or _session.is_encounter_active()
+		var eligible := _session.get_character_advancement_eligibility()
+		_purchase_advancement_button.disabled = option.is_empty() or not option.get("available", false) or not eligible.success
+		_purchase_advancement_button.tooltip_text = "Confirm the selected EXPC purchase" if eligible.success else "Advancement blocked: %s" % _friendly_reason(String(eligible.reason))
 	if _inventory_equip_button != null:
 		_inventory_equip_button.disabled = item.is_empty() or (
 			not item.get("equipped", false) and not item.get("equipable", false)

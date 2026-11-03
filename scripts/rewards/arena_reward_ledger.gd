@@ -14,6 +14,7 @@ var player_actor_id: StringName = &"player"
 var player_level: int = -1
 var earned_xp: int = 0
 var spent_xp: int = 0
+var initial_expc: int = 0 # Authored spendable baseline, not a reward or XP award.
 var current_wave_earned_xp: int = 0
 var current_wave_id: String = ""
 var awards: Array[Dictionary] = []
@@ -27,12 +28,14 @@ var _next_world_item_sequence: int = 0
 var profile_ownership: Dictionary = {}
 
 
-func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int) -> Dictionary:
+func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int, p_initial_expc: int = 0) -> Dictionary:
 	if not [MODE_NORMAL, MODE_DEV_NORMAL, MODE_TEST].has(p_mode):
 		return {"success": false, "reason": "unsupported_reward_mode"}
+	if p_initial_expc < 0: return {"success":false,"reason":"invalid_initial_expc"}
 	mode = p_mode
 	player_actor_id = p_player_actor_id
 	player_level = p_player_level
+	initial_expc = p_initial_expc
 	return {"success": true, "mode": mode, "player_level": player_level}
 
 
@@ -98,7 +101,7 @@ func process_defeat(
 			award.merged({
 				"cumulative_earned_xp": earned_xp,
 				"spent_xp": spent_xp,
-				"unspent_xp": earned_xp - spent_xp,
+				"unspent_xp": initial_expc + earned_xp - spent_xp,
 				"distribution": "full_award_to_each_eligible_participant",
 			}, true), defeat_event_id
 		)
@@ -186,7 +189,7 @@ func get_purchase_options(simulation: CombatSimulation) -> Array[Dictionary]:
 			option["available"] = false
 			option["blocked_reason"] = "test_mode_advancement_prohibited"
 			continue
-		if option.get("available", false) and int(option.get("cost", 0)) > earned_xp - spent_xp:
+		if option.get("available", false) and int(option.get("cost", 0)) > initial_expc + earned_xp - spent_xp:
 			option["available"] = false
 			option["blocked_reason"] = "insufficient_xp"
 	return options
@@ -219,7 +222,7 @@ func purchase_advancement(
 			"preview": matching_option.duplicate(true),
 		}
 	var cost := int(matching_option.get("cost", 0))
-	if cost <= 0 or earned_xp - spent_xp < cost:
+	if cost <= 0 or initial_expc + earned_xp - spent_xp < cost:
 		return {"success": false, "reason": "insufficient_xp"}
 	var current_value := int(matching_option.get("current_value", -1))
 	var target_value := int(matching_option.get("target_value", -1))
@@ -245,7 +248,7 @@ func purchase_advancement(
 		"cost": cost,
 		"earned_xp": earned_xp,
 		"spent_xp": spent_xp,
-		"unspent_xp": earned_xp - spent_xp,
+		"unspent_xp": initial_expc + earned_xp - spent_xp,
 		"source_ref": matching_option.get("source_ref", ""),
 		"preserved_state": application.get("preserved_state", {}).duplicate(true),
 	}
@@ -280,7 +283,7 @@ func to_dictionary() -> Dictionary:
 		"current_wave_earned_xp": current_wave_earned_xp,
 		"earned_xp": earned_xp,
 		"spent_xp": spent_xp,
-		"unspent_xp": earned_xp - spent_xp,
+		"unspent_xp": initial_expc + earned_xp - spent_xp,
 		"awards": awards.duplicate(true),
 		"drop_resolutions": drop_resolutions.duplicate(true),
 		"purchase_records": purchase_records.duplicate(true),

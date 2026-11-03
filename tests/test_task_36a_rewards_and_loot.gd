@@ -305,7 +305,8 @@ func _test_advancement_cost_foundation_does_not_spend() -> void:
 	_expect_equal(Advancement.field_level_cost(&"osf", 14), 42_000, "OSF level 14+ must cost target level x3000.")
 	var preview := Advancement.make_purchase_preview(&"attribute", &"str", 10, 11)
 	_expect_equal(preview.get("cost"), 3_000, "Purchase previews must expose exact verified cost without spending XP.")
-	_expect_true(not preview.get("available", true), "Task 36A must not activate incomplete advancement purchases or automatic leveling.")
+	_expect_true(preview.get("available", false), "Task 37B now supports explicit, paid STR purchases; a cost preview grants no advancement.")
+	_expect_true(not Advancement.make_purchase_preview(&"attribute",&"dex",9,10).available,"Unfinished DEX purchasing must remain blocked.")
 
 
 func _test_snapshot_and_two_client_convergence() -> void:

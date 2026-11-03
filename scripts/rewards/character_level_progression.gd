@@ -9,7 +9,7 @@ static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: S
 	var reason := PrimeV3LevelCatalog.validate(policy, actor)
 	if not reason.is_empty(): return _failure(reason)
 	var previous := state.progression
-	if award_id.is_empty() or xp < 0 or earned < 0 or spent < 0 or spent > earned: return _failure("invalid_progression_award")
+	if award_id.is_empty() or xp < 0 or earned < 0 or spent < 0 or spent > earned+int(policy.initial_expc): return _failure("invalid_progression_award")
 	if (previous.get("award_ids",[]) as Array).has(award_id): return _failure("duplicate_progression_award")
 	if earned != int(previous.get("run_earned_xp",0)) + xp: return _failure("progression_ledger_discontinuity")
 	if spent != int(previous.get("run_spent_xp",0)): return _failure("progression_purchase_discontinuity")

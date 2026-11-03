@@ -59,7 +59,10 @@ static func make_purchase_preview(
 		else:
 			cost = attribute_cost(current_value)
 			if purchase_kind == &"attribute":
-				blocked_reason = _attribute_blocked_reason(target_id)
+				if target_id == &"str":
+					available = cost != null and PrimeV3StrengthChart.derived(current_value).success and PrimeV3StrengthChart.derived(target_value).success
+					if not available: blocked_reason = "strength_chart_or_mortal_limit_unverified"
+				else: blocked_reason = _attribute_blocked_reason(target_id)
 			else:
 				available = cost != null
 	elif purchase_kind in [&"hsf", &"osf"]:
@@ -98,7 +101,14 @@ static func build_actor_purchase_options(actor: CombatActorDefinition) -> Array[
 		if typeof(current) != TYPE_INT:
 			options.append(_unresolved_option(&"attribute", attribute_id, "source_current_value_unresolved"))
 			continue
-		options.append(make_purchase_preview(&"attribute", attribute_id, int(current), int(current) + 1))
+		var option := make_purchase_preview(&"attribute", attribute_id, int(current), int(current) + 1)
+		if attribute_id == &"str" and option.available:
+			var derived := PrimeV3StrengthChart.derived(int(current))
+			for field: String in ["sb","ppg","mwc"]:
+				if (field == "sb" or actor.base_combat_stats.has(field)) and actor.base_combat_stats.get(field) != derived[field]:
+					option.available = false
+					option.blocked_reason = "strength_derived_source_mismatch"
+		options.append(option)
 	for resistance: Dictionary in [
 		{"purchase_kind": &"special_resistance", "target_id": &"sr"},
 		{"purchase_kind": &"talent_bonus", "target_id": &"tb"},
