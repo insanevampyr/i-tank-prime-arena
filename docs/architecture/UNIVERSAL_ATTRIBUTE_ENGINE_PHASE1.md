@@ -63,3 +63,55 @@ Task 36B, character projection (Task 36J-Pass1), physical defense and two-client
 synchronization. Final headless import and `git diff --check` passed. No full
 regression or Web export was run. Keep the independent audit JSON and its
 checksum with the tests when the owner eventually checkpoints these files.
+
+## Phase 2A — isolated character attribute projection
+
+`CharacterAttributeProjection.project(actor_dictionary, mode, state_dictionary,
+effective_stats, authored_exceptions)` accepts existing actor/state snapshots and
+an explicit `mana` or `regular` reference mode. `project_actor` provides the same
+read-only operation for CombatActorDefinition/CombatActorState. Neither entry
+point reads a simulation, initializes a character or calls a live stat resolver.
+The caller must supply any effective values from the existing authority.
+
+Output separates identity, Primaries, Derived Attributes, Resistances and
+Resources. For each derived field, authored base, stored calculated value,
+equipment modifier, supplied effective value, recorded permanent allocation and
+V3 reference remain distinct. Numeric comparisons use **base versus reference**,
+never equipment-adjusted/current values. `different` is evidence of a numeric
+difference, not a diagnosis that authored character data is wrong. Optional
+exception annotations are explicitly caller-supplied descriptions, not proof of
+permission or correction instructions. Field-source provenance is copied intact.
+
+All ten primary scores and all mode-specific derived descriptors are covered.
+Only explicit existing field mappings are read as authoritative derived stats;
+unmapped skill/field/persuasion/entitlement values remain unavailable. In
+particular MAN AP is never read from the Ability Point resource `ap`. The API
+does not compute temporary primary values. Positive, negative or absent effective
+derived values are reported only as supplied; signed DT/DP are not clamped.
+
+Absent primary/derived values produce tagged unavailable entries and
+`complete=false` (coverage of stored primaries/base derived stats/resistances,
+not permission to use the character). Missing state/resources/effective inputs
+are separately tagged unavailable and never refilled. Malformed data, unsupported
+scores/types/modes, mismatched actor/state identity, inconsistent development
+records and object-bearing/non-data inputs fail closed without partial output.
+Validated DEX records can describe their recorded split; no missing DEX/MAN
+allocation or Luck allowance is invented. DEAD/unlimited remain reference tags.
+HPC/current resources, daily allowances and damage shields are copied separately;
+neither Shield protection nor historic HPM growth is treated as chart-derived HPC.
+
+The focused projection suite compares 648 cells and all their components against
+the independently frozen/hash-verified audit fixture. It covers Vaelis, Guard,
+authored Goblin, both chart modes, legacy/current DEX records, missing/invalid data,
+explicit differences, spent resources, independent SR/TB and output isolation.
+Repeated inspection preserves complete simulation snapshots/events/RNG draws;
+inspection of only one same-seed client leaves the two snapshots equal.
+
+Observed base/reference differences in the current fixtures: Guard NAL1 versus
+END-chart NAL2, Goblin SB0 versus STR-chart SB1; Vaelis has no differences among
+the mapped numeric base fields. These authored values remain authoritative and
+unchanged; no source exception was silently converted into a chart calculation.
+
+No UI, live caller, purchase, recalculation, save field, migration or authoritative
+redirect is added. Save Contract V2 and simulation schema12 remain unchanged.
+Further shadow/live integration requires separate owner authorization.
