@@ -1,6 +1,8 @@
 class_name CombatActorDefinition
 extends RefCounted
 
+const AttributeRules = preload("res://scripts/combat/prime_v3_attribute_engine.gd")
+
 const REQUIRED_CORE_ATTRIBUTES := [
 	"str", "end", "spd", "dex", "wis", "int", "wit", "man", "luk", "app",
 ]
@@ -74,7 +76,22 @@ func has_resolved_field(field_name: String) -> bool:
 func get_combat_stat(field_name: String) -> Variant:
 	if not combat_stats.has(field_name):
 		return null
-	return combat_stats[field_name]
+	var stored: Variant = combat_stats[field_name]
+	if field_name == "ss" and typeof(stored) == TYPE_INT:
+		# Definition attributes are permanent; never inspect temporary actor effects.
+		var wisdom: Variant = attributes.get("wis")
+		var source: Variant = field_sources.get("attributes.wis", field_sources.get("attributes"))
+		if typeof(wisdom) == TYPE_INT and wisdom >= 0 and wisdom <= 35 \
+		and source is String and not source.is_empty() \
+		and not unresolved_fields.has("attributes.wis") and not unresolved_fields.has("attributes"):
+			# SS agrees in both printed modes. This reference mode grants no class,
+			# resource or ability permission; authored differences retain stored SS.
+			var reference := AttributeRules.lookup("WIS", wisdom, "mana")
+			var ss: Dictionary = reference.get("values", {}).get("SS", {})
+			if reference.get("success", false) and ss.get("kind") == "integer" \
+			and typeof(ss.get("value")) == TYPE_INT and ss.value == stored:
+				return ss.value
+	return stored
 
 
 func get_base_combat_stat(field_name: String) -> Variant:

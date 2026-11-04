@@ -317,3 +317,57 @@ physical defenses and two-client synchronization. Headless Godot 4.7.2 import
 and whitespace checks passed. Logs reported no ObjectDB leaks or retained-resource
 warnings. STR, engine/tables, allocation/development code and frozen source
 catalog/checksum files were compared with `51bd02e` and remain unchanged.
+
+## Guarded SS integration
+
+Baseline main `9f53821`. Only `CombatActorDefinition.get_combat_stat("ss")`
+changes its internal value source. Missing stored SS returns null as before.
+An integer stored SS is eligible for the engine reference only when permanent
+`attributes.wis` is an integer 0–35, attribute provenance is a nonempty string
+(`attributes.wis` or its existing general `attributes` source), and neither that
+attribute nor the attribute group is flagged unresolved. Otherwise return the
+original stored Variant unchanged, including nulls, types and authored exceptions.
+
+The engine reference must succeed, tag SS as an integer and match the stored
+integer exactly. Only then is its value returned. SS is identical across the
+two printed modes at all 36 scores, so the canonical Mana reference is not a
+class, resource-mode or ability inference. Unsupported reference values are not
+clamped, coerced or substituted. There is no new eligibility or recalculation.
+
+WIS 0 is the printed DEAD boundary in both modes. Its SS reference is nonnumeric;
+the guard keeps stored SS exactly and never converts DEAD to zero or executes
+an actor-death effect. Thus the 72 references comprise 70 numeric values and two
+DEAD tags, not 72 numeric SS values.
+
+Definition attributes hold the existing permanent inputs; temporary effects
+live separately in CombatActorState and are never inspected by this getter.
+Direct SS modifiers remain the responsibility of the existing effective-stat
+layer. No NAC SS/cast logic, roll bonus, RNG, action timing, ability pathway,
+save/projection or history code is changed. Boss Combat abilities still use
+their existing daily-use/AP pathway without a newly introduced SS roll.
+
+The exact previous getter is retained as a test reference. Focused checks cover
+72 independently hash-verified source SS references, matching and mismatching
+authored values, missing/malformed WIS, unknown provenance, unresolved fields,
+stored Variant/type preservation, temporary WIS and unrelated getters/modifiers.
+Actual Force Shield/Force Bolt and boss action snapshots/digests are captured
+before and after the implementation, without a production legacy-provider switch.
+Only disposable test output outside owner-save directories is written.
+
+No persistent fields, migrations, new UI, WIS purchasing or WIS/INIT/SPD
+integration is introduced. Save Contract V2 and schema12 are unchanged. Rollback
+restores the original stored-value return at this getter; no data reversal is
+required. Full regression and Web export remain owner-run checkpoints.
+
+Pre/post Force/boss outputs match exactly, SHA-256
+`bb852bc73e5c8e4da1e1ad904761adc88f18112526e82bb6745314834cf62775`.
+
+Validation: seventeen focused suites passed (guarded SS, both STR/DEX lookup
+suites, dormant engine, projection, both #37A suites, Force/NAC, boss Combat
+abilities and AI, character projection, desktop/browser persistence, backup
+export/preview and restoration, two-client synchronization, actor/actions).
+The independent source assertion exposed a test assumption that WIS0 was numeric;
+that expectation was corrected to the printed DEAD tag without changing runtime
+logic or source data. Final guarded tests and headless Godot 4.7.2 import passed;
+whitespace checks passed. Final runs reported no ObjectDB leaks or retained-resource
+warnings. Full regression and Web export were not run.
