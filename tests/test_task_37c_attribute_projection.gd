@@ -31,7 +31,9 @@ func _test_independent_source() -> void:
 			for primary: String in row.cells:
 				var expected: String = row.cells[primary]
 				var actual: Dictionary = result.primaries[primary].chart_reference
-				check(actual.printed_cell.replace(" ","") == expected.replace(" ","").replace("\n","") and actual.printed_page == row.printed_page,"Projected source cell/page mismatch: %s/%s/%s" % [mode,row.score,primary])
+				# Keep frozen numerical evidence intact; page metadata was corrected by owner.
+				var pages: Array = [51,52] if mode == "mana" else [53,54]
+				check(actual.printed_cell.replace(" ","") == expected.replace(" ","").replace("\n","") and actual.printed_page == pages[0 if int(row.score) <= 20 else 1],"Projected source cell/corrected printed page mismatch: %s/%s/%s" % [mode,row.score,primary])
 				comparisons += 1
 				var ids: Variant = source.component_order[primary]
 				if ids is Dictionary: ids = ids[mode]

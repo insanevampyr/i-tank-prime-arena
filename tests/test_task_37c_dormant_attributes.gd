@@ -32,7 +32,9 @@ func run() -> Array[String]:
 					continue
 				var raw: String = row.cells[primary]
 				check(result.success and result.printed_cell.replace(" ","") == raw.replace(" ","").replace("\n",""),"Printed cell differs: %s %s %s" % [mode,row.score,primary])
-				check(result.printed_page == row.printed_page and not result.grants_eligibility and not result.entitlements_granted,"Lookup must retain source and grant nothing.")
+				# Owner-corrected manuscript numbering; frozen extraction metadata is historical.
+				var pages: Array = [51,52] if mode == "mana" else [53,54]
+				check(result.printed_page == pages[0 if int(row.score) <= 20 else 1] and not result.grants_eligibility and not result.entitlements_granted,"Lookup must use corrected printed pages and grant nothing.")
 				comparisons += 1
 				var ids: Variant = fixture.component_order[primary]
 				if ids is Dictionary: ids = ids[mode]
@@ -74,6 +76,11 @@ func run() -> Array[String]:
 			check(Rules.lookup(primary,score,"mana").values == Rules.lookup(primary,score,"regular").values,"Only WIS/WIT printed columns differ by mode.")
 	check(Rules.lookup("WIS",10,"mana").values.has("MR/H") and not Rules.lookup("WIS",10,"regular").values.has("MR/H"),"Regular mode has no MR/H column.")
 	check(Rules.lookup("WIT",10,"mana").values.MNS.value == 16 and Rules.lookup("WIT",10,"regular").values.MRF.value == 3,"MNS and MRF are different source statistics.")
+	check(Rules.primary_descriptor("APP").name == "Appearance" and Rules.primary_descriptor("APP").definition_page == 24,"APP definition is printed p.24.")
+	for mode: String in ["mana","regular"]:
+		for descriptor: Dictionary in Rules.derived_descriptors("APP",mode).entries:
+			check(descriptor.definition_page == 24 and descriptor.governing_primary == "APP","PAR/CHA definitions must inherit APP printed p.24.")
+			check(descriptor.name == ("Personal Appearance Rating" if descriptor.abbreviation == "PAR" else "Charisma"),"Appearance-derived terminology remains exact.")
 	for score in [20,21,25,26,35]:
 		check(not Rules.lookup("STR",score,"mana").grants_eligibility,"High chart rows never grant magical/Immortality permissions.")
 	check(Rules.lookup("STR",21,"mana").eligibility == "qualifying_special_or_special_imbued_equipment_required" and Rules.lookup("STR",26,"mana").eligibility == "verified_immortality_required","Eligibility boundaries must be explicit.")

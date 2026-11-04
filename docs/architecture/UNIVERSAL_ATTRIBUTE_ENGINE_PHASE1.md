@@ -1,7 +1,9 @@
 # Universal attribute engine Phase 1
 
-Implemented as dormant rules queries only. No live calculation or UI call site
-is redirected; Save Contract V2, schema12, progression and gameplay are unchanged.
+Phase 1 introduced dormant rules queries; Phase 2A/B added isolated inspection.
+Phase 2C now delegates only the existing STR helper to the engine, preserving
+exact results and contracts. Earlier phase boundaries below describe their
+historical scope. Save Contract V2 and simulation schema12 remain unchanged.
 
 ## Interfaces
 
@@ -184,3 +186,72 @@ headless sample of ten explicit three-actor captures took 24,166 microseconds
 total (about 2.42ms per capture). This is not browser frame-time evidence or a
 claim of gameplay performance improvement. Full regression/Web export remain
 owner-run checkpoints; no live automatic diagnostic invocation is enabled.
+
+## Phase 2C — one authoritative STR lookup boundary
+
+Baseline main `19ac972`. Selected `PrimeV3StrengthChart.derived(strength: int)`;
+DEX ACC remains unchanged. The STR helper is called for approved permanent STR
+purchases, previews and hydration, not for general combat-time recalculation.
+DEX has additional active temporary-ACC/allocation consumers, so STR is the
+narrower first boundary. Neither helper should regenerate authored creature stats.
+
+Pre-change comparison proved 120 scalar matches: STR1–20, SB/PPG/MWC, both printed
+Mana/Regular columns. Only the value source is replaced: the helper delegates
+to `PrimeV3AttributeEngine.lookup("STR", strength, "mana")` and adapts integer
+components back to the same `success/sb/ppg/mwc` dictionary. Both printed STR
+columns agree; this fixed reference mode does not reclassify the character.
+The same typed int argument, 1–20 guard and exact failure dictionary remain.
+Chart scores0/21–35, magic/Immortality permissions, prices, source-mismatch gates,
+equipment requirements and resource state are not newly admitted or changed.
+
+The original `ROWS` constant is frozen in place. The previous three-statement
+implementation is preserved in `tests/test_task_37c_authoritative_strength.gd`
+as `legacy_derived`, with exhaustive complete-return/source comparisons. Rollback
+requires only restoring `derived()` to that body and removing its unused Rules
+preload; no saves, receipts, authored definitions or source snapshots need changes.
+The Phase 2B STR diagnostic now compares the current helper against the universal
+reference; independent old-versus-new evidence comes from this frozen legacy
+implementation and the independent source catalog, not from that diagnostic alone.
+
+New focused coverage checks 120 source components, identical whole dictionaries,
+invalid integer boundaries, unchanged public argument/return types, output
+isolation, the STR11→12 SB threshold, independent temporary SB, spent resources,
+RNG/events and authored Guard/Goblin exceptions. Both source-catalog files and all
+attribute-engine/table files remain untouched.
+
+A separate isolated native replay was captured before editing the helper and
+repeated after replacement. It exercised existing #37B purchase transactions
+and actual Guard/Vaelis ArenaCombatSession movement/attack/defense pipelines,
+including two-client digest assertions. Canonical outputs matched exactly:
+SHA-256 `91007a3d981502a7f032528ff0f682e96ea02a22899050f803c35c79f959f9f0`.
+The temporary diagnostic outputs were written outside the repository and player
+save directories. No legacy-provider switch was added to production gameplay.
+
+Further DEX integration remains separately gated. END/WIS history, MAN/Luck
+entitlements, general encumbrance and new character-development operations retain
+their prior approval/compatibility boundaries; this change enables none of them.
+
+Phase 2C validation: fifteen focused suites passed: the new authoritative STR
+suite; projection/dormant engine; both #37B and both #37A suites; character profile
+projection; backup export/preview and restoration; native playable-browser
+persistence tests; inventory/equipment; physical damage; two-client sync; equipment
+foundation. Headless Godot 4.7.2 import and whitespace checks passed, with no
+ObjectDB/retained-resource warnings in these runs. Desktop playable persistence
+is exercised by #37B; native browser-adapter coverage does not establish new real
+browser acceptance. Full regression and Web export remain owner checkpoints.
+
+Owner-confirmed Phase 2C metadata correction: chart references use manuscript
+printed pages 51/52 for Mana scores 0–20/21–35, and 53/54 for Regular scores
+0–20/21–35. APP, PAR and CHA definitions use printed p.24. Exact terminology and
+all chart values are unchanged. Frozen audit catalogs/checksums retain their
+historical page metadata; tests continue using their independent numerical
+evidence while asserting corrected printed references separately. These
+corrections supersede the old page-number descriptions above without rewriting
+source snapshots.
+
+Metadata correction checks passed: authoritative STR, dormant chart/terminology,
+read-only projection and both #37B suites (five focused suites, exit 0). All 648
+cells/1,620 components and 120 STR mode comparisons still match; corrected page
+metadata and APP/PAR/CHA names/pages are asserted explicitly. Whitespace checks
+passed. The existing Phase 2C validation above remains applicable to unchanged
+gameplay and persistence behavior; no separate full regression/export was run.

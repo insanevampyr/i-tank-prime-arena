@@ -25,7 +25,7 @@ const COMPONENTS := {
 	"DEX":["ACC"], "INT":["S#","SCM","MIUR"], "LUK":["RB","RR/G","ToF"],
 	"APP":["PAR","CHA"], "MAN":["AP","KP"],
 }
-const DEFINITION_PAGES := {"STR":19,"END":19,"SPD":19,"DEX":20,"WIS":20,"INT":21,"WIT":21,"MAN":22,"LUK":23,"APP":23}
+const DEFINITION_PAGES := {"STR":19,"END":19,"SPD":19,"DEX":20,"WIS":20,"INT":21,"WIT":21,"MAN":22,"LUK":23,"APP":24}
 
 static func primary_descriptor(primary: String) -> Dictionary:
 	if not PRIMARY_NAMES.has(primary): return _fail("unknown_primary_attribute")
@@ -66,7 +66,7 @@ static func lookup(primary: String, score: Variant, mode: String) -> Dictionary:
 		values["DT"] = {"kind":"allocation_required"}
 		values["DP"] = {"kind":"allocation_required"}
 	return {"success":true,"primary":primary,"score":score,"mode":mode,"printed_cell":raw,
-		"printed_page":(53 if score <= 20 else 54) if mode == "mana" else (55 if score <= 20 else 56),
+		"printed_page":(51 if score <= 20 else 52) if mode == "mana" else (53 if score <= 20 else 54),
 		"outcome":"dead" if raw == "DEAD" else "values","values":values,
 		"grants_eligibility":false,"eligibility":_eligibility(score),
 		"entitlements_granted":false}
