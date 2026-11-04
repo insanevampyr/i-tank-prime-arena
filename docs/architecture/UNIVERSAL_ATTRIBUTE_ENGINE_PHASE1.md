@@ -115,3 +115,72 @@ unchanged; no source exception was silently converted into a chart calculation.
 No UI, live caller, purchase, recalculation, save field, migration or authoritative
 redirect is added. Save Contract V2 and simulation schema12 remain unchanged.
 Further shadow/live integration requires separate owner authorization.
+
+## Phase 2B — explicit combat boundary diagnostics
+
+`AttributeShadowComparison.capture(simulation, modes, exceptions)` is an opt-in
+development/test entry point. Modes explicitly map existing actor IDs to `mana`
+or `regular`; exception annotations are source descriptions supplied by the
+diagnostic caller, never inferred from character names. The registered shadow
+test calls it after real ArenaCombatSession initialization and after completed
+combat test steps. No session, action, tick, movement, UI, event or persistence
+hook calls it automatically. There is no production logging or report storage.
+
+The boundary reads each requested actor/state and the existing read-only
+`get_effective_actor_combat_stat`, then reuses the Phase 2A projection. It never
+uses chart references as effective inputs. Reports distinguish exact base/chart
+matches, numeric mismatches, explicitly annotated authored exceptions, missing
+comparisons and nonnumeric/allocation-dependent references. An annotation does
+not hide the numeric difference and a mismatch never labels gameplay defective.
+Guard NAL1/chart2 and Goblin SB0/chart1 remain approved authored data.
+
+Stored base, stored calculated, equipment, source-qualified temporary effects,
+recorded allocations and supplied runtime effective values remain separate.
+Registered defense/protection profiles are copied for inspection; location TAL,
+racial NAL and damage-type responses are not collapsed into END-chart NAL. SR/TB
+remain independent, without a derived-chart comparison. Encumbrance is explicitly
+unavailable as a separate verified weight ledger; no zero-weight assumption or
+new penalties are created. The report does not recompute final ACC, SS, initiative,
+damage, Dodge geometry, Running, resource history, or entitlements.
+
+Missing actor/mode/primary/provenance stops capture with a diagnostic failure;
+missing derived values remain unavailable. This failure affects only the caller's
+report, never combat permission. Capture requires existing `attributes` and
+`combat_stats` source descriptions and does not grant unverified provenance.
+Work is bounded to 32 explicitly requested actors, 64 effects per actor and 512
+inventory/history/development records per inspected collection. These limits are
+diagnostic budgets, not gameplay capacities. Capture does not copy full encounter
+logs or attach to recurring callbacks. Long histories outside the budget require
+a separately scoped diagnostic, not arbitrary truncation.
+
+`compare_legacy_lookups()` is a separate fixed 192-comparison query over old STR
+1–20 and DEX ACC0–35 helpers in both modes. It records both values and comparison
+classification, without actors or combat calls. Independent chart correctness
+remains covered by the hash-verified Phase 1/2A source-fixture tests.
+
+Integration audit anchors: `CombatActorDefinition.apply_equipment_stat_modifiers`
+separates authored base from equipment; simulation `get_effective_actor_combat_stat`
+adds development/timed effects, while initiative, SS, some reaction ACC and MR
+consumers also read definitions directly. Therefore no getter replacement is
+safe as a global integration shortcut. Existing defense planner, final legality,
+damage pipeline and separate Running model remain authoritative and untouched.
+The test-only boundary observes these existing results without changing any of
+their inputs, event timing or source-qualified exceptions.
+
+No persistent fields, save/backup changes, network messages or snapshot fields
+are added. Save Contract V2 and schema12 remain unchanged. Read-only capture has
+no reference to storage services. Future authoritative replacements still require
+individual owner approval and the compatibility/history work in the Phase 2 plan.
+
+Phase 2B validation: eight focused suites passed (shadow, projection, dormant
+engine, both #37A suites, physical defenses, prone combat and two-client sync).
+Enabled/disabled real Guard/Vaelis duel sessions produced identical complete
+snapshots and synchronization digests; repeated same-seed runs matched. The
+isolated existing leveled/purchased profile produced the exact same canonical
+save envelope before/after capture, with damaged Shield SHP retained. No storage
+operations were invoked. Headless Godot 4.7.2 import and whitespace checks passed;
+final logs reported no ObjectDB leaks or retained-resource warnings. A native
+headless sample of ten explicit three-actor captures took 24,166 microseconds
+total (about 2.42ms per capture). This is not browser frame-time evidence or a
+claim of gameplay performance improvement. Full regression/Web export remain
+owner-run checkpoints; no live automatic diagnostic invocation is enabled.
