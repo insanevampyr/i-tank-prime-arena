@@ -1,8 +1,9 @@
 # Universal attribute engine Phase 1
 
 Phase 1 introduced dormant rules queries; Phase 2A/B added isolated inspection.
-Phase 2C now delegates only the existing STR helper to the engine, preserving
-exact results and contracts. Earlier phase boundaries below describe their
+Phase 2C delegated the existing STR helper; Phase 2D delegates only the existing
+DEX ACC helper as well, preserving exact results and contracts. Earlier phase
+boundaries below describe their
 historical scope. Save Contract V2 and simulation schema12 remain unchanged.
 
 ## Interfaces
@@ -255,3 +256,64 @@ cells/1,620 components and 120 STR mode comparisons still match; corrected page
 metadata and APP/PAR/CHA names/pages are asserted explicitly. Whitespace checks
 passed. The existing Phase 2C validation above remains applicable to unchanged
 gameplay and persistence behavior; no separate full regression/export was run.
+
+## Phase 2D — authoritative DEX ACC lookup only
+
+Baseline main `51bd02e`. The single boundary is
+`PrimeV3DexChart.accuracy(effective_dex: int, chart: String) -> Variant`.
+The public return is an integer or null, not an engine-result dictionary.
+`DexAllocation.derived` retains its existing consumer dictionary unchanged.
+
+Before editing production, all 72 values (scores 0–35 in Mana and Regular) were
+compared against the original ACC array, universal tables and independent
+hash-verified source catalog. Every comparison matched. The helper now delegates
+only its valid value branch to `PrimeV3AttributeEngine.lookup(...).values.ACC.value`.
+Its exact mode/range guard remains in place: unsupported modes/scores return null,
+without defaulting, normalization, clamping or new eligibility permission.
+Score 0 remains valid ACC 0; scores 21–35 retain their prior lookup-only meaning.
+
+The original ACC array remains frozen. The exact previous two-statement body is
+preserved in `tests/test_task_37c_authoritative_dex_accuracy.gd::legacy_accuracy`.
+Rollback replaces the helper body with those statements and removes its unused
+Rules preload; no saves, allocations or receipts require reversal. Phase 2B's
+helper/reference diagnostic now compares both current adapters against the engine;
+independent legacy evidence remains in the Phase 2C/2D frozen-reference tests.
+
+Audited consumers: `DexAllocation.derived`; simulation development commands and
+`get_effective_actor_combat_stat`; profile hydration. Allocation state supplies
+effective DEX; simulation preserves its existing DEX-to-ACC lookup followed by
+direct ACC modifiers. No consumer, modifier, DT/DP calculation, authored base ACC,
+character admission, pricing, equipment or movement code was redirected or edited.
+This delegation adds no allocation grants, automatic actor recalculation, events,
+RNG draws, network fields or persistent fields. It does not infer engine metadata
+or high-score permission from a returned numeric ACC.
+
+Focused coverage retains all 72 scalar and whole consumer-dictionary results,
+invalid mode/range nulls, int/String→Variant static signature, current 6/3 and
+historical 3/6 splits, positive temporary DEX/direct ACC ordering, expiry, effective
+DEX 36 rejection, unchanged snapshots/events/RNG and authored Guard/Goblin values.
+STR and source snapshot files remain unchanged from the baseline.
+
+An isolated pre/post native replay additionally covers existing #37A allocation
+commands, temporary DEX and two-client digest checks, a leveled/purchased profile
+with validated optional development and damaged Shield, canonical save encoding
+and hydration, and real Guard/Vaelis ArenaCombatSession attacks/defenses/movement.
+Only disposable test outputs outside player-save directories are used. No legacy
+provider switch or test-only permissions are added to production.
+
+The pre/post canonical outputs matched exactly, SHA-256
+`7ff307993ec35751520f6def84b17b180c5b26dd3d57169d772c0497a0f8d6bc`.
+
+DT/DP allocation/effective Dodge integration and all other attribute/history
+systems retain their existing scope and owner-approval boundaries. Save Contract
+V2 and simulation schema12 are unchanged. Full regression/Web export remain
+owner-run checkpoints; native browser-adapter tests do not prove new browser QA.
+
+Phase 2D validation: sixteen focused suites passed: new DEX ACC, existing STR,
+dormant engine, projection, both #37A and both #37B suites, character profile
+projection, backup export/preview and restoration, native playable-browser
+persistence, desktop Vaelis persistence, opening initiative/physical attacks,
+physical defenses and two-client synchronization. Headless Godot 4.7.2 import
+and whitespace checks passed. Logs reported no ObjectDB leaks or retained-resource
+warnings. STR, engine/tables, allocation/development code and frozen source
+catalog/checksum files were compared with `51bd02e` and remain unchanged.
