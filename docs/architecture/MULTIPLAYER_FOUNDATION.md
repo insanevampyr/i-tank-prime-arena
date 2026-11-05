@@ -10,6 +10,17 @@ No socket, HTTP, WebSocket, WebRTC, RPC, lobby, matchmaking, prediction, rollbac
 
 ## Future transport path
 
+### Owner-approved future lobby scope — documentation only
+
+The host creates an Arena with a unique room code and chooses Public or Private.
+Public rooms appear in a simple room list; private rooms are accessible only by
+their code. Players join the lobby, select characters and mark Ready. The host
+starts only once everyone is ready. Party membership is locked for the run:
+no joining an active wave or ongoing Arena run. Reconnection for existing members
+requires a separate future decision. No matchmaking, skill rankings, queues or
+automatic team assignment are planned in this scope. None of these lobby or
+network features is implemented by the dormant Profile V3 storage work.
+
 1. Keep the current combat event dictionary as the versioned protocol payload, adding an explicit protocol version before external transport is introduced.
 2. Serialize authoritative envelopes at the host boundary. Validate sequence, identity, schema, size, and permitted fields before a client accepts them.
 3. Deliver envelopes over a transport adapter. Desktop hosts may support transports unavailable to browsers; browser clients should use a supported client transport such as secure WebSocket or WebRTC.

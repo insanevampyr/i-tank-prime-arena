@@ -6,6 +6,11 @@ const CombatShadowTests = preload("res://tests/test_task_37c_combat_shadow.gd")
 const AuthoritativeStrengthTests = preload("res://tests/test_task_37c_authoritative_strength.gd")
 const AuthoritativeDexAccuracyTests = preload("res://tests/test_task_37c_authoritative_dex_accuracy.gd")
 const GuardedSsTests = preload("res://tests/test_task_37c_guarded_ss.gd")
+const DeadAttributeEvaluatorTests = preload("res://tests/test_task_37c_dead_attribute_evaluator.gd")
+const LifeStateHistoryTests = preload("res://tests/test_task_37c_life_state_history.gd")
+const DeathMultiplayerLifecycleTests = preload("res://tests/test_task_37c_death_multiplayer_lifecycle.gd")
+const ProfileV3CompatibilityTests = preload("res://tests/test_task_37c_profile_v3_compatibility.gd")
+const DisposableV3StorageTests = preload("res://tests/test_task_37c_disposable_v3_storage.gd")
 
 const CombatFoundationTests = preload("res://tests/test_combat_foundation.gd")
 const StrengthAdvancementTests = preload("res://tests/test_task_37b_strength.gd")
@@ -96,6 +101,11 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 37C disposable Profile V3 storage", "instance":DisposableV3StorageTests.new()},
+		{"name":"Task 37C dormant DEAD attribute evaluator", "instance":DeadAttributeEvaluatorTests.new()},
+		{"name":"Task 37C dormant life-state history", "instance":LifeStateHistoryTests.new()},
+		{"name":"Task 37C dormant death multiplayer lifecycle", "instance":DeathMultiplayerLifecycleTests.new()},
+		{"name":"Task 37C dormant Profile V3 compatibility", "instance":ProfileV3CompatibilityTests.new()},
 		{"name":"Task 37C guarded SS", "instance":GuardedSsTests.new()},
 		{"name":"Task 37C authoritative DEX accuracy", "instance":AuthoritativeDexAccuracyTests.new()},
 		{"name":"Task 37C authoritative STR lookup", "instance":AuthoritativeStrengthTests.new()},
