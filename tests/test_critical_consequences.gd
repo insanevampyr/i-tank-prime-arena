@@ -11,6 +11,11 @@ func run() -> Array[String]:
 	_test_pending_perfect_evasion_waits_for_destination()
 	_test_rare_shield_contact_and_reaction_boundary()
 	_test_reaction_chain_and_two_client_sync()
+	_test_reaction_current_line_of_sight()
+	_test_reaction_unverified_line_of_sight()
+	_test_reaction_current_effective_accuracy()
+	_test_reaction_existing_legality_gates()
+	_test_reaction_fresh_roll_defenses_and_replay()
 	_test_backfire_and_weapon_specific_gates()
 	return _failures
 
@@ -192,6 +197,7 @@ func _test_reaction_chain_and_two_client_sync() -> void:
 	var harness := TwoClientSyncHarness.new(seed_value)
 	var simulation: CombatSimulation = harness.authority.simulation
 	var damage := CombatPhysicalDamageDefinition.new(1, 1, 0, false, true)
+	simulation.set_attack_final_line_of_sight_resolver(func(_source: StringName, _target: StringName) -> bool: return true) # Open fixture geometry.
 	simulation.register_actor(_actor(&"attacker", 100, PackedStringArray(["fixture_weapon"])))
 	simulation.register_actor(_actor(&"target", 0, PackedStringArray()))
 	_register_no_defense(simulation, &"target")
@@ -218,8 +224,258 @@ func _test_reaction_chain_and_two_client_sync() -> void:
 	_expect_equal(harness.client_a.get_state_digest(), harness.authority.get_state_digest(), "Client critical-chain state must match the authoritative digest.")
 
 
+# Task 39A/39B: assert the approved legality contract without weakening it.
+# The follow-up is earned by a real Uncommon parent critical and stays deferred
+# until that parent's defenses/damage finish. No private reaction call or RNG stub.
+func _test_reaction_current_line_of_sight() -> void:
+	for change: String in ["wall_appears", "target_moves_behind_wall"]:
+		var fixture := _reaction_legality_fixture()
+		var simulation: CombatSimulation = fixture.simulation
+		if change == "wall_appears":
+			fixture.los_context.battlefield = ArenaBattlefield.new(
+				Rect2i(-2_000_000, -2_000_000, 12_000_000, 12_000_000),
+				[{"id": "new_wall", "rect_microfeet": Rect2i(2_000_000, -1_000_000, 500_000, 2_000_000)}]
+			)
+		else:
+			_expect_true(simulation.apply_authoritative_position(&"target", Vector2i(4_000_000, 3_000_000), 0, 3_000_000).success, "39A: target movement before the deferred reaction must be legal.")
+		var battlefield: ArenaBattlefield = fixture.los_context.battlefield
+		_expect_true(not battlefield.has_line_of_sight(simulation.get_actor_state(&"attacker").position_microfeet, simulation.get_actor_state(&"target").position_microfeet), "39A: actual wall geometry must obstruct current LOS.")
+		var draws_before := simulation.random.get_draw_count()
+		_finish_reaction_parent(fixture)
+		_expect_reaction_unavailable(fixture, draws_before + 1, "39A %s: current blocked LOS" % change)
+		# The same current geometry already blocks an ordinary attack before ACC.
+		var ordinary := simulation.start_physical_attack(&"attacker", &"target", fixture.definition, "39a_wall_control", &"torso", true)
+		_expect_true(ordinary.success, "39A: the ordinary approach-attack declaration must remain legal.")
+		if ordinary.success:
+			var ordinary_draws := simulation.random.get_draw_count()
+			simulation.advance_to(2_000_000)
+			var resolved := simulation.get_attack(ordinary.attack_instance_id)
+			_expect_equal(resolved.final_legality_reason, "line_of_sight_blocked_at_resolution", "39A: ordinary final legality must reject the same current wall.")
+			_expect_equal(resolved.natural_roll, null, "39A: ordinary blocked LOS must prevent ACC.")
+			_expect_equal(simulation.random.get_draw_count(), ordinary_draws, "39A: the ordinary blocked-LOS control must consume no RNG.")
+
+	# Registration really occurs behind the wall; the target then moves clear
+	# before the ordinary parent begins. A stale false must not veto fresh LOS.
+	var cleared := _reaction_legality_fixture(20, false)
+	_finish_reaction_parent(cleared)
+	_expect_equal(_count_events(cleared.simulation, &"critical_reaction_attack_declared"), 1, "39A cleared wall: current clear LOS must supersede stale blocked registration.")
+
+
+func _test_reaction_current_effective_accuracy() -> void:
+	for values: Array in [[4, 6, 10, true], [12, -6, 6, false]]:
+		var fixture := _reaction_legality_fixture(int(values[0]))
+		var simulation: CombatSimulation = fixture.simulation
+		# Source-qualified, isolated direct-ACC effect fixture, not a new ability.
+		simulation.get_actor_state(&"attacker").timed_stat_effects["39a_temporary_acc"] = {
+			"source_action_instance_id": "39a_effect_activation",
+			"source_ref": "TEST-FIXTURE temporary ACC modifier",
+			"stat_modifiers": {"acc": int(values[1])},
+			"expires_at_us": 10_000_000,
+		}
+		_expect_equal(simulation.get_effective_actor_combat_stat(&"attacker", "acc"), values[2], "39A: effective ACC must include the active signed modifier.")
+		_finish_reaction_parent(fixture)
+		var reaction := _reaction_attack(simulation)
+		_expect_true(reaction != null, "39A: a valid ACC modifier must not suppress a legal reaction.")
+		if reaction == null:
+			continue
+		_expect_equal(reaction.natural_roll, 8, "39A: the reaction must use its own seeded noncritical ACC roll.")
+		_expect_equal(reaction.base_acc, values[2], "39A: reaction ACC must use the current effective value, not stored ACC %d." % int(values[0]))
+		_expect_equal(reaction.accuracy_success, values[3], "39A: temporary ACC must affect the reaction's actual hit/miss result.")
+		var ordinary := simulation.start_physical_attack(&"attacker", &"target", fixture.definition, "39a_effective_ordinary", &"torso", true)
+		_expect_true(ordinary.success, "39A: an ordinary attack under the same effect must remain legal.")
+		if ordinary.success:
+			_expect_equal(simulation.get_attack(ordinary.attack_instance_id).base_acc, values[2], "39A: the ordinary attack is the effective-ACC control at the same time.")
+
+
+func _test_reaction_unverified_line_of_sight() -> void:
+	for geometry: String in ["missing", "unresolved", "not_required"]:
+		var fixture := _reaction_legality_fixture()
+		var simulation: CombatSimulation = fixture.simulation
+		simulation.set_attack_final_line_of_sight_resolver(Callable())
+		if geometry == "unresolved":
+			simulation.set_attack_final_line_of_sight_resolver(func(_source: StringName, _target: StringName) -> Variant: return null)
+		elif geometry == "not_required":
+			fixture.definition.requires_line_of_sight = false
+		var draws_before := simulation.random.get_draw_count()
+		_finish_reaction_parent(fixture)
+		if geometry == "not_required":
+			_expect_equal(_count_events(simulation, &"critical_reaction_attack_declared"), 1, "39B: an attack that does not require LOS must not acquire a new LOS restriction.")
+			_expect_equal(simulation.random.get_draw_count(), draws_before + 2, "39B: a legal no-LOS reaction must retain its fresh ACC roll.")
+		else:
+			_expect_reaction_unavailable(fixture, draws_before + 1, "39B %s geometry" % geometry)
+			_expect_equal(simulation.get_critical_records()[0].consequence_reason, "critical_reaction_line_of_sight_unverified", "39B: missing or unresolved current geometry must fail closed with an explicit reason.")
+
+
+func _test_reaction_existing_legality_gates() -> void:
+	for gate: String in ["range", "equipment", "awareness", "defeated_reactor"]:
+		var fixture := _reaction_legality_fixture()
+		var simulation: CombatSimulation = fixture.simulation
+		match gate:
+			"range":
+				_expect_true(simulation.apply_authoritative_position(&"target", Vector2i(6_000_000, 0), 0, 2_000_000).success, "39A: out-of-reach fixture movement must succeed.")
+			"equipment":
+				# Isolated post-parent-ACC equipment-loss fixture; no new equipment rule.
+				simulation.get_actor_state(&"attacker").equipment_refs.remove_at(0)
+			"awareness":
+				simulation.set_actor_defense_state(&"attacker", &"unaware", PackedStringArray())
+			"defeated_reactor":
+				simulation.get_actor_state(&"attacker").current_hpc = 0
+		var draws_before := simulation.random.get_draw_count()
+		_finish_reaction_parent(fixture)
+		_expect_reaction_unavailable(fixture, draws_before + 1, "39A %s gate" % gate)
+		var reasons := {
+			"range": "critical_reaction_target_out_of_range", "equipment": "critical_reaction_weapon_not_equipped",
+			"awareness": "critical_reaction_awareness_restricted", "defeated_reactor": "critical_reaction_actor_not_eligible",
+		}
+		_expect_equal(simulation.get_critical_records()[0].consequence_reason, reasons[gate], "39A: unavailable reaction must retain the actual legality reason.")
+
+
+func _test_reaction_fresh_roll_defenses_and_replay() -> void:
+	# Replay the unchanged legal path and both corrected paths. The preceding
+	# tests independently verify legality; snapshot equality verifies determinism.
+	for scenario: String in ["legal_block", "blocked_los", "effective_acc"]:
+		var replays: Array[Dictionary] = []
+		for replay_index in range(2):
+			var fixture := _reaction_legality_fixture(20, true, scenario == "legal_block")
+			var simulation: CombatSimulation = fixture.simulation
+			if scenario == "blocked_los":
+				simulation.apply_authoritative_position(&"target", Vector2i(4_000_000, 3_000_000), 0, 3_000_000)
+			elif scenario == "effective_acc":
+				simulation.get_actor_state(&"attacker").timed_stat_effects["39a_replay_acc"] = {"source_ref": "TEST-FIXTURE", "stat_modifiers": {"acc": -14}, "expires_at_us": 10_000_000}
+			_finish_reaction_parent(fixture)
+			var reaction := _reaction_attack(simulation)
+			if scenario == "legal_block":
+				_expect_true(reaction != null, "39A: unchanged legal reaction must execute.")
+				if reaction != null:
+					_expect_equal(reaction.natural_roll, 8, "39A: follow-up must roll fresh ACC instead of inheriting the parent's natural 1.")
+					_expect_equal(reaction.rng_draw_index, 6, "39A: the reaction ACC must follow opening, parent ACC/rarity and parent Block draws.")
+					_expect_equal(reaction.action_instance_id, "", "39A: zero-Act reaction must not create an ordinary action.")
+					_expect_equal(reaction.status, CombatAttackInstance.STATUS_PENDING_DEFENSE, "39A: reaction ACC success must wait for normal defenses.")
+					var defense := simulation.resolve_pending_defense(reaction.attack_instance_id, "39a_reaction_block")
+					_expect_true(defense.success, "39A: the reaction must accept ordinary legal defenses.")
+					var resolved := simulation.get_defense_resolution(reaction.defense_resolution_id)
+					_expect_equal(resolved.successful_defense_type, &"weapon_block", "39A: a normal weapon Block must defend the reaction.")
+					var rolled: Array = resolved.attempts.filter(func(attempt: CombatDefenseAttempt) -> bool: return attempt.eligibility == CombatDefenseAttempt.ATTEMPTED)
+					_expect_equal(rolled.size(), 1, "39A: successful Block must stop further defense rolls.")
+					if not rolled.is_empty():
+						_expect_equal(rolled[0].natural_roll, 6, "39A: the reaction's normal defense must use a separate fresh d20.")
+					_expect_equal(simulation.get_actor_state(&"target").current_hpc, 30, "39A: successfully defended parent and reaction must cause no damage.")
+					_expect_equal(simulation.random.get_draw_count(), 7, "39A: only opening, parent ACC/rarity/Block and reaction ACC/Block may draw RNG.")
+					var draws_before := simulation.random.get_draw_count()
+					var events_before := simulation.get_resolved_events().size()
+					simulation.resolve_pending_defense(reaction.attack_instance_id, "39a_reaction_block")
+					_expect_equal(simulation.random.get_draw_count(), draws_before, "39A: duplicate defense request must not roll again.")
+					_expect_equal(simulation.get_resolved_events().size(), events_before, "39A: duplicate defense request must not create another reaction/event.")
+			var harness: TwoClientSyncHarness = fixture.harness
+			var envelopes := harness.authority.publish_current_events()
+			for envelope: CombatEventEnvelope in envelopes:
+				harness.client_a.receive(envelope)
+			for index in range(envelopes.size() - 1, -1, -1):
+				harness.client_b.receive(envelopes[index])
+			_expect_true(harness.compare_clients().success, "39A %s: in-order and reversed delivery must converge." % scenario)
+			_expect_equal(harness.client_a.get_state_digest(), harness.authority.get_state_digest(), "39A: simulated clients must match authority on legal and rejected reaction paths.")
+			var events: Array = []
+			for event: CombatEvent in simulation.get_resolved_events():
+				events.append(event.to_dictionary())
+				if event.event_type == &"critical_reaction_attack_declared":
+					_expect_equal(event.parent_event_id, simulation.get_critical_records()[0].event_id, "39A: reaction declaration must retain its critical cause.")
+					_expect_equal(event.payload.ordinary_act_cost, 0, "39A: reaction must remain zero ordinary Acts.")
+					_expect_equal(event.payload.counts_as_nac, false, "39A: reaction must remain separate from NACs.")
+			_expect_equal(simulation.clock.get_elapsed_us(), 1_000_000, "39A: reactions must not refund or add to the parent's 5/AT interval.")
+			replays.append({"snapshot": simulation.get_state_snapshot(), "events": events, "digest": harness.authority.get_state_digest()})
+		_expect_equal(replays[0], replays[1], "39A %s: same-seed replay must preserve RNG state, events and complete snapshot/digest." % scenario)
+
+
+func _reaction_legality_fixture(stored_acc: int = 20, registration_clear: bool = true, with_block: bool = false) -> Dictionary:
+	var harness := TwoClientSyncHarness.new(_seed_for_reaction_legality(with_block))
+	var simulation: CombatSimulation = harness.authority.simulation
+	var attacker := _actor(&"attacker", 100, PackedStringArray(["fixture_weapon"]))
+	attacker.combat_stats.acc = stored_acc
+	simulation.register_actor(attacker)
+	simulation.register_actor(_actor(&"target", 0, PackedStringArray(["block_weapon"]) if with_block else PackedStringArray()))
+	if with_block:
+		var block := CombatBlockDefinition.new(CombatBlockDefinition.TYPE_WEAPON, &"block_weapon", 20, 0, true)
+		simulation.register_defense_profile(&"target", CombatDefenseProfile.new(&"39a_block", PackedStringArray(["weapon_block", "dodge", "shield_block", "physical_soak"]), {}, block))
+	else:
+		_register_no_defense(simulation, &"target")
+	simulation.register_damage_protection_profile(&"target", CombatDamageProtectionProfile.new(&"39a_protection"))
+	var los_context := {"battlefield": ArenaBattlefield.new(
+		Rect2i(-2_000_000, -2_000_000, 12_000_000, 12_000_000),
+		[{"id": "side_wall", "rect_microfeet": Rect2i(2_000_000, 1_000_000, 500_000, 1_000_000)}]
+	)}
+	var simulation_ref: WeakRef = weakref(simulation) # Avoid a Callable/RefCounted cycle.
+	simulation.set_attack_final_line_of_sight_resolver(func(source_id: StringName, target_id: StringName) -> bool:
+		var current := simulation_ref.get_ref() as CombatSimulation
+		return los_context.battlefield.has_line_of_sight(current.get_actor_state(source_id).position_microfeet, current.get_actor_state(target_id).position_microfeet)
+	)
+	simulation.apply_authoritative_position(&"target", Vector2i(4_000_000, 0 if registration_clear else 3_000_000), 0)
+	var definition := _attack(&"39a_follow_up", &"fixture_weapon", CombatPhysicalDamageDefinition.new(1, 1, 1, false, true))
+	_expect_true(simulation.register_critical_reaction_attack(&"attacker", definition, registration_clear).success, "39A: reaction registration must succeed.")
+	if not registration_clear:
+		_expect_true(not los_context.battlefield.has_line_of_sight(Vector2i.ZERO, Vector2i(4_000_000, 3_000_000)), "39A: stale-false fixture must initially be obstructed.")
+		simulation.apply_authoritative_position(&"target", Vector2i(4_000_000, 0), 0)
+	simulation.begin_combat()
+	var started := simulation.start_physical_attack(&"attacker", &"target", definition, "39a_parent", &"torso", true)
+	_expect_true(started.success, "39A: parent attack must start legally.")
+	simulation.advance_to(1_000_000)
+	var parent := simulation.get_attack(started.attack_instance_id)
+	_expect_equal(parent.status, CombatAttackInstance.STATUS_PENDING_DEFENSE, "39A: parent ACC must complete before changing the deferred reaction's context.")
+	_expect_equal(simulation.get_critical_records()[0].outcome_id, &"relentless_follow_up", "39A: fixture must earn an actual Uncommon follow-up.")
+	_expect_equal(_count_events(simulation, &"critical_reaction_attack_declared"), 0, "39A: reaction must wait until the parent becomes terminal.")
+	return {"harness": harness, "simulation": simulation, "parent": parent, "definition": definition, "los_context": los_context, "with_block": with_block}
+
+
+func _finish_reaction_parent(fixture: Dictionary) -> void:
+	var simulation: CombatSimulation = fixture.simulation
+	_expect_true(simulation.resolve_pending_defense(fixture.parent.attack_instance_id, "39a_parent_defense").success, "39A: parent defenses must resolve through the normal transaction.")
+	if not fixture.with_block:
+		_expect_true(simulation.resolve_physical_damage(fixture.parent.attack_instance_id, "39a_parent_damage").success, "39A: parent damage must finish before the follow-up executes.")
+
+
+func _expect_reaction_unavailable(fixture: Dictionary, expected_draws: int, context: String) -> void:
+	var simulation: CombatSimulation = fixture.simulation
+	_expect_equal(_count_events(simulation, &"critical_reaction_attack_declared"), 0, "%s must reject the reaction before ACC." % context)
+	_expect_equal(_count_events(simulation, &"critical_effect_unavailable"), 1, "%s must explicitly record the unavailable effect." % context)
+	_expect_equal(simulation.random.get_draw_count(), expected_draws, "%s must consume only the already-earned parent damage draw, no reaction ACC." % context)
+	_expect_equal(fixture.parent.status, CombatAttackInstance.STATUS_DAMAGE_RESOLVED, "39A: unavailable reaction must not undo finalized parent damage.")
+	_expect_equal(simulation.get_actor_state(&"target").current_hpc, 29, "39A: unavailable reaction must preserve the parent's resolved one damage.")
+	_expect_equal(simulation.clock.get_elapsed_us(), 1_000_000, "39A: unavailable reaction must not refund spent Act time.")
+
+
+func _reaction_attack(simulation: CombatSimulation) -> CombatAttackInstance:
+	for event: CombatEvent in simulation.get_resolved_events():
+		if event.event_type == &"critical_reaction_attack_declared":
+			return simulation.get_attack(event.payload.attack_instance_id)
+	return null
+
+
+func _seed_for_reaction_legality(with_block: bool) -> int:
+	for seed_value in range(1, 2_000_000):
+		var preview := DeterministicCombatRng.new(seed_value)
+		preview.next_int(1, 10)
+		preview.next_int(1, 10)
+		if preview.next_int(1, 20) != 1:
+			continue
+		var rarity := preview.next_int(1, 100)
+		if rarity < 71 or rarity > 95:
+			continue
+		if with_block:
+			if preview.next_int(1, 20) != 5:
+				continue
+		else:
+			preview.next_int(1, 1)
+		if preview.next_int(1, 20) != 8:
+			continue
+		if with_block and preview.next_int(1, 20) != 6:
+			continue
+		return seed_value
+	assert(false, "Unable to find deterministic reaction-legality seed.")
+	return 0
+
+
 func _base_simulation(seed_value: int, target_block_weapon: bool = false, target_counter_weapon: bool = false, target_dodge: bool = false) -> CombatSimulation:
 	var simulation := CombatSimulation.new(seed_value)
+	simulation.set_attack_final_line_of_sight_resolver(func(_source: StringName, _target: StringName) -> bool: return true) # Open fixture geometry.
 	simulation.register_actor(_actor(&"attacker", 100, PackedStringArray(["fixture_weapon"])))
 	var target_equipment := PackedStringArray()
 	if target_block_weapon:

@@ -5555,9 +5555,14 @@ func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary
 	if not is_weapon_attack_ready(reactor_id, definition.weapon_ref):
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_weapon_grip_not_ready")
 		return
-	if definition.requires_line_of_sight and registration["authoritative_line_of_sight"] != true:
-		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_line_of_sight_unverified")
-		return
+	if definition.requires_line_of_sight:
+		var line_of_sight: Variant = null
+		if _attack_final_line_of_sight_resolver.is_valid():
+			line_of_sight = _attack_final_line_of_sight_resolver.call(reactor_id, reaction_target_id)
+		if line_of_sight != true:
+			var reason := "critical_reaction_line_of_sight_unverified" if line_of_sight == null else "critical_reaction_line_of_sight_blocked"
+			_record_critical_effect(record, effect, &"critical_effect_unavailable", false, reason)
+			return
 	var offset := target_state.position_microfeet - reactor_state.position_microfeet
 	var elevation_offset := target_state.elevation_microfeet - reactor_state.elevation_microfeet
 	var distance_squared := offset.x * offset.x + offset.y * offset.y + elevation_offset * elevation_offset
@@ -5565,7 +5570,7 @@ func _execute_critical_reaction(record: CombatCriticalRecord, effect: Dictionary
 	if not definition.has_resolved_range() or distance_squared < minimum_range * minimum_range or distance_squared > int(definition.maximum_range_microfeet) * int(definition.maximum_range_microfeet):
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_target_out_of_range")
 		return
-	var acc_value: Variant = (_actor_definitions[reactor_key] as CombatActorDefinition).get_combat_stat("acc")
+	var acc_value: Variant = get_effective_actor_combat_stat(reactor_id, "acc")
 	if acc_value == null:
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "critical_reaction_acc_unresolved")
 		return
