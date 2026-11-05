@@ -14,6 +14,10 @@ func run() -> Array[String]:
 	_test_weapon_specific_reach_resolves_independently()
 	_test_committed_multistrike_incapacitation()
 	_test_force_bolt_nac_accounting_and_cap()
+	_test_force_bolt_dodge_critical_damage()
+	_test_force_bolt_damage_controls()
+	_test_force_bolt_physical_damage_isolation()
+	_test_force_bolt_critical_replay_and_convergence()
 	_test_force_shield_persistence_absorption_and_cancel()
 	_test_automatic_danger_boundary_and_settings()
 	_test_force_bolt_physical_action_interruption_size_gate()
@@ -160,6 +164,179 @@ func _test_force_bolt_nac_accounting_and_cap() -> void:
 		_expect_equal(damage_event.payload.get("final_damage"), rolled, "Force Bolt must apply the source 1d6 result without fabricated bonus damage.")
 	for knockback_event: CombatEvent in _events_of_type(damaging_session, &"force_bolt_knockback_resolved"):
 		_expect_equal(knockback_event.payload.get("requested_distance_microfeet"), 2_000_000, "Force Bolt must request exactly two feet of knockback.")
+
+
+# Task 39D: real playable-session reproductions from the read-only 39C audit.
+# These seeds include opening Initiative, SS, ACC, legal Dodge and rarity draws.
+func _test_force_bolt_dodge_critical_damage() -> void:
+	for expected: Array in [[579, 3, 6, 7, 96], [5194, 1, 2, 8, 99]]:
+		var fixture := _bolt_damage_case(int(expected[0]))
+		var session: ArenaCombatSession = fixture.session
+		var simulation := session.simulation
+		var attack: CombatAttackInstance = fixture.attack
+		var damage: CombatEvent = fixture.damage
+		_expect_true(damage != null, "39D: the critical Bolt must finish its legal defense/damage pipeline.")
+		if damage == null or attack == null:
+			continue
+		_expect_equal(damage.payload.damage_roll, expected[1], "39D seed %d: preserve the original single d6 roll." % int(expected[0]))
+		_expect_equal(damage.payload.final_damage, expected[2], "39D seed %d: consume the approved Dodge x2 factor." % int(expected[0]))
+		_expect_equal(damage.payload.hpc_before, 100, "39D: the original Guard fixture must begin with 100 HPC.")
+		_expect_equal(damage.payload.hpc_after, 100 - int(expected[2]), "39D: event HPC must account for multiplied damage.")
+		_expect_equal(session.get_actor_state(Fixture.OPPONENT_ID).current_hpc, damage.payload.hpc_after, "39D: authoritative HPC must equal damage-event HPC.")
+		_expect_equal(damage.resource_commitments, {"hpc": int(expected[2])}, "39D: event resource accounting must use final damage.")
+		_expect_equal(damage.payload.get("combined_multiplier_numerator"), 2, "39D: report the exact multiplier numerator.")
+		_expect_equal(damage.payload.get("combined_multiplier_denominator"), 1, "39D: report the exact multiplier denominator.")
+		_expect_equal(damage.payload.get("applied_multipliers", []), attack.consequence_damage_multipliers, "39D: damage history must preserve complete factor provenance.")
+		_expect_equal(attack.consequence_damage_multipliers.size(), 1, "39D: attach and consume only one Dodge factor, including when Bolt ACC is critical.")
+		var dodge_record: CombatCriticalRecord = null
+		var blocked_specials := 0
+		for record: CombatCriticalRecord in simulation.get_critical_records():
+			if record.roll_category == &"dodge": dodge_record = record
+			if record.roll_category == &"special_attack":
+				blocked_specials += 1
+				_expect_equal(record.consequence_status, CombatCriticalRecord.CONSEQUENCE_BLOCKED, "39D: Bolt's own ACC critical must remain blocked.")
+				_expect_equal(record.consequence_reason, "special_critical_consequence_not_approved", "39D: preserve the existing Special-critical policy.")
+		_expect_equal(blocked_specials, 1 if int(expected[0]) == 5194 else 0, "39D: keep independent Bolt and Dodge critical records.")
+		_expect_true(dodge_record != null, "39D: earn the factor through an actual Dodge critical, not an injected modifier.")
+		if dodge_record != null:
+			_expect_equal(dodge_record.natural_d20, 20, "39D: Dodge failure must be a natural 20.")
+			_expect_equal(dodge_record.rarity_roll, expected[4], "39D: preserve the independent seeded rarity draw.")
+			_expect_equal(dodge_record.outcome_id, &"catastrophic_misstep", "39D: preserve the approved Rare Dodge outcome.")
+			_expect_equal(dodge_record.consequence_status, CombatCriticalRecord.CONSEQUENCE_APPLIED, "39D: an applied factor must affect eligible damage.")
+			if not attack.consequence_damage_multipliers.is_empty():
+				var factor: Dictionary = attack.consequence_damage_multipliers[0]
+				_expect_equal(factor.critical_record_id, dodge_record.critical_record_id, "39D: factor provenance must reference the Dodge critical, not the blocked Bolt critical.")
+				_expect_equal(factor.source_ref, CombatCriticalConsequenceCatalog.SOURCE_REF, "39D: preserve the approved consequence source.")
+			var attempted := _last_event(session, &"physical_defense_attempted")
+			var attached := _last_event(session, &"critical_damage_multiplier_attached")
+			_expect_equal(dodge_record.parent_event_id, attempted.event_id, "39D: the Dodge roll must remain the critical's cause.")
+			_expect_equal(attached.parent_event_id, dodge_record.event_id, "39D: factor attachment must retain its critical cause.")
+			_expect_true(attempted.stable_sequence < attached.stable_sequence and attached.stable_sequence < damage.stable_sequence, "39D: resolve Dodge, consequence and damage in causal order.")
+		var defense := simulation.get_defense_resolution(attack.defense_resolution_id)
+		_expect_equal(defense.status, CombatDefenseResolution.STATUS_EXHAUSTED, "39D: all legal defenses must finish before damage.")
+		_expect_equal(damage.parent_event_id, defense.final_event_id, "39D: damage must descend from final defense resolution.")
+		for attempt: CombatDefenseAttempt in defense.attempts:
+			if attempt.defense_type in [CombatDefenseProfile.WEAPON_BLOCK, CombatDefenseProfile.SHIELD_BLOCK, CombatDefenseProfile.PHYSICAL_SOAK]:
+				_expect_equal(attempt.eligibility, CombatDefenseAttempt.INELIGIBLE, "39D: do not grant physical defenses against Force Bolt.")
+		_expect_equal(simulation.random.get_draw_count(), expected[3], "39D: multiplying damage must not add or repeat RNG draws.")
+		_expect_equal(damage.payload.rng_draw_index, expected[3], "39D: preserve the original damage RNG index.")
+		_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).resources.mana, 18, "39D: one Bolt still costs two Mana.")
+		_expect_equal(session.get_actor_state(Fixture.PLAYER_ID).nac_uses_this_round, 1, "39D: one Bolt consumes exactly one NAC activation.")
+		_expect_equal(simulation.clock.get_elapsed_us(), 0, "39D: a Bolt must remain zero ordinary Acts.")
+		_expect_equal(_last_event(session, &"force_bolt_knockback_resolved").payload.requested_distance_microfeet, 2_000_000, "39D: critical damage must not multiply knockback.")
+		_expect_equal(simulation.get_actor_definition(Fixture.PLAYER_ID).to_dictionary(), fixture.player_definition, "39D: do not mutate the caster definition.")
+		_expect_equal(simulation.get_actor_definition(Fixture.OPPONENT_ID).to_dictionary(), fixture.target_definition, "39D: do not mutate the target definition.")
+		var snapshot := simulation.get_state_snapshot()
+		var rng := simulation.random.wave_entry_state()
+		var events := _event_signature(session)
+		var request_id: String = simulation._accepted_special_damage_request_ids.keys()[0]
+		_expect_equal(simulation.resolve_nac_projectile_damage(attack.attack_instance_id, request_id).reason, "duplicate_special_damage_request", "39D: repeated damage request must be rejected.")
+		_expect_equal(simulation.resolve_nac_projectile_damage(attack.attack_instance_id, "39d_repeated_damage").reason, "attack_not_damage_eligible", "39D: a fresh request ID cannot damage a resolved attack again.")
+		_expect_equal(simulation.get_state_snapshot(), snapshot, "39D: rejected repeats must not alter authoritative state.")
+		_expect_equal(simulation.random.wave_entry_state(), rng, "39D: rejected repeats must preserve exact RNG state.")
+		_expect_equal(_event_signature(session), events, "39D: rejected repeats must not append damage or critical events.")
+		print("39D Bolt seed=%d raw=%d final=%d draws=%d" % [int(expected[0]), int(damage.payload.damage_roll), int(damage.payload.final_damage), simulation.random.get_draw_count()])
+
+
+func _test_force_bolt_damage_controls() -> void:
+	for dodges in [false, true]:
+		var fixture := _bolt_damage_case(_seed_for_ordinary_bolt(dodges))
+		var session: ArenaCombatSession = fixture.session
+		var attack: CombatAttackInstance = fixture.attack
+		if attack == null: continue
+		_expect_true(session.simulation.get_critical_records().is_empty(), "39D: ordinary controls must not accidentally trigger critical consequences.")
+		if dodges:
+			_expect_equal(attack.status, CombatAttackInstance.STATUS_DEFENDED, "39D: a successful legal Dodge must still defend the Bolt.")
+			_expect_true(fixture.damage == null, "39D: a defended Bolt must produce no damage event.")
+			_expect_equal(session.get_actor_state(Fixture.OPPONENT_ID).current_hpc, 100, "39D: successful Dodge must preserve HPC.")
+			_expect_equal(_count_events(session, &"force_bolt_knockback_resolved"), 0, "39D: a defended Bolt must not knock back.")
+			_expect_equal(session.simulation.random.get_draw_count(), 5, "39D: successful Dodge must consume no damage roll.")
+		else:
+			var damage: CombatEvent = fixture.damage
+			_expect_true(damage != null, "39D: ordinary failed Dodge must permit ordinary Bolt damage.")
+			if damage == null: continue
+			_expect_equal(damage.payload.final_damage, damage.payload.damage_roll, "39D: an ordinary Bolt remains exactly its one d6 roll.")
+			_expect_equal(damage.payload.get("combined_multiplier_numerator"), 1, "39D: no factor means the exact unit product.")
+			_expect_equal(damage.payload.get("applied_multipliers", []), [], "39D: ordinary damage must not invent critical provenance.")
+			_expect_equal(session.simulation.random.get_draw_count(), 6, "39D: ordinary failed Dodge adds exactly one damage roll.")
+
+
+func _test_force_bolt_physical_damage_isolation() -> void:
+	for location: StringName in [&"torso", &"head"]:
+		var session := _session(5194, Vector2i(20_000_000, 21_000_000))
+		if session == null:
+			_failures.append("39D: physical-isolation fixture failed to initialize.")
+			continue
+		var simulation := session.simulation
+		var definition := VaelisForce.make_force_bolt_attack_definition(Fixture.VAELIS_WAND_REF)
+		var started := simulation.start_nac_projectile_special(Fixture.PLAYER_ID, Fixture.OPPONENT_ID, definition, "39d_isolation", VaelisForce.FORCE_BOLT_ID, 2, location, true)
+		_expect_true(started.get("special_success", false), "39D: isolated engine Bolt must pass its actual SS check.")
+		if not started.has("attack_instance_id"): continue
+		var attack := simulation.get_attack(started.attack_instance_id)
+		var defended := simulation.resolve_pending_defense_automatically(attack.attack_instance_id, "39d_isolation_defense", session._make_dodge_environment(attack))
+		_expect_true(defended.success and attack.status == CombatAttackInstance.STATUS_DEFENSES_EXHAUSTED, "39D: the isolation fixture must first earn its Rare Dodge factor legally.")
+		# Apply physical-only fixture state AFTER the legal Dodge attempt, so
+		# prone does not invalidate its crawl/displacement prerequisites.
+		simulation.get_actor_state(Fixture.PLAYER_ID).timed_stat_effects["39d_sb"] = {"source_ref": "TEST-FIXTURE physical isolation", "stat_modifiers": {"sb": 11}}
+		simulation.get_actor_state(Fixture.OPPONENT_ID).timed_stat_effects["39d_nal"] = {"source_ref": "TEST-FIXTURE physical isolation", "stat_modifiers": {"nal": 37}}
+		simulation.set_actor_defense_state(Fixture.OPPONENT_ID, &"aware", PackedStringArray(["prone"]))
+		_expect_true(simulation.get_effective_actor_combat_stat(Fixture.PLAYER_ID, "sb") >= 11, "39D: the SB isolation control must really have a physical bonus.")
+		_expect_true(simulation.get_effective_actor_combat_stat(Fixture.OPPONENT_ID, "nal") >= 37, "39D: the NAL isolation control must really have physical protection.")
+		var armors := simulation.get_damage_protection_profile(Fixture.OPPONENT_ID).armors
+		_expect_true(armors.any(func(armor: CombatArmorDefinition) -> bool: return armor.has_tal(&"bashing") and int(armor.get_tal(&"bashing")) > 0), "39D: the authored Guard must retain positive physical armor TAL.")
+		if location == &"head":
+			var multiplier: Dictionary = definition.physical_damage.get_location_multiplier(location)
+			_expect_equal([multiplier.numerator, multiplier.denominator], [3, 2], "39D: the physical head multiplier must exist but remain inapplicable to Bolt damage.")
+		var damage := simulation.resolve_nac_projectile_damage(attack.attack_instance_id, "39d_isolation_damage")
+		_expect_true(damage.success, "39D: Special damage must not enter the physical-damage eligibility pipeline.")
+		_expect_equal(damage.get("final_damage"), 2, "39D: apply only 1d6=1 times the approved x2; no SB/TAL/NAL/prone/location factors.")
+		_expect_equal(simulation.random.get_draw_count(), 8, "39D: physical-only state must add no RNG consumption.")
+
+
+func _test_force_bolt_critical_replay_and_convergence() -> void:
+	for seed_value in [579, 5194]:
+		var first := _bolt_damage_case(seed_value)
+		var replay := _bolt_damage_case(seed_value)
+		var session: ArenaCombatSession = first.session
+		var repeated: ArenaCombatSession = replay.session
+		_expect_equal(session.get_state_snapshot(), repeated.get_state_snapshot(), "39D: same-seed critical Bolts must replay identical complete session snapshots.")
+		_expect_equal(_event_signature(session), _event_signature(repeated), "39D: critical causes, factors and damage events must replay identically.")
+		_expect_equal(session.simulation.random.wave_entry_state(), repeated.simulation.random.wave_entry_state(), "39D: replay must preserve the exact native RNG state.")
+		var harness := TwoClientSyncHarness.new(seed_value)
+		harness.authority.simulation = session.simulation
+		var envelopes := harness.authority.publish_current_events()
+		for envelope: CombatEventEnvelope in envelopes: harness.client_a.receive(envelope)
+		for index in range(envelopes.size() - 1, -1, -1): harness.client_b.receive(envelopes[index])
+		if not envelopes.is_empty(): harness.client_b.receive(envelopes[0])
+		_expect_true(harness.compare_clients().success, "39D: duplicate/out-of-order critical Bolt envelopes must converge.")
+		_expect_equal(harness.client_a.get_state_digest(), harness.authority.get_state_digest(), "39D: both simulated clients must match authority.")
+		_expect_equal(session.simulation.get_state_snapshot().schema_version, 12, "39D: preserve simulation schema 12.")
+
+
+func _bolt_damage_case(seed_value: int) -> Dictionary:
+	var session := _session(seed_value, Vector2i(20_000_000, 21_000_000))
+	assert(session != null, "39D: source-backed Vaelis/Guard fixture must initialize.")
+	var player_definition := session.simulation.get_actor_definition(Fixture.PLAYER_ID).to_dictionary()
+	var target_definition := session.simulation.get_actor_definition(Fixture.OPPONENT_ID).to_dictionary()
+	var cast := session.request_player_special(VaelisForce.FORCE_BOLT_ID)
+	_expect_true(cast.get("special_success", false), "39D: fixture SS must succeed.")
+	var attack := session.simulation.get_attack(String(cast.get("attack_instance_id", "")))
+	_expect_true(attack != null and attack.accuracy_success == true, "39D: fixture ACC must succeed before testing defense/damage.")
+	return {"session": session, "attack": attack, "damage": _last_event(session, &"force_bolt_damage_resolved"), "player_definition": player_definition, "target_definition": target_definition}
+
+
+func _seed_for_ordinary_bolt(successful_dodge: bool) -> int:
+	for seed_value in range(1, 100_000):
+		var rng := DeterministicCombatRng.new(seed_value)
+		rng.next_int(1, 10)
+		rng.next_int(1, 10)
+		var ss := rng.next_int(1, 20)
+		if ss < 2 or ss > 9: continue
+		var acc := rng.next_int(1, 20)
+		if acc < 2 or acc > 6: continue
+		if rng.next_int(1, 20) == (2 if successful_dodge else 8): return seed_value
+	assert(false, "39D: unable to find a noncritical Bolt/Dodge control seed.")
+	return 0
 
 
 func _test_force_shield_persistence_absorption_and_cancel() -> void:

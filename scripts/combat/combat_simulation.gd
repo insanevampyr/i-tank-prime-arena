@@ -2768,9 +2768,18 @@ func resolve_nac_projectile_damage(attack_instance_id: String, request_id: Strin
 	var target_state := get_actor_state(attack.target_id)
 	if target_state == null or target_state.current_hpc == null:
 		return _failure("target_hpc_unresolved")
+	var multiplier_entries: Array = []
+	for multiplier: Dictionary in attack.consequence_damage_multipliers:
+		multiplier_entries.append({"multiplier": multiplier})
+	var product := _combine_multiplier_product(multiplier_entries)
+	if not product["success"]:
+		return product
+	if _signed_by_nonnegative_multiplication_overflows(6, int(product["numerator"])):
+		return _failure("damage_multiplier_product_overflow")
 	var damage_roll := roll_int(1, 6)
+	var final_damage := _apply_multiplier_product_once(damage_roll, int(product["numerator"]), int(product["denominator"]))
 	var hpc_before := int(target_state.current_hpc)
-	target_state.current_hpc = hpc_before - damage_roll
+	target_state.current_hpc = hpc_before - final_damage
 	target_state.revision += 1
 	attack.status = CombatAttackInstance.STATUS_DAMAGE_RESOLVED
 	attack.revision += 1
@@ -2782,12 +2791,15 @@ func resolve_nac_projectile_damage(attack_instance_id: String, request_id: Strin
 	var event := _record_resolved_event(clock.get_elapsed_us(), &"force_bolt_damage_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
 		"attack_instance_id": attack_instance_id, "special_id": String(attack.special_id),
 		"damage_roll": damage_roll, "rng_draw_index": random.get_draw_count(),
-		"final_damage": damage_roll, "hpc_before": hpc_before,
-		"hpc_after": int(target_state.current_hpc), "damage_applied": true,
-	}, parent_event_id, PackedStringArray(), {"hpc": damage_roll})
+		"applied_multipliers": attack.consequence_damage_multipliers.duplicate(true),
+		"combined_multiplier_numerator": int(product["numerator"]),
+		"combined_multiplier_denominator": int(product["denominator"]),
+		"final_damage": final_damage, "hpc_before": hpc_before,
+		"hpc_after": int(target_state.current_hpc), "damage_applied": final_damage > 0,
+	}, parent_event_id, PackedStringArray(), {"hpc": final_damage})
 	_apply_special_projectile_knockback(attack, event.event_id)
 	if interrupt_executing_action: _schedule_nac_physical_action_interruption(attack, event.event_id)
-	return _success({"final_damage": damage_roll, "event_id": event.event_id})
+	return _success({"final_damage": final_damage, "event_id": event.event_id})
 
 
 func _apply_special_projectile_knockback(attack: CombatAttackInstance, parent_event_id: String) -> void:
