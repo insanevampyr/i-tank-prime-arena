@@ -15,7 +15,7 @@ static func is_player_facing_event(event: CombatEvent) -> bool:
 		"critical_trigger_recorded",
 		"critical_stagger_applied",
 		"critical_prone_applied",
-		"critical_reaction_started",
+		"critical_reaction_attack_declared",
 		"actor_stood_from_prone",
 		"critical_effect_unavailable",
 		"critical_effect_blocked",
@@ -207,10 +207,10 @@ static func format_event(event: CombatEvent) -> String:
 				_pretty_name(String(record.get("consequence_status", "selected"))),
 			]
 		"critical_stagger_applied":
-			return prefix + "%s receives Critical Stagger for 0.5 seconds." % _display_actor(event.source_actor_id)
+			return prefix + "%s receives Critical Stagger for 0.5 seconds." % _display_actor(_affected_actor(event))
 		"critical_prone_applied":
-			return prefix + "%s is PRONE; standing costs one Act." % _display_actor(event.source_actor_id)
-		"critical_reaction_started":
+			return prefix + "%s is PRONE; standing costs one Act." % _display_actor(_affected_actor(event))
+		"critical_reaction_attack_declared":
 			return prefix + "%s Critical Reaction attack started." % _display_actor(event.source_actor_id)
 		"actor_stood_from_prone":
 			return prefix + "%s completed the legal one-Act stand." % _display_actor(event.source_actor_id)
@@ -258,3 +258,8 @@ static func _display_actor(actor_id: StringName) -> String:
 	if actor_id == PrimeV3VerticalSliceFixture.OPPONENT_ID:
 		return "Opponent"
 	return String(actor_id).capitalize()
+
+
+static func _affected_actor(event: CombatEvent) -> StringName:
+	var actor_id := String(event.payload.get("affected_actor_id", ""))
+	return event.source_actor_id if actor_id.is_empty() else StringName(actor_id)

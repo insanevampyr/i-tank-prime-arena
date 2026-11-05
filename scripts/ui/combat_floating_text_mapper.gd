@@ -4,7 +4,7 @@ extends RefCounted
 ## Declares whether an authoritative event can produce local floating feedback.
 static func supports_event_type(event_type: StringName) -> bool:
 	match String(event_type):
-		"physical_attack_accuracy_resolved", "physical_defense_attempted", "physical_defense_resolved", "physical_damage_resolved", "critical_trigger_recorded", "critical_perfect_evasion_applied", "critical_stagger_applied", "critical_prone_applied", "critical_reaction_started", "physical_attack_interrupted", "action_interrupted", "actor_stood_from_prone":
+		"physical_attack_accuracy_resolved", "physical_defense_attempted", "physical_defense_resolved", "physical_damage_resolved", "critical_trigger_recorded", "critical_perfect_evasion_applied", "critical_stagger_applied", "critical_prone_applied", "critical_reaction_attack_declared", "physical_attack_interrupted", "action_interrupted", "actor_stood_from_prone":
 			return true
 	return false
 ## Translates already-resolved authoritative events into brief presentation intents.
@@ -51,7 +51,7 @@ static func messages_for_event(event: CombatEvent) -> Array[Dictionary]:
 			return [_message(_affected_actor(event), "STAGGER!", "failure", 6)]
 		"critical_prone_applied":
 			return [_message(_affected_actor(event), "PRONE!", "failure", 6)]
-		"critical_reaction_started":
+		"critical_reaction_attack_declared":
 			return [_message(event.source_actor_id, "CRITICAL REACTION!", "critical_success", 5)]
 		"physical_attack_interrupted":
 			return [_message(event.source_actor_id, "INTERRUPTED!", "failure", 5)]

@@ -4,6 +4,7 @@ var _failures: Array[String] = []
 
 
 func run() -> Array[String]:
+	_test_presentation_attribution()
 	_test_all_thirty_approved_outcomes()
 	_test_attack_multiplier_and_exact_damage_order()
 	_test_critical_stagger_interruption_and_exact_gate()
@@ -578,3 +579,97 @@ func _expect_equal(actual: Variant, expected: Variant, message: String) -> void:
 func _expect_true(value: bool, message: String) -> void:
 	if not value:
 		_failures.append(message)
+
+
+# Real seeded events exercise both UI paths without changing the simulation.
+func _test_presentation_attribution() -> void:
+	for scenario: String in ["wrong_footed", "devastating_reversal", "knocked_down", "bad_opening"]:
+		var replay_results: Array = []
+		for presented: bool in [false, true]:
+			var seed_value := 3800 if scenario == "wrong_footed" else (8400 if scenario == "devastating_reversal" else (1510 if scenario == "knocked_down" else 4446))
+			var harness := TwoClientSyncHarness.new(seed_value)
+			var sim: CombatSimulation = harness.authority.simulation
+			sim.set_attack_final_line_of_sight_resolver(func(_a: StringName, _b: StringName) -> bool: return true)
+			sim.register_actor(_actor(&"attacker", 100, PackedStringArray(["fixture_weapon"])))
+			sim.register_actor(_actor(&"target", 0, PackedStringArray(["counter_weapon", "block_weapon", "shield"]), scenario == "wrong_footed"))
+			sim.register_damage_protection_profile(&"attacker", CombatDamageProtectionProfile.new(&"presentation_none_a"))
+			sim.register_damage_protection_profile(&"target", CombatDamageProtectionProfile.new(&"presentation_none_b"))
+			_register_no_defense(sim, &"attacker")
+			if scenario == "bad_opening":
+				_register_no_defense(sim, &"target")
+			var definition := _attack(&"presentation_parent", &"fixture_weapon", CombatPhysicalDamageDefinition.new(1, 1, 0, false, true))
+			sim.register_critical_reaction_attack(&"target", _attack(&"presentation_counter", &"counter_weapon", CombatPhysicalDamageDefinition.new(1, 1, 0, false, true)), true)
+			if scenario == "wrong_footed":
+				sim.register_defense_profile(&"target", CombatDefenseProfile.new(&"presentation_dodge"))
+			elif scenario == "devastating_reversal":
+				var shield := CombatBlockDefinition.new(CombatBlockDefinition.TYPE_SHIELD, &"shield", 20, 0, true, true, 2, PackedStringArray(["TEST-FIXTURE"]), true)
+				sim.register_defense_profile(&"target", CombatDefenseProfile.new(&"presentation_shield", PackedStringArray(["shield_block", "dodge", "weapon_block", "physical_soak"]), {}, null, shield))
+			elif scenario == "knocked_down":
+				var block := CombatBlockDefinition.new(CombatBlockDefinition.TYPE_WEAPON, &"block_weapon", 20, 0, true)
+				sim.register_defense_profile(&"target", CombatDefenseProfile.new(&"presentation_block", PackedStringArray(["weapon_block", "dodge", "shield_block", "physical_soak"]), {}, block))
+			sim.begin_combat()
+			var started := sim.start_physical_attack(&"attacker", &"target", definition, "presentation_parent", &"torso", true)
+			sim.advance_to(1_000_000)
+			if scenario != "bad_opening":
+				var context := CombatDodgeContext.new(CombatDodgeContext.SELECTION_RESOLVED, Vector2i(1_000_000, 0), 1_000_000, false, true, true, "TEST-FIXTURE", &"step", &"open", true, true, true, 0, "legal step")
+				sim.resolve_pending_defense(started.attack_instance_id, "presentation_defense", context)
+			# Resolve each real reaction through ordinary defense and damage boundaries.
+			for pass_index in range(4):
+				var events := sim.get_resolved_events().duplicate()
+				for event: CombatEvent in events:
+					if event.event_type == &"critical_reaction_attack_declared":
+						var attack_id: String = event.payload.attack_instance_id
+						sim.resolve_pending_defense(attack_id, "presentation_defense_" + attack_id)
+						sim.resolve_physical_damage(attack_id, "presentation_damage_" + attack_id)
+			_expect_true(not sim.get_critical_records().is_empty(), "39F: fixture must produce a critical record.")
+			if sim.get_critical_records().is_empty():
+				continue
+			_expect_equal(sim.get_critical_records()[0].outcome_id, StringName(scenario), "39F: fixture must generate the intended actual critical.")
+			var before := sim.get_state_snapshot().duplicate(true)
+			var draws := sim.random.get_draw_count()
+			var original_events: Array = []
+			var captions := 0
+			var declarations := 0
+			var effects := 0
+			for event: CombatEvent in sim.get_resolved_events():
+				original_events.append(event.to_dictionary().duplicate(true))
+				if not presented:
+					continue
+				var text := ArenaCombatEventPresenter.format_event(event)
+				var messages: Array = CombatFloatingTextMapper.messages_for_event(event)
+				if event.event_type in [&"critical_stagger_applied", &"critical_prone_applied"]:
+					effects += 1
+					var affected := String(event.payload.affected_actor_id)
+					_expect_equal(affected, "target" if scenario == "knocked_down" else "attacker", "39F: real effect ownership must remain correct.")
+					_expect_true(text.contains(affected.capitalize()), "39F: caption must name the real affected actor.")
+					_expect_equal(String(messages[0].actor_id), affected, "39F: floating condition text must name the affected actor.")
+				if event.event_type == &"critical_reaction_attack_declared":
+					declarations += 1
+					_expect_equal(event.source_actor_id, &"target", "39F: the actual counterattacker must own declarations, including chained reactions.")
+					_expect_true(text.contains("Target Critical Reaction"), "39F: reaction caption must name the counterattacker.")
+					_expect_equal(messages[0].actor_id, &"target", "39F: reaction floating text must name the counterattacker.")
+					_expect_true(ArenaCombatEventPresenter.is_player_facing_event(event), "39F: declaration must reach recent results.")
+				if text.contains("Critical Reaction attack started"):
+					captions += 1
+				if event.event_type == &"critical_reaction_started":
+					_expect_equal(text, "", "39F: legacy marker must not duplicate captions.")
+					_expect_equal(messages, [], "39F: legacy marker must not duplicate floating text.")
+			if presented:
+				_expect_equal(captions, declarations, "39F: exactly one caption per real reaction.")
+				_expect_true(effects > 0 or scenario == "bad_opening", "39F: condition fixture must exercise a real effect.")
+				if scenario == "bad_opening":
+					_expect_equal(declarations, 2, "39F: Bad Opening fixture must include its legal follow-up chain.")
+			_expect_equal(sim.get_state_snapshot(), before, "39F: presentation must not mutate authoritative state.")
+			_expect_equal(sim.random.get_draw_count(), draws, "39F: presentation must consume no RNG.")
+			var after_events: Array = []
+			for event: CombatEvent in sim.get_resolved_events():
+				after_events.append(event.to_dictionary())
+			_expect_equal(after_events, original_events, "39F: presentation must preserve raw events and causal history.")
+			var envelopes := harness.authority.publish_current_events()
+			for envelope: CombatEventEnvelope in envelopes:
+				harness.client_a.receive(envelope)
+			for index in range(envelopes.size() - 1, -1, -1):
+				harness.client_b.receive(envelopes[index])
+			_expect_true(harness.compare_clients().success, "39F: presentation must preserve two-client convergence.")
+			replay_results.append({"snapshot": before, "events": original_events, "draws": draws})
+		_expect_equal(replay_results[0], replay_results[1], "39F: presentation-on/off replay must preserve damage, RNG and full history.")

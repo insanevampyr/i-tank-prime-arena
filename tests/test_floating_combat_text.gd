@@ -9,6 +9,7 @@ var _failures: Array[String] = []
 
 func run() -> Array[String]:
 	_failures.clear()
+	_test_legacy_condition_fallback()
 	_test_defense_and_attack_mapping()
 	_test_critical_damage_and_condition_ownership()
 	_test_simultaneous_and_critical_chain_mapping()
@@ -36,7 +37,7 @@ func _test_critical_damage_and_condition_ownership() -> void:
 	_expect_text(_event("damage", &"physical_damage_resolved", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {"final_damage": 18, "hpc_after": 42}), "-18 HPC", Fixture.OPPONENT_ID, "Damage text must use only the committed authoritative final damage.")
 	var defeat_messages: Array = Mapper.messages_for_event(_event("defeat", &"physical_damage_resolved", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {"final_damage": 9, "hpc_after": 0}))
 	_expect_true(defeat_messages.size() == 2 and defeat_messages[1]["text"] == "DEFEATED!" and defeat_messages[1]["actor_id"] == Fixture.PLAYER_ID, "A committed zero-HPC result must announce defeat above the damaged target.")
-	_expect_text(_event("reaction", &"critical_reaction_started", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {}), "CRITICAL REACTION!", Fixture.OPPONENT_ID, "Nested Critical Reactions must remain actor-owned.")
+	_expect_text(_event("reaction", &"critical_reaction_attack_declared", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {}), "CRITICAL REACTION!", Fixture.OPPONENT_ID, "Nested Critical Reactions must remain actor-owned.")
 
 
 func _test_simultaneous_and_critical_chain_mapping() -> void:
@@ -45,8 +46,8 @@ func _test_simultaneous_and_critical_chain_mapping() -> void:
 	var player_messages: Array = Mapper.messages_for_event(simultaneous_player)
 	var opponent_messages: Array = Mapper.messages_for_event(simultaneous_opponent)
 	_expect_true(player_messages[0]["actor_id"] == Fixture.OPPONENT_ID and opponent_messages[0]["actor_id"] == Fixture.PLAYER_ID, "Same-timestamp attacks must retain each committed damage target.")
-	var first_reaction := _event("critical_reaction_parent", &"critical_reaction_started", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {}, 21)
-	var nested_reaction := _event("critical_reaction_child", &"critical_reaction_started", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {}, 21)
+	var first_reaction := _event("critical_reaction_parent", &"critical_reaction_attack_declared", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {}, 21)
+	var nested_reaction := _event("critical_reaction_child", &"critical_reaction_attack_declared", Fixture.OPPONENT_ID, Fixture.PLAYER_ID, {}, 21)
 	_expect_true(Mapper.messages_for_event(first_reaction)[0]["actor_id"] == Fixture.PLAYER_ID and Mapper.messages_for_event(nested_reaction)[0]["actor_id"] == Fixture.OPPONENT_ID, "Nested critical-reaction events must remain separately owned and presentable.")
 
 
@@ -136,3 +137,15 @@ func _event(event_id: String, event_type: StringName, source: StringName, target
 func _expect_true(value: bool, message: String) -> void:
 	if not value:
 		_failures.append(message)
+
+
+func _test_legacy_condition_fallback() -> void:
+	for kind: StringName in [&"critical_stagger_applied", &"critical_prone_applied"]:
+		for payload: Dictionary in [{}, {"affected_actor_id": ""}]:
+			var event := _event("legacy_condition", kind, Fixture.PLAYER_ID, Fixture.OPPONENT_ID, payload)
+			_expect_true(ArenaCombatEventPresenter.format_event(event).contains("Player"), "Missing or empty affected actor must safely fall back to the source in captions.")
+			var messages: Array = Mapper.messages_for_event(event)
+			_expect_true(messages[0].actor_id == Fixture.PLAYER_ID, "Legacy condition floating text must retain the same fallback.")
+	var marker := _event("legacy_reaction", &"critical_reaction_started", Fixture.PLAYER_ID, Fixture.OPPONENT_ID, {})
+	_expect_true(not Mapper.supports_event_type(marker.event_type), "Legacy reaction marker must not be advertised as floating feedback.")
+	_expect_true(not ArenaCombatEventPresenter.is_player_facing_event(marker), "Legacy reaction marker must not enter recent results.")
