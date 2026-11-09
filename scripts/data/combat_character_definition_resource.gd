@@ -88,6 +88,7 @@ func instantiate_actor(
 	)
 	actor.progression_policy = progression_policy.duplicate(true)
 	actor.class_names = class_names.duplicate()
+	actor.source_character_definition = self
 	return actor
 
 

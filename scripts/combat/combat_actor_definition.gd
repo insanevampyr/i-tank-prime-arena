@@ -28,6 +28,8 @@ var inventory_records: Dictionary
 var equipment_refs: PackedStringArray
 var defensive_capabilities: Dictionary
 var field_sources: Dictionary
+# Authored input for source-qualified checks. Actor snapshots keep their existing shape.
+var source_character_definition: CombatCharacterDefinitionResource
 var unresolved_fields: PackedStringArray
 
 

@@ -5427,18 +5427,8 @@ func _apply_critical_consequence(
 					_record_critical_effect(record, effect, &"critical_effect_blocked", false, "same_attack_unshakable_protection")
 				else:
 					_apply_critical_stagger(record, stagger_actor_id, effect)
-			"prone":
-				var prone_actor_id := _critical_effect_actor_id(record, String(effect["target"]))
-				if attack.same_attack_condition_protected_actor_id == prone_actor_id:
-					_record_critical_effect(record, effect, &"critical_effect_blocked", false, "same_attack_unshakable_protection")
-				else:
-					_apply_prone(record, prone_actor_id, effect)
-			"shield_contact_prone":
-				var contact_verified: bool = profile != null and profile.shield_block != null and profile.shield_block.verified_shield_contact == true
-				if contact_verified:
-					_apply_prone(record, _critical_effect_actor_id(record, String(effect["target"])), effect)
-				else:
-					_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "shield_contact_unverified")
+			"prone", "shield_contact_prone":
+				_resolve_critical_knockdown(record, attack, effect, profile)
 			"perfect_evasion":
 				if attempt != null and attempt.success == true and String(attempt.resolution_context.get("selection_status", "")) == String(CombatDodgeContext.SELECTION_RESOLVED):
 					_record_critical_effect(record, effect, &"critical_perfect_evasion_applied", true)
@@ -5476,7 +5466,8 @@ func _record_critical_effect(
 	effect: Dictionary,
 	event_type: StringName,
 	applied: bool,
-	reason: String = ""
+	reason: String = "",
+	balance_check: Dictionary = {}
 ) -> CombatEvent:
 	var effect_id := String(effect["effect_id"])
 	var affected_actor_id := _critical_effect_actor_id(record, String(effect.get("target", "source")))
@@ -5488,17 +5479,19 @@ func _record_critical_effect(
 			record.blocked_effect_ids.append(effect_id)
 	if not reason.is_empty():
 		record.consequence_reason = reason
+	var payload := {
+		"critical_record_id": record.critical_record_id,
+		"outcome_id": String(record.outcome_id),
+		"effect_id": effect_id,
+		"affected_actor_id": String(affected_actor_id),
+		"applied": applied,
+		"reason": reason,
+	}
+	if not balance_check.is_empty():
+		payload["balance_check"] = balance_check
 	var event := _record_resolved_event(
 		clock.get_elapsed_us(), event_type, _get_actor_initiative(String(record.source_actor_id)),
-		record.source_actor_id, record.target_actor_id,
-		{
-			"critical_record_id": record.critical_record_id,
-			"outcome_id": String(record.outcome_id),
-			"effect_id": effect_id,
-			"affected_actor_id": String(affected_actor_id),
-			"applied": applied,
-			"reason": reason,
-		}, record.event_id
+		record.source_actor_id, record.target_actor_id, payload, record.event_id
 	)
 	if not record.child_event_ids.has(event.event_id):
 		record.child_event_ids.append(event.event_id)
@@ -5670,6 +5663,50 @@ func _apply_critical_stagger(record: CombatCriticalRecord, actor_id: StringName,
 			}, {})
 			_resolved_events.append(interrupt)
 			_resolve_action_interrupt_due(interrupt)
+
+
+func _resolve_critical_knockdown(
+	record: CombatCriticalRecord,
+	attack: CombatAttackInstance,
+	effect: Dictionary,
+	profile: CombatDefenseProfile
+) -> void:
+	var use_balance: bool = _reward_state.get("mode") == ArenaRewardLedger.MODE_NORMAL
+	var effect_id := String(effect["effect_id"])
+	# Each effect selects exactly one actor within this causal critical record.
+	if use_balance and (record.applied_effect_ids.has(effect_id) or record.blocked_effect_ids.has(effect_id)):
+		return
+	var requires_contact: bool = effect["type"] == "shield_contact_prone"
+	if requires_contact and (profile == null or profile.shield_block == null or profile.shield_block.verified_shield_contact != true):
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, "shield_contact_unverified")
+		return
+	var actor_id := _critical_effect_actor_id(record, String(effect["target"]))
+	if attack.same_attack_condition_protected_actor_id == actor_id and (use_balance or not requires_contact):
+		_record_critical_effect(record, effect, &"critical_effect_blocked", false, "same_attack_unshakable_protection")
+		return
+	if not use_balance:
+		_apply_prone(record, actor_id, effect)
+		return
+	var actor := get_actor_definition(actor_id)
+	var actor_state := get_actor_state(actor_id)
+	if actor_state != null and actor_state.conditions.has("prone"):
+		_record_critical_effect(record, effect, &"critical_effect_blocked", false, "balance_not_required_already_prone")
+		return
+	var source: CombatCharacterDefinitionResource = actor.source_character_definition if actor != null else null
+	var captured := BalanceActorProfile.capture(source, actor, actor_state, clock.get_elapsed_us())
+	if not captured.success:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, captured.reason)
+		return
+	var opportunity_id := "%s:%s:%s" % [record.critical_record_id, effect_id, actor_id]
+	var check := BalanceSkillCheck.roll(captured.profile, random, opportunity_id)
+	if not check.success:
+		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, check.reason)
+		return
+	if check.check_success:
+		_record_critical_effect(record, effect, &"critical_effect_blocked", false, "balance_footing_maintained", check)
+	else:
+		_add_actor_condition(actor_state, "prone")
+		_record_critical_effect(record, effect, &"critical_prone_applied", true, "", check)
 
 
 func _apply_prone(record: CombatCriticalRecord, actor_id: StringName, effect: Dictionary) -> void:

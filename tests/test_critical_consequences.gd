@@ -4,6 +4,7 @@ var _failures: Array[String] = []
 
 
 func run() -> Array[String]:
+	_test_live_critical_balance()
 	_test_presentation_attribution()
 	_test_all_thirty_approved_outcomes()
 	_test_attack_multiplier_and_exact_damage_order()
@@ -673,3 +674,227 @@ func _test_presentation_attribution() -> void:
 			_expect_true(harness.compare_clients().success, "39F: presentation must preserve two-client convergence.")
 			replay_results.append({"snapshot": before, "events": original_events, "draws": draws})
 		_expect_equal(replay_results[0], replay_results[1], "39F: presentation-on/off replay must preserve damage, RNG and full history.")
+
+
+func _test_live_critical_balance() -> void:
+	var session := ArenaCombatSession.new(1, null, PrimeV3VerticalSliceFixture.ENCOUNTER_MEDIUM_GUARDS, PrimeV3VerticalSliceFixture.PLAYER_CHARACTER_VAELIS)
+	var initialized := session.initialize(Vector2i(20_000_000, 7_000_000), Vector2i(23_000_000, 7_000_000), false)
+	_expect_true(initialized.success, "39I: the normal playable Vaelis fixture must initialize.")
+	if initialized.success:
+		_expect_true(session.configure_reward_mode(ArenaRewardLedger.MODE_NORMAL).success, "39I: the existing NORMAL entry point must configure authoritative mode.")
+		var actor := session.simulation.get_actor_definition(&"player")
+		var captured := BalanceActorProfile.capture(actor.source_character_definition, actor, session.simulation.get_actor_state(&"player"), 0)
+		_expect_true(captured.success and captured.profile.investments == 2, "39I: ordinary session admission preserves Vaelis's verified Balance record.")
+		_expect_equal(session.simulation.get_state_snapshot().reward_state.mode, ArenaRewardLedger.MODE_NORMAL, "39I: NORMAL mode is carried in existing authoritative state.")
+	for outcome: String in ["hard_fall", "knocked_down", "driven_down", "brought_down", "devastating_reversal"]:
+		var reversal := outcome == "devastating_reversal"
+		for natural in [1, 20]:
+			var fixture := _live_balance_fixture(outcome, _seed_for_live_balance(reversal, natural))
+			var sim: CombatSimulation = fixture.sim
+			var event := _expect_live_balance_outcome(fixture, outcome, natural, natural == 1)
+			if event == null: continue
+			_expect_equal(sim.random.get_draw_count(), 7 if reversal else 6, "39I: only one d20 is inserted after rarity; skill criticals add no rarity draw.")
+			if reversal:
+				_expect_equal(_count_events(sim, &"critical_reaction_attack_declared"), 1, "39I: either Balance result preserves the independent counterattack.")
+				_expect_equal(fixture.profile.shield_block.current_shp, 1, "39I: shield success still spends one SHP.")
+			else:
+				_expect_equal(sim.get_action(fixture.action_id).status, CombatActionInstance.STATUS_IN_PROGRESS, "39I: falling does not interrupt an already executing action.")
+				if natural == 20:
+					sim.advance_to(3_000_000)
+					_expect_equal(sim.get_action(fixture.action_id).status, CombatActionInstance.STATUS_COMPLETED, "39I: the existing action must finish at its original time.")
+					_expect_true(sim.start_stand_action(fixture.affected, "39i_stand").success, "39I: prone actor can start standing.")
+					sim.advance_to(3_999_999)
+					_expect_true(sim.get_actor_state(fixture.affected).conditions.has("prone"), "39I: stand needs its full Act.")
+					sim.advance_to(4_000_000)
+					_expect_true(not sim.get_actor_state(fixture.affected).conditions.has("prone"), "39I: standing clears prone after one Act.")
+
+	var ordinary_seed := _seed_for_live_balance(false, 7)
+	for training: String in ["trained", "untrained", "temporary_dex"]:
+		var fixture := _live_balance_fixture("knocked_down", ordinary_seed, training)
+		var event := _expect_live_balance_outcome(fixture, "knocked_down", 7, training == "trained")
+		if event != null:
+			_expect_equal(event.payload.balance_check.target, {"trained": 9, "untrained": 4, "temporary_dex": 6}[training], "39I: training and current source-qualified DEX determine the target.")
+
+	for gate: String in ["missing_source", "missing_training", "missing_rb", "missing_scm", "already_prone", "protected", "missing_contact", "shield_protected"]:
+		var reversal := gate in ["missing_contact", "shield_protected"]
+		var outcome := "devastating_reversal" if reversal else "knocked_down"
+		var fixture := _live_balance_fixture(outcome, _seed_for_live_balance(true, 7) if reversal else ordinary_seed, gate)
+		var sim: CombatSimulation = fixture.sim
+		var reason: String = {
+			"missing_source": "balance_actor_unavailable", "missing_training": "balance_training_unknown",
+			"missing_rb": "balance_rb_unavailable", "missing_scm": "balance_scm_unavailable",
+			"already_prone": "balance_not_required_already_prone", "protected": "same_attack_unshakable_protection",
+			"missing_contact": "shield_contact_unverified", "shield_protected": "same_attack_unshakable_protection",
+		}[gate]
+		var event := _live_balance_event(sim, outcome)
+		_expect_true(event != null and event.payload.reason == reason and not event.payload.has("balance_check"), "39I: %s must record its explicit reason without a fabricated check." % gate)
+		_expect_equal(sim.random.get_draw_count(), 6 if reversal else 5, "39I: %s must consume no Balance RNG." % gate)
+		_expect_equal(sim.get_actor_state(fixture.affected).conditions.has("prone"), gate == "already_prone", "39I: unavailable or protected check cannot newly apply prone.")
+		if reversal:
+			_expect_equal(_count_events(sim, &"critical_reaction_attack_declared"), 1, "39I: shield contact/protection cannot suppress an independent legal counterattack.")
+
+	for mode: String in [ArenaRewardLedger.MODE_TEST, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var fixture := _live_balance_fixture("knocked_down", ordinary_seed, "", mode)
+		var sim: CombatSimulation = fixture.sim
+		_expect_equal(sim.random.get_draw_count(), 5, "39I: only NORMAL adds a Balance draw.")
+		_expect_true(sim.get_actor_state(fixture.affected).conditions.has("prone"), "39I: other modes preserve their existing consequence.")
+
+	_test_live_balance_chain_and_replay()
+
+
+func _live_balance_fixture(outcome: String, seed_value: int, gate: String = "", mode: String = ArenaRewardLedger.MODE_NORMAL) -> Dictionary:
+	var reversal := outcome == "devastating_reversal"
+	var affected: StringName = &"attacker" if reversal else &"target"
+	var harness := TwoClientSyncHarness.new(seed_value)
+	var sim: CombatSimulation = harness.authority.simulation
+	sim.set_reward_state_snapshot({"mode": mode})
+	sim.set_attack_final_line_of_sight_resolver(func(_a: StringName, _b: StringName) -> bool: return true)
+	var source: CombatCharacterDefinitionResource = preload("res://data/characters/vaelis_thorn.tres").duplicate(true)
+	# Retain the authored Balance record; isolate the parent defense category.
+	source.combat_stats.merge({"at": 5, "acc": 20, "init": 100 if reversal else 0, "hpm": 30}, true)
+	if gate == "untrained":
+		source.proficiencies.balance = {"training": "untrained", "investments": 0, "scm": 0, "source_ref": "TEST-FIXTURE explicit untrained"}
+	elif gate == "missing_training": source.proficiencies.erase("balance")
+	elif gate == "missing_rb": source.combat_stats.erase("rb")
+	elif gate == "missing_scm": source.proficiencies.balance.erase("scm")
+	var affected_actor: CombatActorDefinition = source.instantiate_actor(affected, "Balance Fixture", PackedStringArray(["fixture_weapon", "block_weapon", "shield"]))
+	if outcome != "hard_fall":
+		affected_actor.combat_stats.erase("dt")
+		affected_actor.combat_stats.erase("dp")
+	if outcome != "brought_down": affected_actor.combat_stats.erase("physical_soak")
+	if gate == "missing_source": affected_actor.source_character_definition = null
+	var attacker := affected_actor if reversal else _actor(&"attacker", 100, PackedStringArray(["fixture_weapon"]))
+	var target := _actor(&"target", 0, PackedStringArray(["counter_weapon", "shield"])) if reversal else affected_actor
+	sim.register_actor(attacker)
+	sim.register_actor(target)
+	var weapon: CombatBlockDefinition = null
+	var shield: CombatBlockDefinition = null
+	if outcome == "knocked_down":
+		weapon = CombatBlockDefinition.new(CombatBlockDefinition.TYPE_WEAPON, &"block_weapon", 20, 0, true)
+	if outcome == "driven_down" or reversal:
+		var contact: Variant = null if gate == "missing_contact" else true
+		shield = CombatBlockDefinition.new(CombatBlockDefinition.TYPE_SHIELD, &"shield", 20, 0, true, true, 2, PackedStringArray(["TEST-FIXTURE"]), contact)
+	var profile := CombatDefenseProfile.new(&"balance_defense", PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]), {}, weapon, shield)
+	sim.register_defense_profile(&"target", profile)
+	if gate == "chain":
+		var counter_block := CombatBlockDefinition.new(CombatBlockDefinition.TYPE_WEAPON, &"block_weapon", 20, 0, true)
+		sim.register_defense_profile(&"attacker", CombatDefenseProfile.new(&"counter_block", PackedStringArray(["dodge", "weapon_block", "shield_block", "physical_soak"]), {}, counter_block))
+	else:
+		_register_no_defense(sim, &"attacker")
+	if reversal:
+		sim.register_critical_reaction_attack(&"target", _attack(&"balance_counter", &"counter_weapon"), true)
+	if gate == "temporary_dex":
+		sim.get_actor_state(affected).timed_stat_effects["39i_dex"] = {"source_ref": "TEST-FIXTURE DEX -3", "source_action_instance_id": "39i_dex_activation", "stat_modifiers": {"dex": -3}, "expires_at_us": 10_000_000}
+	sim.begin_combat()
+	var definition := _attack(&"balance_parent")
+	definition.physical_soak_eligible = outcome == "brought_down"
+	var started := sim.start_physical_attack(&"attacker", &"target", definition, "39i_attack", &"torso", true)
+	var action_id := ""
+	if not reversal:
+		var action := sim.start_action(affected, CombatActionDefinition.new(&"balance_ongoing_action", 3), "39i_ongoing")
+		action_id = action.get("action_instance_id", "")
+	sim.advance_to(1_000_000)
+	var attack := sim.get_attack(started.get("attack_instance_id", ""))
+	if gate == "protected" or gate == "shield_protected": attack.same_attack_condition_protected_actor_id = affected
+	if gate == "already_prone": sim.set_actor_defense_state(affected, &"aware", PackedStringArray(["prone"]))
+	var context := CombatDodgeContext.new(CombatDodgeContext.SELECTION_RESOLVED, Vector2i(1_000_000, 0), 1_000_000, false, true, true, "TEST-FIXTURE", &"step", &"open", true, true, true, 0, "legal step")
+	var result := sim.resolve_pending_defense(attack.attack_instance_id, "39i_defense", context)
+	_expect_true(result.success, "39I: parent defense must resolve for %s/%s." % [outcome, gate])
+	return {"sim": sim, "harness": harness, "profile": profile, "attack": attack, "affected": affected, "action_id": action_id}
+
+
+func _expect_live_balance_outcome(fixture: Dictionary, outcome: String, natural: int, success: bool) -> CombatEvent:
+	var sim: CombatSimulation = fixture.sim
+	var event := _live_balance_event(sim, outcome)
+	_expect_true(event != null and event.payload.has("balance_check"), "39I: %s must record a real Balance check." % outcome)
+	if event == null or not event.payload.has("balance_check"): return null
+	var check: Dictionary = event.payload.balance_check
+	var record := sim.get_critical_record(event.payload.critical_record_id)
+	_expect_equal(check.natural_roll, natural, "39I: preserve the seeded Balance d20.")
+	_expect_equal(check.check_success, success, "39I: Balance result must match the expected footing outcome.")
+	_expect_equal([check.critical_success, check.critical_failure], [natural == 1, natural == 20], "39I: natural skill critical flags must be exact.")
+	_expect_equal(check.rng_draw_index, record.rarity_rng_draw_index + 1, "39I: Balance follows its causal rarity draw.")
+	_expect_equal(event.parent_event_id, record.event_id, "39I: effect evidence must retain its critical parent.")
+	_expect_equal(event.payload.affected_actor_id, String(fixture.affected), "39I: check must belong to the actor at risk of falling.")
+	_expect_equal(sim.get_actor_state(fixture.affected).conditions.has("prone"), not success, "39I: failed Balance alone applies prone.")
+	_expect_true(not sim.get_actor_state(fixture.affected).conditions.has("critical_stagger"), "39I: no phantom Stagger.")
+	return event
+
+
+func _live_balance_event(sim: CombatSimulation, outcome: String) -> CombatEvent:
+	for event: CombatEvent in sim.get_resolved_events():
+		if event.event_type in [&"critical_prone_applied", &"critical_effect_blocked", &"critical_effect_unavailable"] and event.payload.get("outcome_id") == outcome:
+			return event
+	return null
+
+
+func _seed_for_live_balance(reversal: bool, balance_roll: int, chain: bool = false) -> int:
+	for seed_value in range(1, 1_000_000):
+		var preview := DeterministicCombatRng.new(seed_value)
+		preview.next_int(1, 10)
+		preview.next_int(1, 10)
+		if preview.next_int(1, 20) not in range(2, 20): continue
+		if preview.next_int(1, 20) != (1 if reversal else 20): continue
+		var rarity := preview.next_int(1, 100)
+		if rarity not in (range(96, 101) if reversal else range(71, 96)): continue
+		var footing_roll := preview.next_int(1, 20)
+		if chain and footing_roll > 9: continue
+		if not chain and footing_roll != balance_roll: continue
+		if reversal and preview.next_int(1, 20) not in range(2, 20): continue
+		if chain:
+			if preview.next_int(1, 20) != 20: continue
+			if preview.next_int(1, 100) not in range(71, 96): continue
+			if preview.next_int(1, 20) <= 9: continue
+		return seed_value
+	_expect_true(false, "39I: no seed found for the requested Balance fixture.")
+	return 0
+
+
+func _test_live_balance_chain_and_replay() -> void:
+	var seed_value := _seed_for_live_balance(true, 0, true)
+	if seed_value == 0: return
+	var preview := DeterministicCombatRng.new(seed_value)
+	preview.next_int(1, 10)
+	preview.next_int(1, 10)
+	preview.next_int(1, 20)
+	preview.next_int(1, 20)
+	preview.next_int(1, 100)
+	var expected_roll := preview.next_int(1, 20)
+	var replays: Array = []
+	for replay_index in range(2):
+		var fixture := _live_balance_fixture("devastating_reversal", seed_value, "chain")
+		var sim: CombatSimulation = fixture.sim
+		var parent := _expect_live_balance_outcome(fixture, "devastating_reversal", expected_roll, true)
+		if parent == null: return
+		var reaction := _reaction_attack(sim)
+		_expect_true(reaction != null and reaction.action_instance_id.is_empty(), "39I: counterattack still costs zero Acts.")
+		if reaction == null: return
+		_expect_equal(reaction.rng_draw_index, 7, "39I: fresh reaction ACC follows the Balance draw.")
+		_expect_true(sim.resolve_pending_defense(reaction.attack_instance_id, "39i_chain_defense").success, "39I: reaction permits ordinary legal defenses.")
+		var child := _live_balance_event(sim, "knocked_down")
+		_expect_true(child != null and child.payload.has("balance_check"), "39I: chained Knocked Down earns its own Balance check.")
+		if child == null or not child.payload.has("balance_check"): return
+		_expect_true(child.payload.balance_check.opportunity_id != parent.payload.balance_check.opportunity_id, "39I: distinct criticals have distinct opportunity identities.")
+		_expect_equal(child.payload.balance_check.rng_draw_index, 10, "39I: child check follows child defense and rarity.")
+		_expect_true(sim.get_actor_state(fixture.affected).conditions.has("prone"), "39I: the failed child check applies prone.")
+		var before := sim.get_state_snapshot().duplicate(true)
+		_expect_equal(before.schema_version, 12, "39I: Balance evidence must preserve schema 12.")
+		var rng_before := sim.random.wave_entry_state()
+		var event_count := sim.get_resolved_events().size()
+		_expect_true(not sim.resolve_pending_defense(reaction.attack_instance_id, "39i_chain_defense").success, "39I: duplicate public defense request must reject.")
+		var record := sim.get_critical_record(child.payload.critical_record_id)
+		var effect: Dictionary = CombatCriticalConsequenceCatalog.get_outcome(record.roll_category, record.result_kind, record.rarity).effects[0]
+		sim._resolve_critical_knockdown(record, reaction, effect, sim.get_defense_profile(fixture.affected))
+		_expect_equal(sim.get_state_snapshot(), before, "39I: duplicate consequence cannot mutate state.")
+		_expect_equal(sim.random.wave_entry_state(), rng_before, "39I: duplicate consequence cannot draw RNG.")
+		_expect_equal(sim.get_resolved_events().size(), event_count, "39I: duplicate consequence emits no event.")
+		var harness: TwoClientSyncHarness = fixture.harness
+		var envelopes := harness.authority.publish_current_events()
+		for envelope: CombatEventEnvelope in envelopes: harness.client_a.receive(envelope)
+		for index in range(envelopes.size() - 1, -1, -1):
+			harness.client_b.receive(envelopes[index])
+			harness.client_b.receive(envelopes[index])
+		_expect_true(harness.compare_clients().success, "39I: reversed and duplicate deliveries must converge.")
+		_expect_equal(harness.client_a.get_state_digest(), harness.authority.get_state_digest(), "39I: client digest must match authority.")
+		replays.append({"snapshot": before, "rng": rng_before, "digest": harness.authority.get_state_digest()})
+	_expect_equal(replays[0], replays[1], "39I: same seed reproduces full history, RNG and snapshot.")
