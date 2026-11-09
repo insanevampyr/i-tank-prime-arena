@@ -25,6 +25,7 @@ resource_maxima = {"blood": 10, "mana": 20}
 defensive_capabilities = {
 "dodge": true, "physical_soak": true, "shield_block": false, "weapon_block": false
 }
+proficiencies = {"balance": {"training": "trained", "investments": 2, "scm": 0, "source_ref": "Supplied Vaelis JSON skills Balance SI 2 modifier 0 and SCM 0; PRIME-V3 pp. 27, 67, 69, 107"}}
 running_profile = {
 "roll_bonus": 0, "running_skill_investment": 3, "skill_check_modifier": 0
 }

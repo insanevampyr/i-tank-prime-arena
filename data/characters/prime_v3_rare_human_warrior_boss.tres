@@ -69,7 +69,7 @@ ability_access = {
 proficiencies = {
 "alertness": {"check_formula": "WIT -4", "investments": 3},
 "ambidextrous": {"automatic": true},
-"balance": {"check_formula": "DEX -1", "investments": 1},
+"balance": {"check_formula": "DEX -1", "investments": 1, "training": "trained", "scm": 0, "source_ref": "Existing verified boss proficiency Balance SI 1 and authored combat_stats SCM 0; PRIME-V3 pp. 27, 67, 69, 107"},
 "camping": {"check_formula": "END -1", "investments": 2},
 "direction_sense": {"automatic": true},
 "land_riding": {"check_formula": "END -2", "investments": 1},

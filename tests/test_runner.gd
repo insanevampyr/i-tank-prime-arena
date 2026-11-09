@@ -1,5 +1,7 @@
 extends SceneTree
 
+const BalanceFoundationTests = preload("res://tests/test_balance_skill_foundation.gd")
+
 const DormantAttributeTests = preload("res://tests/test_task_37c_dormant_attributes.gd")
 const AttributeProjectionTests = preload("res://tests/test_task_37c_attribute_projection.gd")
 const CombatShadowTests = preload("res://tests/test_task_37c_combat_shadow.gd")
@@ -101,6 +103,7 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name": "Task 39H Balance skill foundation", "instance": BalanceFoundationTests.new()},
 		{"name":"Task 37C disposable Profile V3 storage", "instance":DisposableV3StorageTests.new()},
 		{"name":"Task 37C dormant DEAD attribute evaluator", "instance":DeadAttributeEvaluatorTests.new()},
 		{"name":"Task 37C dormant life-state history", "instance":LifeStateHistoryTests.new()},
