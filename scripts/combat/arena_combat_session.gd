@@ -2657,11 +2657,12 @@ func _resolve_rage_knockback(attacker_id: StringName, target_id: StringName, dis
 		roundi(direction.x * float(distance_microfeet)),
 		roundi(direction.y * float(distance_microfeet))
 	)
-	var result := _battlefield.resolve_motion(
+	var result := _battlefield.resolve_knockback_motion(
 		target_id,
 		target_state.position_microfeet,
 		desired,
-		_actor_occupancy()
+		_actor_occupancy(),
+		target_state.elevation_microfeet
 	)
 	result["facing_millidegrees"] = target_state.facing_millidegrees
 	return result

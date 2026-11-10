@@ -103,6 +103,8 @@ var _current_opening_rank: int = 0
 var _opening_rank_count: int = 0
 var _attack_final_line_of_sight_resolver: Callable
 var _rage_knockback_resolver: Callable
+# Rebuilt by authoritative execution from causal damage and source identities.
+var _knockback_opportunity_ids: Dictionary = {}
 var _special_touch_resolver: Callable
 var _gatherable_material_resolver: Callable
 var _world_item_landing_resolver: Callable
@@ -2733,24 +2735,7 @@ func _absorb_with_persistent_damage_shield(target_state: CombatActorState, incom
 
 
 func _apply_force_shield_attacker_knockback(attack: CombatAttackInstance, knockback_microfeet: int, parent_event_id: String) -> void:
-	if knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
-		return
-	var attacker_state := get_actor_state(attack.attacker_id)
-	if attacker_state == null:
-		return
-	var start := attacker_state.position_microfeet
-	var result: Variant = _rage_knockback_resolver.call(attack.target_id, attack.attacker_id, knockback_microfeet)
-	if typeof(result) != TYPE_DICTIONARY or not (result as Dictionary).get("success", false):
-		return
-	var destination: Vector2i = (result as Dictionary).get("position_microfeet", start)
-	if destination != start:
-		apply_authoritative_forced_position(attack.attacker_id, destination, int((result as Dictionary).get("facing_millidegrees", attacker_state.facing_millidegrees)), parent_event_id, "force_shield_knockback")
-	_record_resolved_event(clock.get_elapsed_us(), &"force_shield_knockback_resolved", _get_actor_initiative(String(attack.target_id)), attack.target_id, attack.attacker_id, {
-		"attack_instance_id": attack.attack_instance_id,
-		"requested_distance_microfeet": knockback_microfeet,
-		"start_microfeet": [start.x, start.y], "position_microfeet": [destination.x, destination.y],
-		"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
-	}, parent_event_id)
+	_resolve_source_knockback(attack.attack_instance_id, attack.target_id, attack.attacker_id, knockback_microfeet, "force_shield_knockback", parent_event_id)
 
 
 func resolve_nac_projectile_damage(attack_instance_id: String, request_id: String, interrupt_executing_action: bool = true) -> Dictionary:
@@ -2797,30 +2782,14 @@ func resolve_nac_projectile_damage(attack_instance_id: String, request_id: Strin
 		"final_damage": final_damage, "hpc_before": hpc_before,
 		"hpc_after": int(target_state.current_hpc), "damage_applied": final_damage > 0,
 	}, parent_event_id, PackedStringArray(), {"hpc": final_damage})
-	_apply_special_projectile_knockback(attack, event.event_id)
+	if final_damage > 0 or _reward_state.get("mode") != ArenaRewardLedger.MODE_NORMAL:
+		_apply_special_projectile_knockback(attack, event.event_id)
 	if interrupt_executing_action: _schedule_nac_physical_action_interruption(attack, event.event_id)
 	return _success({"final_damage": final_damage, "event_id": event.event_id})
 
 
 func _apply_special_projectile_knockback(attack: CombatAttackInstance, parent_event_id: String) -> void:
-	if attack.special_knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
-		return
-	var target_state := get_actor_state(attack.target_id)
-	if target_state == null:
-		return
-	var start := target_state.position_microfeet
-	var result: Variant = _rage_knockback_resolver.call(attack.attacker_id, attack.target_id, attack.special_knockback_microfeet)
-	if typeof(result) != TYPE_DICTIONARY or not (result as Dictionary).get("success", false):
-		return
-	var destination: Vector2i = (result as Dictionary).get("position_microfeet", start)
-	if destination != start:
-		apply_authoritative_forced_position(attack.target_id, destination, int((result as Dictionary).get("facing_millidegrees", target_state.facing_millidegrees)), parent_event_id, "force_bolt_knockback")
-	_record_resolved_event(clock.get_elapsed_us(), &"force_bolt_knockback_resolved", _get_actor_initiative(String(attack.attacker_id)), attack.attacker_id, attack.target_id, {
-		"attack_instance_id": attack.attack_instance_id,
-		"requested_distance_microfeet": attack.special_knockback_microfeet,
-		"start_microfeet": [start.x, start.y], "position_microfeet": [destination.x, destination.y],
-		"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
-	}, parent_event_id)
+	_resolve_source_knockback(attack.attack_instance_id, attack.attacker_id, attack.target_id, attack.special_knockback_microfeet, "force_bolt_knockback", parent_event_id)
 
 
 func _schedule_nac_physical_action_interruption(attack: CombatAttackInstance, parent_event_id: String) -> void:
@@ -2942,32 +2911,72 @@ func _apply_successful_hit_knockback(attack: CombatAttackInstance, parent_event_
 			knockback_microfeet = amount
 			effect_id = String(key)
 			break
-	if knockback_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
+	_resolve_source_knockback(attack.attack_instance_id, attack.attacker_id, attack.target_id, knockback_microfeet, "rage_knockback", parent_event_id, effect_id)
+
+
+func _resolve_source_knockback(
+	attack_instance_id: String,
+	source_id: StringName,
+	target_id: StringName,
+	distance_microfeet: int,
+	kind: String,
+	parent_event_id: String,
+	effect_id: String = ""
+) -> void:
+	if distance_microfeet <= 0 or not _rage_knockback_resolver.is_valid():
 		return
-	var result: Variant = _rage_knockback_resolver.call(attack.attacker_id, attack.target_id, knockback_microfeet)
-	if typeof(result) != TYPE_DICTIONARY:
+	var state := get_actor_state(target_id)
+	if state == null:
 		return
-	var resolution: Dictionary = result
-	if not resolution.get("success", false):
+	var use_balance: bool = _reward_state.get("mode") == ArenaRewardLedger.MODE_NORMAL
+	var opportunity_id := "%s:%s:%s" % [parent_event_id, kind, target_id]
+	if use_balance:
+		if _knockback_opportunity_ids.has(opportunity_id):
+			return
+		# Reserve before geometry resolution so even reentrant processing cannot repeat the effect.
+		_knockback_opportunity_ids[opportunity_id] = true
+	var start := state.position_microfeet
+	var result: Variant = _rage_knockback_resolver.call(source_id, target_id, distance_microfeet)
+	if typeof(result) != TYPE_DICTIONARY or not result.get("success", false):
 		return
-	var destination: Vector2i = resolution.get("position_microfeet", target_state.position_microfeet)
-	var start := target_state.position_microfeet
+	if use_balance and typeof(result.get("position_microfeet")) != TYPE_VECTOR2I:
+		return
+	var destination: Vector2i = result.get("position_microfeet", start)
+	var blocked := bool(result.get("blocked", false))
+	if use_balance and destination == start and not blocked:
+		return
 	if destination != start:
-		apply_authoritative_forced_position(attack.target_id, destination, int(resolution.get("facing_millidegrees", target_state.facing_millidegrees)), parent_event_id, "rage_knockback")
-	_record_resolved_event(
-		clock.get_elapsed_us(), &"rage_knockback_resolved", _get_actor_initiative(String(attack.attacker_id)),
-		attack.attacker_id, attack.target_id,
-		{
-			"attack_instance_id": attack.attack_instance_id,
-			"effect_id": effect_id,
-			"requested_distance_microfeet": knockback_microfeet,
-			"start_microfeet": [start.x, start.y],
-			"position_microfeet": [destination.x, destination.y],
-			"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
-			"blocked": bool(resolution.get("blocked", false)),
-			"collision_reason": String(resolution.get("reason", "")),
-		}, parent_event_id
-	)
+		apply_authoritative_forced_position(target_id, destination, int(result.get("facing_millidegrees", state.facing_millidegrees)), parent_event_id, kind)
+	var payload := {
+		"attack_instance_id": attack_instance_id,
+		"requested_distance_microfeet": distance_microfeet,
+		"start_microfeet": [start.x, start.y],
+		"position_microfeet": [destination.x, destination.y],
+		"resolved_distance_microfeet": roundi(Vector2(destination - start).length()),
+	}
+	if kind == "rage_knockback":
+		payload["effect_id"] = effect_id
+	if kind == "rage_knockback" or use_balance:
+		payload["blocked"] = blocked
+		payload["collision_reason"] = String(result.get("reason", ""))
+	if use_balance or _reward_state.get("mode") == ArenaRewardLedger.MODE_DEV_NORMAL:
+		var contact: Dictionary = result.get("collision_contact", {"status": "unsupported", "reason": "contact_evidence_unavailable"}).duplicate(true)
+		if contact.status == "verified_static_wall":
+			contact["impact_id"] = opportunity_id + ":impact"
+		payload["collision_contact"] = contact
+	if use_balance:
+		payload["balance_opportunity_id"] = opportunity_id
+		if state.current_hpc != null and int(state.current_hpc) <= 0:
+			payload["balance_reason"] = "balance_actor_incapacitated"
+		else:
+			var check := _roll_footing_balance(target_id, opportunity_id)
+			if not check.success:
+				payload["balance_reason"] = check.reason
+			else:
+				payload["balance_check"] = check
+				if not check.check_success:
+					_add_actor_condition(state, "prone")
+	_record_resolved_event(clock.get_elapsed_us(), StringName(kind + "_resolved"), _get_actor_initiative(String(source_id)), source_id, target_id, payload, parent_event_id)
 
 
 func schedule_interruption(
@@ -5687,18 +5696,12 @@ func _resolve_critical_knockdown(
 	if not use_balance:
 		_apply_prone(record, actor_id, effect)
 		return
-	var actor := get_actor_definition(actor_id)
 	var actor_state := get_actor_state(actor_id)
 	if actor_state != null and actor_state.conditions.has("prone"):
 		_record_critical_effect(record, effect, &"critical_effect_blocked", false, "balance_not_required_already_prone")
 		return
-	var source: CombatCharacterDefinitionResource = actor.source_character_definition if actor != null else null
-	var captured := BalanceActorProfile.capture(source, actor, actor_state, clock.get_elapsed_us())
-	if not captured.success:
-		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, captured.reason)
-		return
 	var opportunity_id := "%s:%s:%s" % [record.critical_record_id, effect_id, actor_id]
-	var check := BalanceSkillCheck.roll(captured.profile, random, opportunity_id)
+	var check := _roll_footing_balance(actor_id, opportunity_id)
 	if not check.success:
 		_record_critical_effect(record, effect, &"critical_effect_unavailable", false, check.reason)
 		return
@@ -5707,6 +5710,15 @@ func _resolve_critical_knockdown(
 	else:
 		_add_actor_condition(actor_state, "prone")
 		_record_critical_effect(record, effect, &"critical_prone_applied", true, "", check)
+
+
+func _roll_footing_balance(actor_id: StringName, opportunity_id: String) -> Dictionary:
+	var actor := get_actor_definition(actor_id)
+	var source: CombatCharacterDefinitionResource = actor.source_character_definition if actor != null else null
+	var captured := BalanceActorProfile.capture(source, actor, get_actor_state(actor_id), clock.get_elapsed_us())
+	if not captured.success:
+		return captured
+	return BalanceSkillCheck.roll(captured.profile, random, opportunity_id)
 
 
 func _apply_prone(record: CombatCriticalRecord, actor_id: StringName, effect: Dictionary) -> void:

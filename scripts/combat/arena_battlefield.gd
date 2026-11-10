@@ -11,6 +11,7 @@ var actor_radius_microfeet: int
 var navigation_authoritative: bool
 var maximum_altitude_microfeet: int
 var _obstacles: Array[Dictionary] = []
+var _solid_knockback_walls: Dictionary = {}
 var _hazards: Array[Dictionary] = []
 var _gatherable_material_regions: Array[Dictionary] = []
 var _direct_path_exact_sample_count: int = 0
@@ -33,6 +34,9 @@ func _init(
 	maximum_altitude_microfeet = p_maximum_altitude_microfeet
 	for obstacle: Dictionary in p_obstacles:
 		assert(obstacle.has("id") and obstacle.has("rect_microfeet"), "Every battlefield obstacle needs a stable ID and rectangle.")
+		var obstacle_id := String(obstacle["id"])
+		_solid_knockback_walls[obstacle_id] = not _solid_knockback_walls.has(obstacle_id) \
+			and not obstacle_id.strip_edges().is_empty() and obstacle.get("knockback_surface") == "solid_wall"
 		_obstacles.append({
 			"id": String(obstacle["id"]),
 			"rect_microfeet": obstacle["rect_microfeet"],
@@ -70,6 +74,7 @@ static func create_task16_test_arena() -> ArenaBattlefield:
 		[
 			{
 				"id": "center_wall",
+				"knockback_surface": "solid_wall",
 				"rect_microfeet": Rect2i(29_000_000, 8_000_000, 2_000_000, 12_000_000),
 				"hazard_tier": 0,
 				"height_microfeet": 8_000_000,
@@ -266,6 +271,162 @@ func resolve_motion(
 		"blocked": resolved != desired_microfeet,
 		"reason": "collision_limited" if resolved != desired_microfeet else "legal",
 	}
+
+
+# Preserve the existing X-then-Y endpoint. Verify contact separately from motion legality.
+func resolve_knockback_motion(
+	actor_id: StringName,
+	start: Vector2i,
+	desired: Vector2i,
+	occupancy: Dictionary,
+	elevation_microfeet: int
+) -> Dictionary:
+	var motion := resolve_motion(actor_id, start, desired, occupancy)
+	if not motion.success:
+		return motion
+	var contact := {"status": "none"}
+	if motion.blocked:
+		contact = _knockback_wall_contact(actor_id, start, desired, motion.position_microfeet, occupancy, elevation_microfeet)
+	motion["collision_contact"] = contact
+	return motion
+
+
+func _knockback_wall_contact(
+	actor_id: StringName,
+	start: Vector2i,
+	desired: Vector2i,
+	resolved: Vector2i,
+	occupancy: Dictionary,
+	elevation_microfeet: int
+) -> Dictionary:
+	if elevation_microfeet != 0:
+		return _unsupported_contact("elevated_knockback")
+	# Bound the cross products and squared length used for exact corner arithmetic.
+	if absi(int(desired.x) - start.x) > 1_000_000_000 or absi(int(desired.y) - start.y) > 1_000_000_000:
+		return _unsupported_contact("contact_arithmetic_out_of_bounds")
+	var legs: Array[Dictionary] = []
+	var prevented := Vector2i.ZERO
+	for axis in range(2):
+		if desired[axis] == resolved[axis]:
+			continue
+		var end := Vector2i(resolved.x, start.y) if axis == 0 else resolved
+		var leg := _verify_knockback_wall_face(actor_id, axis, start[axis], desired[axis], end, occupancy)
+		if leg.has("status"):
+			return leg
+		prevented[axis] = leg.prevented_microfeet
+		legs.append(leg)
+	var corner := legs.size() == 2
+	var shared_center := Vector2i.ZERO
+	if corner:
+		var push := desired - start
+		# Compare rational contact times without rounding or converting to floats.
+		if int(legs[0].travel_microfeet) * absi(push.y) != int(legs[1].travel_microfeet) * absi(push.x):
+			return _unsupported_contact("sequential_wall_contacts")
+		shared_center = Vector2i(legs[0].center.x, legs[1].center.y)
+		if not is_position_legal(actor_id, shared_center, occupancy).legal:
+			return _unsupported_contact("corner_contact_unverified")
+		for axis in range(2):
+			var shared_leg := _verify_knockback_wall_face(actor_id, axis, start[axis], desired[axis], shared_center, occupancy)
+			if shared_leg.has("status") or shared_leg.center != shared_center:
+				return _unsupported_contact("corner_contact_unverified")
+			for wall: Dictionary in legs[axis].walls:
+				if not shared_leg.walls.has(wall):
+					return _unsupported_contact("corner_contact_unverified")
+			legs[axis] = shared_leg
+	var contacts: Array[Dictionary] = []
+	for leg: Dictionary in legs:
+		var center: Vector2i = shared_center if corner else leg.center
+		var normal: Vector2i = leg.normal
+		for wall: Dictionary in leg.walls:
+			var rect: Rect2i = wall.rect_microfeet
+			var point := (center - normal * actor_radius_microfeet).clamp(rect.position, rect.end)
+			contacts.append({
+				"wall_id": wall.id,
+				"blocking_normal": [normal.x, normal.y],
+				"contact_point_microfeet": [point.x, point.y],
+				"prevented_microfeet": leg.prevented_microfeet,
+			})
+	return {
+		"status": "verified_static_wall",
+		"contacts": contacts,
+		"prevented_components_microfeet": [prevented.x, prevented.y],
+		"prevented_microfeet": _floor_contact_length(prevented),
+	}
+
+
+func _verify_knockback_wall_face(
+	actor_id: StringName,
+	axis: int,
+	start: int,
+	desired: int,
+	end: Vector2i,
+	occupancy: Dictionary
+) -> Dictionary:
+	var inward := Vector2i.ZERO
+	inward[axis] = 1 if desired > start else -1
+	var center := end
+	var probe := center + inward
+	var blocker := is_position_legal(actor_id, probe, occupancy)
+	if blocker.legal:
+		# The sampled search can stop one microfoot short of the exact legal face.
+		center = probe
+		probe += inward
+		blocker = is_position_legal(actor_id, probe, occupancy)
+	if blocker.get("reason") != "blocked_by_obstacle":
+		return _unsupported_contact(String(blocker.get("reason", "wall_contact_unverified")))
+	if _non_wall_blocks_contact(actor_id, probe, occupancy):
+		return _unsupported_contact("mixed_wall_contact")
+	var prevented := (desired - center[axis]) * inward[axis]
+	if prevented <= 0:
+		return _unsupported_contact("wall_contact_unverified")
+	var walls: Array[Dictionary] = []
+	for wall: Dictionary in _obstacles:
+		var rect: Rect2i = wall.rect_microfeet
+		if not _position_overlaps_rect(probe, rect, actor_radius_microfeet):
+			continue
+		if not _solid_knockback_walls.get(wall.id, false) or rect.size.x <= 0 or rect.size.y <= 0:
+			return _unsupported_contact("surface_unclassified")
+		var face := rect.position[axis] - actor_radius_microfeet if inward[axis] > 0 else rect.end[axis] + actor_radius_microfeet
+		if center[axis] != face:
+			return _unsupported_contact("wall_face_unverified")
+		walls.append(wall)
+	return {"center": center, "normal": -inward, "walls": walls,
+		"prevented_microfeet": prevented, "travel_microfeet": absi(center[axis] - start)}
+
+
+func _non_wall_blocks_contact(actor_id: StringName, probe: Vector2i, occupancy: Dictionary) -> bool:
+	var inset := Vector2i(actor_radius_microfeet, actor_radius_microfeet)
+	var minimum := bounds_microfeet.position + inset
+	var maximum := bounds_microfeet.end - inset
+	if probe.clamp(minimum, maximum) != probe:
+		return true
+	var separation := actor_radius_microfeet * 2
+	for key: Variant in occupancy:
+		if StringName(key) == actor_id:
+			continue
+		var offset: Vector2i = occupancy[key] - probe
+		if offset.length_squared() < separation * separation:
+			return true
+	return false
+
+
+static func _unsupported_contact(reason: String) -> Dictionary:
+	return {"status": "unsupported", "reason": reason}
+
+
+static func _floor_contact_length(components: Vector2i) -> int:
+	# Count each blocked axis once, even if several faces share that normal.
+	var squared := int(components.x) * components.x + int(components.y) * components.y
+	var low := 0
+	var high := components.x + components.y + 1
+	while low + 1 < high:
+		@warning_ignore("integer_division")
+		var middle := (low + high) / 2
+		if middle * middle <= squared:
+			low = middle
+		else:
+			high = middle
+	return low
 
 
 func is_path_clear(
