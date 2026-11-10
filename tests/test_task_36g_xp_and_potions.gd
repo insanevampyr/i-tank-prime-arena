@@ -12,7 +12,9 @@ func run() -> Array[String]:
 	var dev := _rewards(Ledger.MODE_DEV_NORMAL)
 	_expect(normal.earned == 690 and dev.earned == 6900, "Arena rewards and developer multiplier must total 690/6900.")
 	_expect(normal.drops == dev.drops and normal.items == dev.items and normal.rng == dev.rng, "XP multiplier must not change drops, item identity or RNG.")
+	_expect(_rewards(Ledger.MODE_NORMAL, 1) == normal and _rewards(Ledger.MODE_NORMAL, 10) == dev, "Explicit multipliers must reproduce the corresponding legacy awards, loot and RNG for the same level.")
 	_expect(_rewards(Ledger.MODE_TEST).earned == 0, "TEST MODE must remain reward-free.")
+	_test_run_bound_reward_policy()
 	_expect(Catalog.get_reward("common_goblin").xp == 1 and Catalog.get_reward("common_spadoodle").xp == 3 and Catalog.get_reward("common_skelly").xp == 10, "Printed source EXP must remain unmodified.")
 	_test_combat_potions()
 	_test_player_npc_potion_parity()
@@ -23,7 +25,7 @@ func run() -> Array[String]:
 	return _failures
 
 
-func _rewards(mode: String) -> Dictionary:
+func _rewards(mode: String, xp_multiplier: Variant = null) -> Dictionary:
 	var simulation := CombatSimulation.new(367)
 	var actor_fixture := Fixture.make_player_actor(Fixture.PLAYER_CHARACTER_VAELIS)
 	# Isolate the multiplier/drop contract: real level-up HD rolls are covered by 36H.
@@ -31,7 +33,7 @@ func _rewards(mode: String) -> Dictionary:
 	simulation.register_actor(actor_fixture)
 	simulation.set_world_item_landing_resolver(func(_item: Dictionary, _position: Vector2i) -> bool: return true)
 	var ledger := Ledger.new()
-	ledger.configure(mode, &"player", 11)
+	ledger.configure(mode, &"player", 11, 0, xp_multiplier)
 	var ids := ["wave_1_common_goblin_01", "wave_2_common_spadoodle_01", "wave_3_common_skelly_01", "wave_3_hades_combat_follower_01", "wave_4_mini_gargoyle_swarmer_01"]
 	var expected := [10, 30, 50, 100, 500]
 	for index in range(ids.size()):
@@ -39,8 +41,22 @@ func _rewards(mode: String) -> Dictionary:
 		simulation.register_actor(actor)
 		simulation.get_actor_state(actor.actor_id).current_hpc = 0
 		var result := ledger.process_defeat(simulation, actor.actor_id, "defeat:%s" % ids[index])
-		if mode != Ledger.MODE_TEST: _expect(result.get("xp") == expected[index] * (10 if mode == Ledger.MODE_DEV_NORMAL else 1), "Each individual creature award must use its Arena value.")
+		if mode != Ledger.MODE_TEST:
+			var multiplier: int = (10 if mode == Ledger.MODE_DEV_NORMAL else 1) if xp_multiplier == null else xp_multiplier
+			var award: Dictionary = ledger.awards.back()
+			_expect(result.get("xp") == expected[index] * multiplier and award.arena_xp == expected[index] and award.xp_multiplier == multiplier and award.defeat_event_id == "defeat:%s" % ids[index], "Each award must preserve the Arena base value, multiplier and defeat identity.")
+			var before := simulation.get_state_snapshot()
+			_expect(not ledger.process_defeat(simulation, actor.actor_id, award.defeat_event_id).success and simulation.get_state_snapshot() == before, "Repeated defeat cannot change XP, loot or RNG.")
 	var reward_snapshot := {"earned": ledger.earned_xp, "drops": ledger.drop_resolutions.duplicate(true), "items": simulation.get_world_items_snapshot(), "rng": simulation.random.to_dictionary()}
+	var events: Array[Dictionary] = []
+	for event: CombatEvent in simulation.get_resolved_events():
+		events.append(event.to_dictionary())
+	reward_snapshot["events"] = events
+	if xp_multiplier != null:
+		var harness := TwoClientSyncHarness.new(367)
+		harness.authority.simulation = simulation
+		harness.deliver_in_order(harness.authority.publish_current_events())
+		_expect(harness.compare_clients().success and harness.client_a.get_state_snapshot() == simulation.get_state_snapshot(), "An explicit reward policy and its awards must converge on both clients.")
 	if mode == Ledger.MODE_DEV_NORMAL:
 		var state := simulation.get_actor_state(&"player")
 		state.current_hpc = 3
@@ -48,6 +64,42 @@ func _rewards(mode: String) -> Dictionary:
 		_expect(ledger.purchase_advancement(simulation, "dev:sr", &"special_resistance", &"sr").get("success", false), "Developer NORMAL must allow verified SR advancement.")
 		_expect(ledger.spent_xp == 2000 and state.current_hpc == 3 and state.resources.mana == 2, "Advancement must spend exact XP without refills.")
 	return reward_snapshot
+
+
+func _test_run_bound_reward_policy() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	for multiplier: int in [1, 10]:
+		var scene := (load("res://scenes/test_arena.tscn") as PackedScene).instantiate()
+		tree.root.add_child(scene)
+		var controller: ArenaCombatController = scene.get_node("CombatController")
+		controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
+		var requested := Ledger.resolve_run_policy(Ledger.MODE_NORMAL, multiplier)
+		var prepared := controller._prepare_encounter_fixture(false, {}, {}, requested)
+		_expect(prepared.success, "An explicitly disposable run can admit XP ×%d." % multiplier)
+		if not prepared.success:
+			scene.free()
+			continue
+		var session := controller.get_combat_session_for_testing()
+		requested.xp_multiplier = 0
+		var policy := session.get_run_reward_policy()
+		_expect(policy.xp_multiplier == multiplier and session._playable_persistence == null, "Admission must retain its own policy without binding a saved profile.")
+		var before := session.get_state_snapshot()
+		var dev: Button = scene.get_node("HUD/UI/DevToolsButton")
+		dev.pressed.emit()
+		dev.pressed.emit()
+		_expect(not session.configure_reward_mode(Ledger.MODE_DEV_NORMAL).success and session.get_state_snapshot() == before, "READY policy and RNG survive visibility toggles and a rejected change.")
+		session.set_opponent_behavior_enabled(false)
+		controller.press_encounter_control_for_testing()
+		_expect(session.is_encounter_active() and not session.configure_reward_mode(Ledger.MODE_DEV_NORMAL).success, "Active combat rejects a policy change.")
+		for id: String in session.get_targetable_enemy_ids():
+			session.get_actor_state(StringName(id)).current_hpc = 0
+		session.advance_by(1)
+		_expect(session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME and not session.configure_reward_mode(Ledger.MODE_DEV_NORMAL).success, "Downtime rejects a policy change.")
+		_expect(session.request_next_wave().success and session.get_run_reward_policy() == policy, "NEXT WAVE retains the admitted policy.")
+		controller._reset_encounter()
+		_expect(session.get_run_reward_policy() == policy and session.get_reward_state().get("xp_multiplier", 1) == multiplier and session.get_reward_state().earned_xp == 0, "Disposable RESET restores its entry policy with fresh reward totals.")
+		scene.free()
+	_expect(not Ledger.resolve_run_policy(Ledger.MODE_TEST, 10).success and not Ledger.resolve_run_policy(Ledger.MODE_NORMAL, 1.0).success, "Reject TEST overrides and noninteger multipliers.")
 
 
 func _session() -> ArenaCombatSession:

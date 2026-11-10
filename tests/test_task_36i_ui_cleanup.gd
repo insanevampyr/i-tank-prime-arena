@@ -150,10 +150,12 @@ func _test_toolbar_geometry() -> void:
 	var dev_button: Button = ui.get_node("DevToolsButton")
 	var log_button: Button = ui.get_node("LogButton")
 	var debug_button: Button = ui.get_node("DebugButton")
-	_expect(dev_button.is_visible_in_tree() and not log_button.is_visible_in_tree() and not debug_button.is_visible_in_tree(), "The DEV switch stays visible while diagnostics are hidden.")
+	var xp_button: Button = ui.get_node("XpMultiplierButton")
+	_expect(dev_button.is_visible_in_tree() and not log_button.is_visible_in_tree() and not debug_button.is_visible_in_tree() and not xp_button.is_visible_in_tree(), "The DEV switch stays visible while the toolbox is hidden.")
 	dev_button.pressed.emit()
-	var buttons: Array[Button] = [ui.get_node("EncounterSelector"), log_button, debug_button, ui.get_node("EncounterButton"), dev_button]
+	var buttons: Array[Button] = [ui.get_node("EncounterSelector"), log_button, debug_button, ui.get_node("EncounterButton"), dev_button, xp_button]
 	buttons[0].text = "DEV NORMAL — XP ×10"
+	xp_button.text = "XP ×10: OFF\nNEXT RUN · NOW ×10"
 	for display in [Vector2(1650, 928), Vector2(1152, 648), Vector2(960, 540), Vector2(800, 450), Vector2(800, 360), Vector2(915, 412), Vector2(390, 844)]:
 		# Include stretched browser canvas and unscaled viewports.
 		var viewport: Vector2 = Vector2(1152, 648) if display.x == 1650 else display

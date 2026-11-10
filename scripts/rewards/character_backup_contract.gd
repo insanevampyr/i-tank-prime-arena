@@ -77,7 +77,7 @@ static func validate_history(history: Dictionary, save_namespace: String) -> Dic
 		if not scan.success: return scan
 		var decoded := Contract.decode(row.document)
 		if not decoded.success: return fail(decoded.get("reason","invalid_character_document"))
-		if decoded.get("version") != 2: return fail("unsupported_character_version")
+		if decoded.get("version") not in [Contract.PROFILE_VERSION, Contract.RUN_REWARD_PROFILE_VERSION]: return fail("unsupported_character_version")
 		var payload: Dictionary = decoded.payload
 		if index == 0:
 			var baseline := String(payload.get("lineage",{}).get("baseline_digest",""))

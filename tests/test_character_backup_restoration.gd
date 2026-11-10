@@ -35,10 +35,17 @@ func run() -> Array[String]:
 	c._session.set_opponent_behavior_enabled(false)
 	helper._defeat_wave(c._session)
 	check(helper._failures.is_empty(),"Source physical-combat fixture remains legal.")
+	check(c._session.request_next_wave().success,"Secure a legacy Wave 2 entry before starting a new run.")
+	c._session.get_actor_state(&"player").current_hpc = 0
+	c._session.advance_by(1)
+	var authorized := c._session.get_return_to_wave_one_authorization()
+	check(authorized.success and c._prepare_encounter_fixture(true, authorized.checkpoint, {}, ArenaRewardLedger.resolve_run_policy("dev_normal", 1)).success,"Create a source V4 run with ×1 in the legacy DEV namespace.")
+	helper._defeat_wave(c._session)
 	var exported := CharacterBackupReader.new().begin_export(c._session._playable_persistence)
 	check(exported.get("success",false) and exported.history.size() > 1,"Actual committed multi-generation source exports.")
 	helper._free(scene)
 	if exported.get("success",false):
+		check(CharacterSaveContract.decode(exported.history[0].document).version == 2 and CharacterSaveContract.decode(exported.history.back().document).version == 4,"Backup carries exact V2 and V4 generations.")
 		test_native(exported)
 		test_web(exported)
 		check(not Restore.new().begin(exported.text,"normal",null,make_storage("namespace")).success,"Wrong namespace rejected before ownership/publication.")
@@ -54,8 +61,9 @@ func test_native(exported: Dictionary) -> void:
 	PlayableCharacterPersistence.test_storage = destination
 	var scene := helper._scene()
 	var c: ArenaCombatController = scene.get_node("CombatController")
-	c._encounter_selector_index = 8
-	check(c._session.configure_reward_mode("dev_normal").success,"Matching destination namespace selected.")
+	c._encounter_selector_index = 7
+	c._encounter_selector.pressed.emit()
+	check(c._session.get_reward_mode() == "dev_normal","Matching destination namespace selected.")
 	var original := c._session.get_state_snapshot()
 	var actions := c._backup_actions
 	actions._namespace = "dev_normal"
@@ -72,6 +80,7 @@ func test_native(exported: Dictionary) -> void:
 	check(actions.last_result.get("state") == "verified_committed","Actual confirmation publishes and acknowledges complete history.")
 	var loaded := c._session._playable_persistence
 	check(loaded != null and loaded._prior == exported.payload,"Actual playable admission restores exact permanent/checkpoint data.")
+	check(c._session.get_run_reward_policy().xp_multiplier == 1,"Restoring V4 under DEV recovers ×1 rather than the legacy ×10 default.")
 	var actor := c._session.get_actor_state(&"player")
 	check(actor.current_hpc == exported.payload.recovery.player.current_hpc and actor.resources == exported.payload.recovery.player.resources and actor.persistent_damage_shields == exported.payload.recovery.player.persistent_damage_shields,"Live checkpoint resources and protection are restored without refilling.")
 	check(CharacterSaveStorage.history_records(destination.inspect_profile(exported.manifest.profile_id)) == exported.history,"Native restoration retains exact original transactions and documents.")
@@ -136,8 +145,8 @@ func test_web(exported: Dictionary) -> void:
 	PlayableBrowserPersistence.test_factory = func() -> CharacterBrowserStorage: return CharacterBrowserStorage.new(backend.transport)
 	var scene := helper._scene()
 	var c: ArenaCombatController = scene.get_node("CombatController")
-	c._encounter_selector_index = 8
-	c._session.configure_reward_mode("dev_normal")
+	c._encounter_selector_index = 7
+	c._encounter_selector.pressed.emit()
 	var actions := c._backup_actions
 	actions._namespace = "dev_normal"
 	actions.preview_text(exported.text)

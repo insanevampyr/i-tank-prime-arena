@@ -73,6 +73,9 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 	for field: String in LINEAGE_FIELDS: payload.lineage[field] = evidence.get(field)
 	if evidence.has("profile_namespace"): payload["profile_namespace"] = save_namespace
 	if evidence.has("run_history"): payload["run_history"] = evidence.run_history.duplicate()
+	if evidence.has("run_reward_policy"):
+		if not evidence.run_reward_policy is Dictionary: return _fail("invalid_run_reward_policy")
+		payload["run_reward_policy"] = evidence.run_reward_policy.duplicate(true)
 	if evidence.has("equipment_state"):
 		if evidence.equipment_state != {"hands":state.hand_occupancy,"handling":state.weapon_handling}: return _fail("equipment_state_source_mismatch")
 		payload["equipment_state"] = evidence.equipment_state.duplicate(true)
@@ -81,6 +84,8 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 		payload.permanent["development"] = state.progression.development.duplicate(true)
 	var candidate := hydrate(payload, source, String(payload.character_id), String(payload.rules_revision), verifier)
 	if not candidate.get("success",false): return candidate
+	if payload.has("run_reward_policy") and not _ledger_matches_run_policy(payload, ledger):
+		return _fail("run_reward_policy_ledger_mismatch")
 	var reconstructed: CombatActorDefinition = candidate.actor_definition
 	var source_definition := actor.to_dictionary()
 	source_definition.actor_id = String(reconstructed.actor_id)
@@ -188,15 +193,46 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		if not recovery_validation.success: return recovery_validation
 		var ledger: Dictionary = payload.recovery.ledger
 		if ledger.get("mode") != save_namespace or ledger.get("earned_xp") != b.earned or ledger.get("spent_xp") != b.spent or ledger.get("player_level") != p.level: return _fail("recovery_progression_generation_mismatch")
+		if payload.has("run_reward_policy") and not _ledger_matches_run_policy(payload, ledger):
+			return _fail("run_reward_policy_ledger_mismatch")
+	if payload.has("recovery") or payload.has("run_reward_policy"):
+		var multipliers := run_xp_multipliers(payload) if payload.has("run_reward_policy") else {}
 		for award: Dictionary in p.award_receipts:
-			var parts: PackedStringArray = String(award.award_id).split("/")
-			if parts.size() != 6 or parts[-2] != "defeat": return _fail("recovery_award_identity_unverified")
-			var creature := PrimeV3RewardCatalog.creature_id_for_actor(StringName(parts[-1]))
-			var expected_xp := int(PrimeV3RewardCatalog.ARENA_XP_OVERRIDES.get(creature,-1)) * (10 if save_namespace == "dev_normal" else 1)
-			if award.xp != expected_xp: return _fail("recovery_award_value_unverified")
+			var verified := validate_playable_xp_award(payload, award, multipliers)
+			if not verified.success: return verified
 	# Candidate is permanent-only: deliberately NOT CombatActorState.new(actor),
 	# whose constructor would refill HPC/Mana/AP/daily allowances.
 	return {"success":true,"actor_definition":actor,"permanent":p.duplicate(true),"xp":payload.xp.duplicate(true),"purchases":payload.purchases.duplicate(true),"items":payload.items.duplicate(true),"hand_occupancy":ownership.hands,"shield_blocks":ownership.shields,"profile_id":profile_id}
+
+# Call only after validating the policy-bearing payload.
+static func run_xp_multipliers(payload: Dictionary) -> Dictionary:
+	var policy: Dictionary = payload.run_reward_policy
+	var multipliers := {}
+	var legacy_multiplier := ArenaRewardLedger.legacy_xp_multiplier(payload.profile_namespace)
+	for index in range(policy.legacy_run_count):
+		multipliers[payload.run_history[index]] = legacy_multiplier
+	for entry: Dictionary in policy.runs:
+		multipliers[entry.run_id] = entry.xp_multiplier
+	return multipliers
+
+static func _ledger_matches_run_policy(payload: Dictionary, ledger: Dictionary) -> bool:
+	var legacy_multiplier := ArenaRewardLedger.legacy_xp_multiplier(payload.profile_namespace)
+	var multiplier: Variant = ledger.get("xp_multiplier", legacy_multiplier)
+	return typeof(multiplier) == TYPE_INT and multiplier == payload.run_reward_policy.runs.back().xp_multiplier
+
+static func validate_playable_xp_award(payload: Dictionary, award: Dictionary, multipliers: Dictionary) -> Dictionary:
+	var parts := String(award.award_id).split("/")
+	if parts.size() != 6 or parts[4] != "defeat": return _fail("recovery_award_identity_unverified")
+	var multiplier := ArenaRewardLedger.legacy_xp_multiplier(payload.get("profile_namespace", "normal"))
+	if not multipliers.is_empty():
+		if parts[0] != payload.character_id or parts[1] != payload.lineage.run_id or not parts[5].begins_with(parts[3] + "_"):
+			return _fail("recovery_award_identity_unverified")
+		if not multipliers.has(parts[2]): return _fail("recovery_award_run_unverified")
+		multiplier = multipliers[parts[2]]
+	var creature := PrimeV3RewardCatalog.creature_id_for_actor(StringName(parts[5]))
+	var base_xp := int(PrimeV3RewardCatalog.ARENA_XP_OVERRIDES.get(creature, -1))
+	if base_xp < 0 or award.xp != base_xp * multiplier: return _fail("recovery_award_value_unverified")
+	return {"success": true, "run_id": parts[2], "wave_id": parts[3]}
 
 static func _ownership(payload: Dictionary, actor: CombatActorDefinition, catalog: CombatDefinitionCatalog) -> Dictionary:
 	var quantities := {}

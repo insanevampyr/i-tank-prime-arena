@@ -113,6 +113,11 @@ func _exercise(storage: CharacterSaveStorage, mode: String, runs: int, root: Str
 			_expect(storage.read_profile(profile_id).payload == secured,"A rejected return cannot replace the last verified generation.")
 			storage.reject_writes = false
 		PlayableCharacterPersistence.test_run_id = "run_%s_return_%s" % [mode,index+1]
+		var exercise_mixed_policy := index == runs - 1
+		var multiplier := 1 if mode == "dev_normal" and exercise_mixed_policy else 10
+		controller._dev_tools_button.pressed.emit()
+		_expect(controller._xp_multiplier_button.visible and not controller._xp_multiplier_button.disabled and controller._xp_multiplier_button.text == "XP ×10: OFF\nNEXT RUN · NOW ×%d" % session.get_run_reward_policy().xp_multiplier, "Verified defeat permits a default-OFF next policy and displays the current multiplier separately.")
+		if multiplier == 10: controller._xp_multiplier_button.pressed.emit()
 		controller._return_wave_one_button.pressed.emit()
 		var returned := controller.get_combat_session_for_testing()
 		_expect(returned != session and returned._current_reward_wave_id() == "wave_1" and returned.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY,"RETURN must create a fresh ready Wave 1 through the real button.")
@@ -124,6 +129,10 @@ func _exercise(storage: CharacterSaveStorage, mode: String, runs: int, root: Str
 		_expect(saved.generation == secured.generation+1 and saved.recovery.phase == "entry" and saved.recovery.wave_id == "wave_1","A verified new Wave-1 entry must publish before replacement is accepted.")
 		for field: String in ["xp","purchases","items","permanent","settlements"]: _expect(saved[field] == secured[field],"RETURN must preserve secured %s exactly, excluding failed-wave changes." % field)
 		_expect(saved.run_history.size() == secured.run_history.size()+1 and saved.run_history.back() == PlayableCharacterPersistence.test_run_id,"Each legitimate return has one fresh authorized run identity.")
+		_expect(saved.run_reward_policy.legacy_run_count == 1 and saved.run_reward_policy.runs.back() == {"run_id":saved.recovery.run_id,"xp_multiplier":multiplier},"The first entry atomically secures the V4 run ID and its selected policy.")
+		_expect(CharacterSaveContract.decode(storage.read_profile(profile_id).document).version == 4,"The published document must use envelope V4.")
+		_expect(controller._xp_multiplier_button.disabled and controller._xp_multiplier_button.text.ends_with("LOCKED"), "Adopted RETURN locks the verified new-run multiplier.")
+		controller._dev_tools_button.pressed.emit()
 		var player := returned.get_actor_state(&"player")
 		_expect(player.current_hpc == returned.get_actor_max_hpm(&"player") and player.resources == returned.simulation.get_actor_definition(&"player").resource_maxima and player.ability_daily_remaining == player.ability_daily_maxima,"Existing NEW RUN maxima/daily restoration applies exactly once.")
 		_expect(player.persistent_damage_shields.is_empty() and player.timed_stat_effects.is_empty() and player.conditions.is_empty(),"A fresh run must not retain old run-only combat effects.")
@@ -140,6 +149,7 @@ func _exercise(storage: CharacterSaveStorage, mode: String, runs: int, root: Str
 		scene = _scene(mode)
 		controller = scene.get_node("CombatController")
 		var reopened := controller.get_combat_session_for_testing()
+		_expect(reopened.get_run_reward_policy().xp_multiplier == multiplier,"Cold load must recover the recorded multiplier instead of the namespace default.")
 		_expect(reopened._playable_persistence.items == saved.items and reopened.get_actor_state(&"player").current_hpc == player.current_hpc and reopened.get_actor_state(&"player").resources == player.resources,"Exit/reload must restore the newly secured character and entry.")
 		for field: String in CharacterWaveCheckpoint.PLAYER_FIELDS:
 			var actual: Variant = reopened.get_actor_state(&"player").get(field)
@@ -158,7 +168,30 @@ func _exercise(storage: CharacterSaveStorage, mode: String, runs: int, root: Str
 			for receipt: Dictionary in saved.settlements:
 				if receipt.kind == "xp" and receipt.run_id == secured.run_history.back(): new_run_receipts += 1
 			_expect(new_run_receipts > 0,"Repeated runs must secure fresh XP under their original distinct run identities.")
+		if exercise_mixed_policy:
+			_exercise_mixed_policy(controller, storage, profile_id, saved, multiplier)
 	PlayableTests.new()._free(scene)
+
+func _exercise_mixed_policy(controller: ArenaCombatController, storage: CharacterSaveStorage, profile_id: String, entry: Dictionary, multiplier: int) -> void:
+	var session := controller.get_combat_session_for_testing()
+	session.set_opponent_behavior_enabled(false)
+	controller._on_dev_tools_pressed()
+	controller._on_dev_tools_pressed()
+	controller._encounter_button.pressed.emit()
+	_defeat_wave(session)
+	var downtime: Dictionary = storage.read_profile(profile_id).payload
+	var awards: Array = session.get_reward_state().awards
+	var earned := 0
+	for award: Dictionary in awards:
+		_expect(award.xp_multiplier == multiplier and award.xp == award.arena_xp * multiplier,"Each new award uses the recovered run policy.")
+		earned += int(award.xp)
+	_expect(earned > 0 and downtime.recovery.phase == "downtime" and downtime.xp.earned == entry.xp.earned + earned,"Mixed-policy XP is permanently secured once.")
+	controller._encounter_button.pressed.emit()
+	var next: Dictionary = storage.read_profile(profile_id).payload
+	_expect(next.recovery.wave_id == "wave_2" and next.run_reward_policy == downtime.run_reward_policy and next.xp == downtime.xp,"NEXT WAVE carries the same durable policy without awarding XP twice.")
+	_defeat_player(controller)
+	controller._encounter_button.pressed.emit()
+	_expect(controller.get_combat_session_for_testing().get_run_reward_policy().xp_multiplier == multiplier and storage.read_profile(profile_id).payload == next,"V4 RETRY restores the exact checkpoint and recorded multiplier.")
 
 func _defeat_wave(session: ArenaCombatSession) -> void:
 	for id: String in session.get_targetable_enemy_ids(): _defeat_actor(session,StringName(id))

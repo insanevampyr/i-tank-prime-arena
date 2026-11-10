@@ -45,7 +45,8 @@ func stage() -> void:
 		target_factory()
 		make_scene()
 		restoring_target = true
-	controller._session.configure_reward_mode("dev_normal")
+	controller._encounter_selector_index = 7
+	controller._encounter_selector.pressed.emit()
 	var before := controller._session.get_state_snapshot()
 	controller._backup_actions._namespace = "dev_normal"
 	controller._backup_actions.preview_text(restore_text)

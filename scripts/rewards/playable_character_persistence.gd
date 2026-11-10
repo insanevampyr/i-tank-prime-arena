@@ -17,6 +17,7 @@ var mode := ""
 var profile_id := ""
 var run_id := ""
 var _runs: Array = []
+var _run_policy_history: Dictionary = {}
 var generation := 0
 var items: Array = []
 var receipts: Array = []
@@ -44,7 +45,7 @@ var _failure := ""
 var _reset := false
 var _status := {"persistent":false,"reason":"not_initialized","text":"Progress not saved"}
 
-func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}) -> Dictionary:
+func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, xp_multiplier: Variant = null) -> Dictionary:
 	mode = p_mode
 	if not defeated_checkpoint.is_empty() and not new_run: return _fail("defeat_restart_requires_new_run")
 	if mode not in ["normal","dev_normal"]: return _fail("test_mode_nonpersistent")
@@ -56,11 +57,13 @@ func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary
 	source = starter.source
 	profile_id = starter.profile_id
 	var history := storage.inspect_profile(profile_id)
-	return open_verified_history(starter,history,new_run,defeated_checkpoint)
+	return open_verified_history(starter, history, new_run, defeated_checkpoint, xp_multiplier)
 
 # Shared source/lineage/hydration path. Browser callers supply fully decoded,
 # verified history only after asynchronous lock acquisition and inspection.
-func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary) -> Dictionary:
+func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary, xp_multiplier: Variant = null) -> Dictionary:
+	var requested := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
+	if not requested.success: return requested
 	if history.get("success",false) and not history.get("generations",[]).is_empty():
 		var baseline := String(history.generations[0].payload.get("lineage",{}).get("baseline_digest",""))
 		if baseline.is_empty(): return _fail("profile_baseline_missing")
@@ -74,7 +77,7 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 		var after: Dictionary = history.generations[index].payload
 		if not CharacterSaveContract.validate_replacement(before,after).success or not Coordinator._validate_continuity(before,after).success or not Coordinator._validate_new_items(before,after).success: return _fail("profile_generation_continuity_invalid")
 	if history.generations.is_empty():
-		if not defeated_checkpoint.is_empty(): return _fail("defeated_profile_checkpoint_missing")
+		if new_run or not defeated_checkpoint.is_empty(): return _fail("new_run_profile_checkpoint_missing")
 		if history.get("profile_directory_exists",false): return _fail("empty_profile_history_requires_review")
 		_prior = starter.prepared.payload.duplicate(true)
 		items = _prior.items.duplicate(true)
@@ -85,11 +88,14 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 		if not candidate.success: return candidate
 		run_id = _new_run_id()
 		_runs = [run_id]
+		if xp_multiplier != null:
+			_run_policy_history = {"legacy_run_count": 0, "runs": [{"run_id": run_id, "xp_multiplier": requested.xp_multiplier}]}
 	else:
 		_prior = history.generations.back().payload.duplicate(true)
 		if _prior.get("profile_namespace") != mode or _prior.character_id != profile_id or _prior.rules_revision != Admission.RULES or _prior.get("lineage",{}).get("baseline_digest") != Profiles.fingerprint(source.to_dictionary()): return _fail("profile_source_namespace_mismatch")
 		if not _prior.has("recovery") or not _prior.has("equipment_state") or not _prior.has("run_history"): return _fail("legacy_profile_requires_explicit_boundary_migration")
 		_runs = _prior.run_history.duplicate()
+		_run_policy_history = _prior.get("run_reward_policy", {}).duplicate(true)
 		_lineage = _prior.lineage.duplicate(true)
 		if _lineage != starter.prepared.payload.lineage: return _fail("profile_lineage_mismatch")
 		_allowed_payloads[Profiles.fingerprint(_prior)] = _lineage.duplicate(true)
@@ -114,6 +120,9 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 			if not condition_policy.success: return _fail(condition_policy.reason)
 			run_id = _new_run_id()
 			if _runs.has(run_id): return _fail("run_identity_reused")
+			if _run_policy_history.is_empty():
+				_run_policy_history = {"legacy_run_count": _runs.size(), "runs": []}
+			_run_policy_history.runs.append({"run_id": run_id, "xp_multiplier": requested.xp_multiplier})
 			_runs.append(run_id)
 			recovery = {}
 	for receipt: Dictionary in receipts:
@@ -122,6 +131,11 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 	for purchase: Dictionary in _prior.purchases: _purchases[purchase.purchase_id] = purchase.purchase_id
 	for record: Dictionary in _prior.permanent.growth: _growth[record.growth_id+":"+str(record.level)] = record.growth_id
 	return {"success":true,"recovery":recovery.duplicate(true)}
+
+func get_run_reward_policy() -> Dictionary:
+	var multiplier: Variant = null
+	if not _run_policy_history.is_empty(): multiplier = _run_policy_history.runs.back().xp_multiplier
+	return ArenaRewardLedger.resolve_run_policy(mode, multiplier)
 
 static func validate_new_run_conditions(player: Dictionary) -> Dictionary:
 	# Called only after complete profile/checkpoint validation. This scopes the
@@ -310,7 +324,10 @@ func ingest(session: ArenaCombatSession) -> Dictionary:
 	var batch := session.simulation.get_resolved_events_from(_cursor)
 	if not batch.success: return _fail("ownership_cursor_invalid")
 	for event: CombatEvent in batch.events:
-		if String(event.event_type) == "reward_xp_awarded" and event.target_actor_id == &"player": _proved_awards[event.event_id] = event.payload.duplicate(true)
+		if String(event.event_type) == "reward_xp_awarded" and event.target_actor_id == &"player":
+			var proof := event.payload.duplicate(true)
+			proof["parent_event_id"] = event.parent_event_id
+			_proved_awards[event.event_id] = proof
 		if String(event.event_type) == "reward_advancement_purchased" and event.source_actor_id == &"player": _proved_purchases[event.event_id] = event.payload.duplicate(true)
 		if String(event.event_type) == "reward_character_level_gained" and event.source_actor_id == &"player": _proved_growth["%s:%s" % [event.payload.award_id,event.payload.level]] = event.payload.duplicate(true)
 		if event.source_actor_id != &"player": continue
@@ -417,11 +434,21 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 	var actor := session.simulation.get_actor_definition(&"player")
 	var ledger := session.get_reward_state()
 	if ledger.mode != mode: return _fail("persistent_mode_lineage_changed")
+	var multiplier: int = get_run_reward_policy().xp_multiplier
+	if session.get_run_reward_policy().xp_multiplier != multiplier or ledger.get("xp_multiplier", ArenaRewardLedger.legacy_xp_multiplier(mode)) != multiplier:
+		return _fail("persistent_run_reward_policy_changed")
 	for award: Dictionary in ledger.awards:
 		var key := String(award.get("award_event_id",""))
 		if _awards.has(key): continue
 		var proof: Dictionary = _proved_awards.get(key,{})
 		if proof.get("actor_id") != award.actor_id or proof.get("wave_id") != award.wave_id or proof.get("xp") != award.xp: return _fail("xp_award_authoritative_proof_missing")
+		if not _run_policy_history.is_empty():
+			var base_xp: Variant = award.get("arena_xp")
+			var defeat_event_id := String(award.get("defeat_event_id", ""))
+			if typeof(base_xp) != TYPE_INT or base_xp < 0 or award.xp != base_xp * multiplier or proof.get("arena_xp") != base_xp:
+				return _fail("xp_award_policy_proof_missing")
+			if proof.get("xp_multiplier") != multiplier or award.get("xp_multiplier") != multiplier or defeat_event_id.is_empty() or proof.get("defeat_event_id") != defeat_event_id or proof.get("parent_event_id") != defeat_event_id:
+				return _fail("xp_award_policy_proof_missing")
 		var id := "%s/starter_admission/%s/%s/defeat/%s" % [profile_id,run_id,award.wave_id,award.actor_id]
 		var receipt := {"award_id":id,"xp":int(award.xp)}
 		_awards[key] = receipt
@@ -450,6 +477,7 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 		var checkpoint_id := "%s/%s/%s" % [profile_id,run_id,session._current_reward_wave_id()]
 		if not checkpoints.has(checkpoint_id): checkpoints.append(checkpoint_id)
 	_evidence = _lineage.merged({"profile_namespace":mode,"run_history":_runs.duplicate(),"generation":generation+1,"items":items.filter(func(item: Dictionary) -> bool: return item.quantity > 0).duplicate(true),"award_receipts":_awards.duplicate(true),"purchase_ids":_purchases.duplicate(true),"growth_ids":_growth.duplicate(true),"secured_checkpoints":checkpoints,"equipment_state":equipment},true)
+	if not _run_policy_history.is_empty(): _evidence["run_reward_policy"] = _run_policy_history.duplicate(true)
 	var defense := session.simulation.get_defense_profile(&"player")
 	_source_binding = Profiles.fingerprint({"actor":actor.to_dictionary(),"state":state.to_dictionary(),"ledger":ledger,"defense":defense.to_dictionary()})
 	_projection_window = true

@@ -251,6 +251,13 @@ theme_override_font_sizes/font_size = 13
 text = "DEV OFF"
 tooltip_text = "Show or hide developer tools"
 
+[node name="XpMultiplierButton" type="Button" parent="HUD/UI"]
+visible = false
+disabled = true
+focus_mode = 0
+mouse_default_cursor_shape = 2
+text = "XP ×10: OFF\nLOCKED"
+
 [node name="EncounterSelector" type="Button" parent="HUD/UI"]
 layout_mode = 0
 offset_left = 596.0

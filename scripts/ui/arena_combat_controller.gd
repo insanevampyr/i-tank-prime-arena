@@ -65,6 +65,7 @@ var _event_history_generation: int = -1
 var _log_lines: Array[String] = []
 var _debug_log_lines: Array[String] = []
 var _dev_tools_enabled := false
+var _next_run_xp_boost := false
 var _applied_displacement_event_ids: Dictionary = {}
 var _pending_player_displacement_event_ids: Array[String] = []
 var _cached_transcript_text := ""
@@ -145,6 +146,7 @@ var _backup_actions: CharacterBackupActions
 @onready var _seed_apply_button: Button = get_node_or_null(seed_apply_button_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
 @onready var _dev_tools_button: Button = get_node_or_null(dev_tools_button_path)
+@onready var _xp_multiplier_button: Button = _dev_tools_button.get_parent().get_node_or_null("XpMultiplierButton") if _dev_tools_button != null else null
 @onready var _attack_readiness = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness = get_node_or_null(run_readiness_path)
 @onready var _log_button: Button = get_node_or_null(log_button_path)
@@ -193,6 +195,8 @@ func _ready() -> void:
 		_debug_button.pressed.connect(_on_debug_button_pressed)
 	if _dev_tools_button != null and not _dev_tools_button.pressed.is_connected(_on_dev_tools_pressed):
 		_dev_tools_button.pressed.connect(_on_dev_tools_pressed)
+	if _xp_multiplier_button != null:
+		_xp_multiplier_button.pressed.connect(_on_xp_multiplier_pressed)
 	if _log_button != null and not _log_button.pressed.is_connected(_on_log_button_pressed):
 		_log_button.pressed.connect(_on_log_button_pressed)
 	if _close_log_button != null and not _close_log_button.pressed.is_connected(_on_close_log_button_pressed):
@@ -556,6 +560,7 @@ func _on_dev_tools_pressed() -> void:
 		_log_button.visible = _dev_tools_enabled
 	_update_seed_editing_controls()
 	_update_developer_refresh_control()
+	_update_xp_multiplier_control()
 	_update_recent_results()
 
 
@@ -855,7 +860,8 @@ func _on_encounter_button_pressed() -> void:
 			_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(_next_wave_failure_reason)
 	elif _session._playable_persistence != null:
 		var completed := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY
-		var result := _prepare_encounter_fixture(completed)
+		var policy := _next_run_reward_policy() if completed else _session.get_run_reward_policy()
+		var result := _prepare_encounter_fixture(completed, {}, {}, policy)
 		close_rewards = result.get("success",false)
 		_last_ui_message = "Loading character." if result.get("state") == "pending" else ("New run ready." if result.get("success",false) and completed else ("Wave entry restored." if result.get("success",false) else "Recovery blocked: %s" % result.get("reason","unverified save")))
 	else:
@@ -880,11 +886,13 @@ func _on_encounter_selector_pressed() -> void:
 			else (Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD if _encounter_selector_index == 7 else Fixture.ENCOUNTER_WAVE_ONE_GOBLINS)
 		)
 	)
-	var result := _select_encounter_fixture(fixture)
+	var policy := _next_run_reward_policy() if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and not PlayableCharacterPersistence.test_nonpersistent else {}
+	var result := _select_encounter_fixture(fixture, policy)
 	if result.get("state") == "pending": return
 	if not result.get("success", false):
 		_encounter_selector_index = previous_index
 		_developer_test_mode = previous_test_mode
+		_update_presentation()
 
 
 static func _wave_fixture_for_number(wave_number: int) -> StringName:
@@ -920,10 +928,11 @@ func _on_character_selector_pressed() -> void:
 		_cancel_browser_creation()
 		return
 	var next_character := Fixture.PLAYER_CHARACTER_VAELIS if _player_character_id == Fixture.PLAYER_CHARACTER_GUARD else Fixture.PLAYER_CHARACTER_GUARD
-	_select_player_character(next_character)
+	var policy := _next_run_reward_policy() if next_character == Fixture.PLAYER_CHARACTER_VAELIS and _can_select_next_run_xp() else {}
+	_select_player_character(next_character, policy)
 
 
-func _select_player_character(player_character_id: StringName) -> Dictionary:
+func _select_player_character(player_character_id: StringName, reward_policy: Dictionary = {}) -> Dictionary:
 	_clear_attack_hold_intent()
 	if _session != null and _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY:
 		return {"success": false, "reason": "character_selection_requires_ready_state"}
@@ -931,10 +940,11 @@ func _select_player_character(player_character_id: StringName) -> Dictionary:
 		return {"success": false, "reason": "unsupported_player_character"}
 	var previous_character := _player_character_id
 	_player_character_id = player_character_id
-	var result := _select_encounter_fixture(_encounter_fixture_id)
+	var result := _select_encounter_fixture(_encounter_fixture_id, reward_policy)
 	if result.get("state") == "pending": return result
 	if not result.get("success", false):
 		_player_character_id = previous_character
+		_update_presentation()
 		return result
 	_last_ui_message = "%s selected. Press START." % Fixture.get_player_character_display_name(_player_character_id)
 	_update_presentation()
@@ -1003,7 +1013,7 @@ static func _fits_signed_64_bit(value: String) -> bool:
 	return true
 
 
-func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
+func _select_encounter_fixture(encounter_fixture_id: StringName, reward_policy: Dictionary = {}) -> Dictionary:
 	if _browser_transition_blocked(): return {"success":false,"reason":"character_storage_pending"}
 	var previous_motion := _player.capture_wave_entry_motion()
 	var previous_position := _player.position
@@ -1025,7 +1035,7 @@ func _select_encounter_fixture(encounter_fixture_id: StringName) -> Dictionary:
 	_invalidate_transcript_cache()
 	if _floating_combat_text != null:
 		_floating_combat_text.clear()
-	var result := _prepare_encounter_fixture()
+	var result := _prepare_encounter_fixture(false, {}, {}, reward_policy)
 	if not result.get("success",false):
 		if result.get("state") != "pending": _encounter_fixture_id = previous_fixture
 		_restore_profile_visual_state(previous_motion,previous_position)
@@ -1042,7 +1052,7 @@ func _on_return_to_wave_one_pressed() -> void:
 	_clear_attack_hold_intent()
 	var authorization := _session.get_return_to_wave_one_authorization()
 	var result: Dictionary = authorization
-	if authorization.get("success",false): result = _prepare_encounter_fixture(true,authorization.checkpoint)
+	if authorization.get("success",false): result = _prepare_encounter_fixture(true, authorization.checkpoint, {}, _next_run_reward_policy())
 	if result.get("state") == "pending":
 		_return_wave_one_failure_reason = ""
 		_last_ui_message = "Loading character."
@@ -1056,17 +1066,35 @@ func _on_return_to_wave_one_pressed() -> void:
 	_update_presentation()
 
 
-func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}, restored_head: Dictionary = {}) -> Dictionary:
-	if _use_browser_character_persistence(): return _begin_browser_load(new_run,defeated_checkpoint)
+func _selected_reward_policy() -> Dictionary:
+	var mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
+	return ArenaRewardLedger.resolve_run_policy(mode)
+
+
+func _next_run_reward_policy() -> Dictionary:
+	var policy := _selected_reward_policy()
+	if policy.mode == ArenaRewardLedger.MODE_TEST: return policy
+	return ArenaRewardLedger.resolve_run_policy(policy.mode, 10 if _next_run_xp_boost else 1)
+
+
+func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}, restored_head: Dictionary = {}, reward_policy: Dictionary = {}) -> Dictionary:
+	var policy := _selected_reward_policy() if reward_policy.is_empty() else reward_policy.duplicate()
+	policy["requested_xp_multiplier"] = reward_policy.get("xp_multiplier")
+	if _use_browser_character_persistence():
+		var pending := _begin_browser_load(new_run, defeated_checkpoint, null, restored_head, policy)
+		_update_xp_multiplier_control()
+		return pending
 	var previous_motion := _player.capture_wave_entry_motion()
 	var previous_position := _player.position
 	var previous_fixture := _encounter_fixture_id
 	var previous := _session
-	var result := _prepare_encounter_candidate(new_run,defeated_checkpoint,null,restored_head)
+	var result := _prepare_encounter_candidate(policy, new_run, defeated_checkpoint, null, restored_head)
 	if not result.get("success",false):
 		_session = previous
 		_encounter_fixture_id = previous_fixture
 		_restore_profile_visual_state(previous_motion,previous_position)
+	elif _session._playable_persistence != null:
+		_next_run_xp_boost = false
 	return result
 
 
@@ -1077,12 +1105,12 @@ func _restore_profile_visual_state(motion: Dictionary, previous_position: Vector
 	_player.restore_wave_entry_motion(motion)
 
 
-func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableBrowserPersistence = null, restored_head: Dictionary = {}) -> Dictionary:
+func _prepare_encounter_candidate(reward_policy: Dictionary, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableBrowserPersistence = null, restored_head: Dictionary = {}) -> Dictionary:
 	var previous_session := _session
 	var requested_seed: int = previous_session._seed_value if new_run and previous_session != null else combat_seed
 	_session = ArenaCombatSession.new(requested_seed, null, _encounter_fixture_id, _player_character_id)
-	var reward_mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
-	var persistent_setup := _session.prepare_playable_persistence(reward_mode,new_run,defeated_checkpoint,browser_service)
+	var reward_mode: String = reward_policy.mode
+	var persistent_setup := _session.prepare_playable_persistence(reward_mode, new_run, defeated_checkpoint, browser_service, reward_policy.get("requested_xp_multiplier"))
 	if browser_service != null and not persistent_setup.get("persistent",false):
 		_session = previous_session
 		return {"success":false,"reason":"persistent_browser_candidate_required"}
@@ -1115,9 +1143,7 @@ func _prepare_encounter_candidate(new_run: bool = false, defeated_checkpoint: Di
 		_session = previous_session
 		_last_ui_message = "Combat fixture blocked: %s" % String(setup.get("reason", "unknown setup failure"))
 		return setup
-	var reward_setup := _session.configure_reward_mode(
-		ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
-	)
+	var reward_setup := _session.configure_reward_mode(reward_mode)
 	if not reward_setup.get("success", false):
 		_session = previous_session
 		_last_ui_message = "Rewards blocked: %s" % _friendly_reason(String(reward_setup.get("reason", "reward setup failure")))
@@ -1205,16 +1231,18 @@ func _browser_status_text() -> String:
 func _can_cancel_browser_load() -> bool:
 	return not _web_operation.is_empty() and not _web_operation.get("lease_transferred",false) and _web_operation.get("phase") == "failed" and _web_operation.kind == "load" and _web_operation.service._prepared.is_empty()
 
-func _begin_browser_load(new_run: bool, defeated: Dictionary, backup_lease: PlayableBrowserPersistence = null, restored_head: Dictionary = {}) -> Dictionary:
+func _begin_browser_load(new_run: bool, defeated: Dictionary, backup_lease: PlayableBrowserPersistence = null, restored_head: Dictionary = {}, reward_policy: Dictionary = {}) -> Dictionary:
 	if not _web_operation.is_empty(): return {"success":false,"state":"pending"}
+	var policy := _selected_reward_policy() if reward_policy.is_empty() else reward_policy.duplicate()
 	_freeze_browser_motion()
 	var service := PlayableBrowserPersistence.new()
 	var previous: PlayableBrowserPersistence = _session._playable_persistence as PlayableBrowserPersistence if _session != null else null
 	if backup_lease != null: previous = backup_lease
 	_web_operation = {"service":service,"phase":"loading","kind":"load","new_run":new_run,"defeated":defeated.duplicate(true),"previous":_session,"motion":_player.capture_wave_entry_motion(),"position":_player.position,"fixture":_encounter_fixture_id}
 	_web_operation["restored_head"] = restored_head.duplicate(true)
+	_web_operation["reward_policy"] = policy
 	if backup_lease != null: _web_operation["backup_lease"] = backup_lease
-	var opened := service.open_browser("dev_normal" if _encounter_selector_index == 8 else "normal",previous,new_run,defeated)
+	var opened := service.open_browser(policy.mode, previous, new_run, defeated, policy.get("requested_xp_multiplier"))
 	_last_ui_message = "Loading character."
 	return opened
 
@@ -1249,11 +1277,11 @@ func _poll_browser_persistence() -> void:
 		if _web_creation_dialog == null:
 			_web_creation_dialog = ConfirmationDialog.new()
 			_web_creation_dialog.title = "Create Vaelis character?"
-			_web_creation_dialog.dialog_text = "No saved character exists in this browser profile. Create a new Vaelis?\nBrowser saves are local to this origin and may be deleted or evicted."
 			_web_creation_dialog.confirmed.connect(_confirm_browser_character)
 			_web_creation_dialog.canceled.connect(_cancel_browser_creation)
 			add_child(_web_creation_dialog)
 		_web_creation_dialog.title = "Create Vaelis (%s)?" % service.mode.replace("_"," ").to_upper()
+		_web_creation_dialog.dialog_text = "No saved character exists in this browser profile. Create a new Vaelis with XP ×%d?\nBrowser saves are local to this origin and may be deleted or evicted." % _web_operation.reward_policy.xp_multiplier
 		_web_creation_dialog.popup_centered()
 		return
 	if not response.get("success",false):
@@ -1261,7 +1289,7 @@ func _poll_browser_persistence() -> void:
 		_last_ui_message = service.status().text+". Press RETRY STORAGE."
 		return
 	if _web_operation.phase == "loading":
-		var built := _prepare_encounter_candidate(_web_operation.new_run,_web_operation.defeated,service,_web_operation.get("restored_head",{}))
+		var built := _prepare_encounter_candidate(_web_operation.reward_policy, _web_operation.new_run, _web_operation.defeated, service, _web_operation.get("restored_head",{}))
 		_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
 		_encounter_fixture_id = _web_operation.fixture
 		if not built.get("success",false) and built.get("state") != "pending":
@@ -1325,6 +1353,7 @@ func _adopt_browser_candidate() -> void:
 	_combat_inventory_open = false
 	if _rewards_panel != null: _rewards_panel.hide()
 	_last_ui_message = "Progress saved."
+	_next_run_xp_boost = false
 	_web_operation.clear()
 	_delta_us_remainder = 0.0
 	_update_combat_movement_lock()
@@ -1395,12 +1424,6 @@ func _reset_encounter() -> void:
 		_floating_combat_text.clear()
 	_delta_us_remainder = 0.0
 	if result.get("success", false):
-		var reward_reset := _session.configure_reward_mode(
-			ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
-		)
-		if not reward_reset.get("success", false):
-			_last_ui_message = "Reward RESET blocked: %s" % _friendly_reason(String(reward_reset.get("reason", "rejected")))
-			return
 		_session.select_target(_session.get_targetable_enemy_ids()[0])
 		_rebuild_encounter_visuals()
 		_append_log("Encounter reset: fixtures, clock, RNG and presentation restored.")
@@ -2426,7 +2449,7 @@ func _update_presentation() -> void:
 		_return_wave_one_button.tooltip_text = "Return blocked: %s" % _friendly_reason(_return_wave_one_failure_reason) if not _return_wave_one_failure_reason.is_empty() else "Start Wave 1 with the secured character and approved NEW RUN restoration."
 	if _encounter_selector != null:
 		_encounter_selector.text = (
-			("DEV NORMAL — XP ×10" if _encounter_selector_index == 8 else "NORMAL\nWAVE 1")
+			("DEV NORMAL" if _encounter_selector_index == 8 else "NORMAL\nWAVE 1")
 			if not _developer_test_mode
 			else (
 				"TEST MODE\nWAVE %d" % _encounter_selector_index
@@ -2446,6 +2469,7 @@ func _update_presentation() -> void:
 	if _seed_label != null:
 		_seed_label.text = "SEED %d" % _authoritative_seed()
 	_update_seed_editing_controls()
+	_update_xp_multiplier_control()
 	_update_recent_results()
 	if is_transcript_visible():
 		_refresh_transcript_view()
@@ -2658,6 +2682,41 @@ func _update_seed_editing_controls() -> void:
 			_seed_apply_button.release_focus()
 		_seed_apply_button.visible = seed_editable
 		_seed_apply_button.disabled = not seed_editable
+
+
+func _can_select_next_run_xp() -> bool:
+	if _session == null or _developer_test_mode or PlayableCharacterPersistence.test_nonpersistent or _browser_transition_blocked(): return false
+	var service := _session._playable_persistence
+	if service == null:
+		return _player_character_id == Fixture.PLAYER_CHARACTER_GUARD and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
+	if _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY:
+		return service.generation > 0 and service.recovery.get("phase") == "complete" and (service._prepared.is_empty() or service._last_ack)
+	return _session.get_return_to_wave_one_authorization().success
+
+
+func _on_xp_multiplier_pressed() -> void:
+	if not _dev_tools_enabled or not _can_select_next_run_xp(): return
+	_next_run_xp_boost = not _next_run_xp_boost
+	_update_xp_multiplier_control()
+
+
+func _update_xp_multiplier_control() -> void:
+	if _xp_multiplier_button == null: return
+	_xp_multiplier_button.visible = _dev_tools_enabled
+	var editable := _can_select_next_run_xp()
+	_xp_multiplier_button.disabled = not editable
+	var multiplier := int(_session.get_run_reward_policy().xp_multiplier) if _session != null else 1
+	var label := "LOCKED"
+	if editable:
+		label = "NEXT VAELIS RUN" if _session._playable_persistence == null else "NEXT RUN · NOW ×%d" % multiplier
+		multiplier = 10 if _next_run_xp_boost else 1
+	elif not _web_operation.is_empty() and _web_operation.kind == "load":
+		multiplier = _web_operation.reward_policy.xp_multiplier
+		label = "LOADING"
+	elif multiplier == 0:
+		label = "TEST · NO XP"
+	_xp_multiplier_button.text = "XP ×10: %s\n%s" % ["ON" if multiplier == 10 else "OFF", label]
+	_xp_multiplier_button.tooltip_text = "Choose XP for the next new Vaelis run. Saved runs keep their verified policy." if editable else "The XP policy is fixed for the current run."
 
 
 func _update_developer_refresh_control() -> void:

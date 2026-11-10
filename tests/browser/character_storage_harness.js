@@ -16,9 +16,38 @@ const make = suffix => api.testStore({testing: true, database: `${database}-${su
 const args = (document, generation, transaction_id = `test_txn_${generation + 1}`, fault) => ({profile, owner:"session_a", expected_generation: generation, transaction_id, document, ...(fault ? {fault} : {})});
 const txDone = tx => new Promise((resolve,reject) => {tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>{};});
 
+async function v4Storage(legacyDocument) {
+  // The Godot compatibility suites validate complete character/checkpoint
+  // semantics. This fixture isolates the browser's byte-level storage layer.
+  const legacy = JSON.parse(legacyDocument);
+  const payload = JSON.parse(legacy.payload_json);
+  payload.generation = 2;
+  payload.run_history = ["run_legacy", "run_new"];
+  payload.run_reward_policy = {legacy_run_count:1,runs:[{run_id:"run_new",xp_multiplier:10}]};
+  const body = JSON.stringify(payload);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(body))), b=>b.toString(16).padStart(2,"0")).join("");
+  const document = JSON.stringify({...legacy,version:4,payload_json:body,sha256:hash});
+  const store = make("v4");
+  await store.run("acquire",{profile,owner:"session_a"});
+  check((await store.run("publish",args(legacyDocument,0))).success,"V4 storage fixture preserves a real V2 prefix");
+  check((await store.run("publish",args(document,1,"v4-entry","abort"))).state === "failed" && (await store.run("inspect",{profile})).document === legacyDocument,"V4 abort leaves the V2 head unchanged");
+  check((await store.run("publish",args(document,1,"v4-entry","lost_ack"))).state === "recovery_required","V4 lost acknowledgment is uncertain");
+  check((await store.run("reconcile",args(document,1,"v4-entry"))).document === document && (await store.run("publish",args(document,1,"v4-entry"))).reason === "exact_retry_verified","V4 exact reconciliation and retry preserve bytes");
+  check((await store.run("publish",args(document,1,"stale-v4"))).reason === "stale_generation","Stale V4 writer cannot change the current generation");
+  const history = await store.run("inspect",{profile});
+  check(history.generation === 2 && history.generations[0].document === legacyDocument && history.document === document,"Fresh IndexedDB read retains exact mixed-generation history");
+  await store.close();
+  const destination = make("v4-restore");
+  await destination.run("acquire",{profile,owner:"session_a"});
+  const restored = await destination.run("restore",{profile,owner:"session_a",records:history.generations,expected:[]});
+  check(restored.success && JSON.stringify(restored.generations) === JSON.stringify(history.generations),"IndexedDB restores a mixed-version backup by exact history");
+  await destination.close();
+}
+
 async function core() {
   lines=[];passed=0;failed=0;
   const f = await fixtures;
+  await v4Storage(f.normal[0]);
   for (const unavailable of ["indexeddb","locks"]) {
     const absent=api.testStore({testing:true,database:`${database}-no-${unavailable}`,unavailable});
     const response=await absent.run(unavailable === "locks" ? "acquire" : "inspect",{profile,owner:"session_a"});

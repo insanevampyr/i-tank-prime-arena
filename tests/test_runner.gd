@@ -81,6 +81,7 @@ const Task36HFix1PlaytestTests = preload("res://tests/test_task_36h_fix1_playtes
 const Task36IUiCleanupTests = preload("res://tests/test_task_36i_ui_cleanup.gd")
 const Task36IFix3NacInputTests = preload("res://tests/test_task_36i_fix3_nac_input.gd")
 const CharacterProfileProjectionTests = preload("res://tests/test_character_profile_projection.gd")
+const RunRewardSaveContractTests = preload("res://tests/test_run_reward_save_contract.gd")
 const CharacterPersistenceCoordinatorTests = preload("res://tests/test_character_persistence_coordinator.gd")
 const CharacterPersistenceSessionTests = preload("res://tests/test_character_persistence_session.gd")
 const PlayableCharacterAdmissionTests = preload("res://tests/test_playable_character_admission.gd")
@@ -135,6 +136,7 @@ func _run_tests() -> void:
 		{"name":"Task 36J-Pass3 persistence session gates", "instance":CharacterPersistenceSessionTests.new()},
 		{"name":"Task 36J-Pass2 persistence coordinator", "instance":CharacterPersistenceCoordinatorTests.new()},
 		{"name":"Task 36J-Pass1 character projection", "instance":CharacterProfileProjectionTests.new()},
+		{"name":"Task 39S run reward save contract", "instance":RunRewardSaveContractTests.new()},
 		{"name":"Task 36I-Fix3 NAC input and concurrency", "instance":Task36IFix3NacInputTests.new()},
 		{"name":"Task 36I targeted UI cleanup", "instance":Task36IUiCleanupTests.new()},
 		{"name":"Task 36H-Fix1 playtest corrections", "instance":Task36HFix1PlaytestTests.new()},

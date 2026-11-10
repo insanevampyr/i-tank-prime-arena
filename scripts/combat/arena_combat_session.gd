@@ -120,6 +120,8 @@ var _gargoyle_failed_approach_counts: Dictionary = {}
 var _gargoyle_last_tactical_signatures: Dictionary = {}
 var _reward_ledger: ArenaRewardLedger
 var _reward_mode: String = ArenaRewardLedger.MODE_TEST
+var _run_reward_policy: Dictionary = {}
+var _run_rewards_configured := false
 var _reward_event_cursor: int = 0
 var _character_persistence := CharacterPersistenceSession.new()
 var _profile_binding_requested := false
@@ -805,19 +807,27 @@ func _register_selected_player() -> Dictionary:
 	return {"success": true}
 
 
-func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableCharacterPersistence = null) -> Dictionary:
+func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableCharacterPersistence = null, xp_multiplier: Variant = null) -> Dictionary:
 	if _initialized: return _failure("persistence_requires_fresh_session")
+	if not _run_reward_policy.is_empty(): return _failure("run_reward_policy_locked")
+	var policy := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
+	if not policy.success: return policy
 	if browser_service != null and (not browser_service is PlayableBrowserPersistence or browser_service.mode != mode or browser_service._browser_result.get("state") != "loaded" or not browser_service.candidate.get("success",false)): return _failure("verified_browser_admission_required")
 	if not defeated_checkpoint.is_empty():
 		if not new_run or mode != defeated_checkpoint.get("mode") or mode not in [ArenaRewardLedger.MODE_NORMAL,ArenaRewardLedger.MODE_DEV_NORMAL] or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 			return _failure("defeated_profile_mode_mismatch")
 		if (OS.has_feature("web") and browser_service == null) or _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]: return _failure("defeated_profile_encounter_not_authorized")
-	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or mode == "test" or PlayableCharacterPersistence.test_nonpersistent: return {"success":true,"persistent":false}
-	if _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]: return {"success":true,"persistent":false}
+	var disposable := _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or mode == ArenaRewardLedger.MODE_TEST or PlayableCharacterPersistence.test_nonpersistent or _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
+	if policy.xp_multiplier != ArenaRewardLedger.legacy_xp_multiplier(mode) and (_profile_binding_requested or (disposable and browser_service != null)):
+		return _failure("xp_override_requires_disposable_run")
+	if disposable:
+		_run_reward_policy = policy
+		return {"success":true,"persistent":false}
 	if OS.has_feature("web") and browser_service == null: return _failure("browser_profile_loading_required")
 	var service := browser_service if browser_service != null else PlayableCharacterPersistence.new()
-	var opened := {"success":true} if browser_service != null else service.open(mode,new_run,defeated_checkpoint)
+	var opened := {"success":true} if browser_service != null else service.open(mode, new_run, defeated_checkpoint, xp_multiplier)
 	if not opened.success: return opened
+	_run_reward_policy = service.get_run_reward_policy()
 	_playable_persistence = service
 	_entry_bootstrap = service.recovery.duplicate(true)
 	if _entry_bootstrap.is_empty(): _encounter_fixture_id = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
@@ -845,6 +855,7 @@ func get_return_to_wave_one_authorization() -> Dictionary:
 
 
 func finalize_playable_persistence() -> Dictionary:
+	if not _run_reward_policy.is_empty() and not _run_rewards_configured: return _failure("run_reward_policy_not_configured")
 	if _playable_persistence == null: return {"success":true,"persistent":false}
 	_authorized_entry_write = true
 	var result := _playable_persistence.bind_runtime(self)
@@ -857,7 +868,7 @@ func finalize_playable_persistence() -> Dictionary:
 
 
 func bind_character_profile_before_initialization(source: CombatCharacterDefinitionResource, profile_id: String, rules_revision: String, authority: Callable, isolated_storage: CharacterSaveStorage = null) -> Dictionary:
-	if _initialized or _profile_binding_requested: return _failure("profile_binding_requires_new_session")
+	if _initialized or _profile_binding_requested or not _run_reward_policy.is_empty(): return _failure("profile_binding_requires_new_session")
 	_profile_binding_requested = true
 	# Host-only seam. The current fixtures have no instance/admission authority;
 	# the controller never constructs profile IDs or supplies a verifier.
@@ -895,6 +906,7 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 
 
 func start_encounter() -> Dictionary:
+	if not _run_reward_policy.is_empty() and not _run_rewards_configured: return _failure("run_reward_policy_not_configured")
 	if _playable_persistence is PlayableBrowserPersistence and _playable_persistence.pending_or_unsecured(): return _failure("character_storage_pending")
 	if not _character_persistence.can_start_run():
 		return {"success":false,"reason":"character_profile_not_ready","persistence":get_character_persistence_status()}
@@ -924,6 +936,7 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 		_playable_persistence = null
 	simulation = CombatSimulation.new(_seed_value)
 	_reward_ledger = ArenaRewardLedger.new()
+	_run_rewards_configured = false
 	_reward_event_cursor = 0
 	_attack_definition = null
 	_attack_definitions_by_actor.clear()
@@ -970,6 +983,19 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_gargoyle_last_tactical_signatures.clear()
 	_opponent_movement_round_index = -1
 	_opponent_movement_spent_microfeet = 0
+	if _run_reward_policy.is_empty():
+		return _initialize_reset_fixture(start_active)
+	var reset := _initialize_reset_fixture(false)
+	if not reset.success: return reset
+	var rewards := configure_reward_mode(_run_reward_policy.mode)
+	if not rewards.success: return rewards
+	if start_active:
+		var started := start_encounter()
+		if not started.success: return started
+	return reset
+
+
+func _initialize_reset_fixture(start_active: bool) -> Dictionary:
 	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_ONE_GOBLINS:
 		return initialize_wave_one_goblins(_initial_player_position_microfeet, _initial_opponent_position_microfeet, start_active)
 	if _encounter_fixture_id == Fixture.ENCOUNTER_WAVE_TWO_SPADOODLES:
@@ -987,13 +1013,17 @@ func configure_reward_mode(mode: String) -> Dictionary:
 	if _encounter_active:
 		return _failure("reward_mode_locked_during_active_encounter")
 	if _playable_persistence != null and mode != _playable_persistence.mode: return _failure("persistent_profile_mode_locked")
+	if not _run_reward_policy.is_empty():
+		if mode != _run_reward_policy.mode: return _failure("run_reward_policy_locked")
+		if _run_rewards_configured: return {"success":true,"mode":mode,"player_level":_reward_ledger.player_level}
 	var player_definition := simulation.get_actor_definition(Fixture.PLAYER_ID)
 	if player_definition == null:
 		return _failure("reward_player_unavailable")
-	var result := _reward_ledger.configure(mode, Fixture.PLAYER_ID, player_definition.level,int(player_definition.progression_policy.get("initial_expc",0)))
+	var result := _reward_ledger.configure(mode, Fixture.PLAYER_ID, player_definition.level, int(player_definition.progression_policy.get("initial_expc",0)), _run_reward_policy.get("xp_multiplier"))
 	if not result.get("success", false):
 		return result
 	_reward_mode = mode
+	_run_rewards_configured = true
 	_character_persistence.observe_mode(mode)
 	var preflight := _character_persistence.inspect_before_run()
 	if preflight.get("reason") == "trusted_profile_and_item_ownership_unavailable" or (preflight.get("reason") == "nonproduction_mode_lineage" and _character_persistence.get_status().mode_history == ["dev_normal"]):
@@ -1021,6 +1051,10 @@ func get_reward_state() -> Dictionary:
 
 func get_reward_mode() -> String:
 	return _reward_mode
+
+
+func get_run_reward_policy() -> Dictionary:
+	return ArenaRewardLedger.resolve_run_policy(_reward_mode) if _run_reward_policy.is_empty() else _run_reward_policy.duplicate()
 
 
 func request_developer_character_refresh(request_id: String = "") -> Dictionary:
@@ -2220,7 +2254,7 @@ func _sync_wave_snapshot() -> void:
 
 
 func _process_reward_events() -> void:
-	if _reward_ledger == null:
+	if _reward_ledger == null or (not _run_reward_policy.is_empty() and not _run_rewards_configured):
 		return
 	_reward_ledger.begin_wave(_current_reward_wave_id())
 	var batch := simulation.get_resolved_events_from(_reward_event_cursor)

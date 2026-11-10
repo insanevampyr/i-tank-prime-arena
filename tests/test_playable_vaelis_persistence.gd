@@ -18,6 +18,13 @@ func run() -> Array[String]:
 	PlayableCharacterPersistence.test_nonpersistent = false
 	PlayableCharacterPersistence.test_storage = CharacterSaveStorage.new(root)
 	PlayableCharacterPersistence.test_run_id = "run_playable_test"
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var session := ArenaCombatSession.new(1, null, Fixture.ENCOUNTER_WAVE_ONE_GOBLINS, Fixture.PLAYER_CHARACTER_VAELIS)
+		var rejected := session.prepare_playable_persistence(mode, false, {}, null, 2)
+		_expect(rejected.get("reason") == "invalid_run_xp_multiplier" and session._playable_persistence == null, "Persistent namespaces must reject unsupported XP policies at admission.")
+	_test_first_selected_run(root.path_join("selected_policy"))
+	PlayableCharacterPersistence.test_storage = CharacterSaveStorage.new(root)
+	PlayableCharacterPersistence.test_run_id = "run_playable_test"
 	_test_playable_load(root)
 	_test_developer_progression(root)
 	_test_inventory_and_failures(root)
@@ -36,6 +43,51 @@ func _scene() -> Node:
 func _free(scene: Node) -> void:
 	scene.get_parent().remove_child(scene)
 	scene.free()
+
+func _test_first_selected_run(root: String) -> void:
+	var storage := CharacterSaveStorage.new(root)
+	PlayableCharacterPersistence.test_storage = storage
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var boosted := mode == ArenaRewardLedger.MODE_NORMAL
+		var multiplier := 10 if boosted else 1
+		var profile := "prod_vaelis_thorn" if boosted else "dev_vaelis_thorn"
+		PlayableCharacterPersistence.test_run_id = "run_first_" + mode
+		var scene := _scene()
+		var c: ArenaCombatController = scene.get_node("CombatController")
+		c._encounter_selector_index = 0 if boosted else 8
+		var button := c._xp_multiplier_button
+		_expect(not button.visible, "XP control starts hidden with DEV OFF.")
+		c._dev_tools_button.pressed.emit()
+		_expect(button.visible and not button.disabled and button.text == "XP ×10: OFF\nNEXT VAELIS RUN", "READY offers an editable, default-OFF policy for the next Vaelis run.")
+		if boosted:
+			button.pressed.emit()
+			_expect(button.text.begins_with("XP ×10: ON"), "The switch selects ×10 before admission.")
+			c._dev_tools_button.pressed.emit()
+		c._character_selector.pressed.emit()
+		var read := storage.read_profile(profile)
+		_expect(read.get("success",false), "Playable selection must publish the selected first profile.")
+		if not read.get("success",false):
+			_free(scene)
+			continue
+		var payload: Dictionary = read.payload
+		_expect(CharacterSaveContract.decode(read.document).version == 4 and payload.generation == 1 and payload.recovery.wave_id == "wave_1", "First selected run must publish a verified V4 Wave 1 generation.")
+		_expect(payload.run_reward_policy == {"legacy_run_count":0,"runs":[{"run_id":payload.recovery.run_id,"xp_multiplier":multiplier}]}, "First creation binds the exact selection in its original namespace without a legacy prefix.")
+		if boosted: c._dev_tools_button.pressed.emit()
+		_expect(button.visible and button.disabled and button.text == "XP ×10: %s\nLOCKED" % ("ON" if boosted else "OFF"), "Admitted READY shows the verified multiplier locked.")
+		var session := c._session
+		var snapshot := session.get_state_snapshot()
+		button.pressed.emit()
+		c._dev_tools_button.pressed.emit()
+		_expect(c._session == session and session.get_state_snapshot() == snapshot and storage.read_profile(profile).payload == payload, "Toggling DEV or attempting to edit a locked policy changes neither RNG nor the save.")
+		_defeat_wave(session)
+		c._dev_tools_button.pressed.emit()
+		_expect(button.disabled and button.text.ends_with("LOCKED"), "Downtime retains the current policy and cannot edit it.")
+		var earned := 0
+		for award: Dictionary in session.get_reward_state().awards:
+			_expect(award.xp_multiplier == multiplier and award.xp == award.arena_xp * multiplier, "First V4 run awards XP under its captured policy.")
+			earned += int(award.xp)
+		_expect(earned > 0 and storage.read_profile(profile).payload.xp.earned == payload.xp.earned + earned, "First-run awards are secured once with DEV hidden.")
+		_free(scene)
 
 func _test_playable_load(root: String) -> void:
 	var scene := _scene()
@@ -233,8 +285,12 @@ func _test_new_run(controller: ArenaCombatController, session: ArenaCombatSessio
 	session.advance_by(1)
 	_expect(session.request_next_wave().get("success",false) and session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY,"A completed circuit must secure a final coherent checkpoint.")
 	PlayableCharacterPersistence.test_run_id = "run_playable_next"
+	controller._dev_tools_button.pressed.emit()
+	_expect(not controller._xp_multiplier_button.disabled, "A verified completed circuit makes the next NEW RUN policy editable.")
+	controller._xp_multiplier_button.pressed.emit()
 	controller._on_encounter_button_pressed()
 	var next := controller.get_combat_session_for_testing()
+	_expect(next.get_run_reward_policy().xp_multiplier == 10 and controller._xp_multiplier_button.disabled, "NEW RUN binds the chosen ×10 before returning to locked READY.")
 	_expect(next._playable_persistence._prior.run_history == ["run_playable_test","run_playable_next"],"NEW RUN appends its own identity without relabeling prior settlements.")
 	var altered_history: Dictionary = next._playable_persistence._prior.duplicate(true)
 	altered_history.run_history.reverse()

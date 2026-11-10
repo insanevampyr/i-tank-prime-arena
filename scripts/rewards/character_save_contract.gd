@@ -5,6 +5,7 @@ extends RefCounted
 const FORMAT := "itank_arena_character"
 const VERSION := 1
 const PROFILE_VERSION := 2
+const RUN_REWARD_PROFILE_VERSION := 4
 const MAX_SAFE_INTEGER := 9_007_199_254_740_991
 const PAYLOAD_KEYS := ["character_id", "definition_id", "rules_revision", "generation", "base_attributes", "xp", "purchases", "items", "secured_checkpoints"]
 
@@ -19,6 +20,7 @@ static func validate(payload: Dictionary) -> Dictionary:
 		legacy.erase("recovery")
 		legacy.erase("equipment_state")
 		legacy.erase("run_history")
+		legacy.erase("run_reward_policy")
 		var result := validate(legacy)
 		if payload.get("permanent",{}) is Dictionary and payload.permanent.has("development"):
 			if not payload.permanent.development is Dictionary or not CharacterDevelopment.inspect(_normalize_json_numbers(payload.permanent.development)).success: result.errors.append("invalid_character_development")
@@ -44,6 +46,8 @@ static func validate(payload: Dictionary) -> Dictionary:
 				result.errors.append("profile_namespace_identity_mismatch")
 		if payload.has("settlements"):
 			_validate_records(payload.settlements,"receipt_id",result.errors,"settlement")
+		if payload.has("run_reward_policy") and not _valid_run_reward_policy(payload):
+			result.errors.append("invalid_run_reward_policy")
 		if not payload.get("permanent") is Dictionary or not payload.get("lineage") is Dictionary:
 			result.errors.append("incomplete_v2_profile")
 		result.success = result.errors.is_empty()
@@ -107,7 +111,7 @@ static func encode(payload: Dictionary) -> Dictionary:
 	if not validation.success: return validation
 	var serialized := JSON.stringify(payload, "", true, true)
 	return {"success": true, "text": JSON.stringify({
-		"format": FORMAT, "version": PROFILE_VERSION if payload.has("permanent") else VERSION, "payload_json": serialized,
+		"format": FORMAT, "version": _payload_version(payload), "payload_json": serialized,
 		"sha256": serialized.sha256_text(),
 	}, "", true, true)}
 
@@ -117,7 +121,10 @@ static func decode(text: String) -> Dictionary:
 	if parser.parse(text) != OK or not parser.data is Dictionary:
 		return {"success": false, "reason": "invalid_json"}
 	var envelope: Dictionary = parser.data
-	if envelope.get("format") != FORMAT or (envelope.get("version") != VERSION and envelope.get("version") != PROFILE_VERSION):
+	var version: Variant = envelope.get("version")
+	if typeof(envelope.get("format")) != TYPE_STRING or envelope.format != FORMAT or not _integer(version, VERSION):
+		return {"success": false, "reason": "unsupported_format_or_version"}
+	if version != VERSION and version != PROFILE_VERSION and version != RUN_REWARD_PROFILE_VERSION:
 		return {"success": false, "reason": "unsupported_format_or_version"}
 	if envelope.size() != 4 or typeof(envelope.get("payload_json")) != TYPE_STRING or typeof(envelope.get("sha256")) != TYPE_STRING:
 		return {"success": false, "reason": "invalid_envelope"}
@@ -128,11 +135,41 @@ static func decode(text: String) -> Dictionary:
 		return {"success": false, "reason": "invalid_payload_json"}
 	var payload: Dictionary = parser.data
 	var is_profile := payload.has("permanent") and payload.has("lineage")
-	if (envelope.version == PROFILE_VERSION) != is_profile:
+	if (version != VERSION) != is_profile or version != _payload_version(payload):
 		return {"success": false, "reason": "unsupported_format_or_version"}
+	if version == RUN_REWARD_PROFILE_VERSION:
+		payload = _normalize_json_numbers(payload)
 	var validation := validate(payload)
 	if not validation.success: return validation
-	return {"success": true, "payload": _normalize_json_numbers(payload), "version": int(envelope.version)}
+	return {"success": true, "payload": payload if version == RUN_REWARD_PROFILE_VERSION else _normalize_json_numbers(payload), "version": int(version)}
+
+
+static func _payload_version(payload: Dictionary) -> int:
+	if payload.has("run_reward_policy"): return RUN_REWARD_PROFILE_VERSION
+	return PROFILE_VERSION if payload.has("permanent") else VERSION
+
+
+static func _valid_run_reward_policy(payload: Dictionary) -> bool:
+	var policy: Variant = payload.run_reward_policy
+	var runs: Variant = payload.get("run_history")
+	if payload.get("profile_namespace") not in ["normal", "dev_normal"] or not runs is Array:
+		return false
+	if not policy is Dictionary or policy.size() != 2 or not policy.has_all(["legacy_run_count", "runs"]) or not policy.runs is Array:
+		return false
+	var legacy_count: Variant = policy.legacy_run_count
+	if typeof(legacy_count) != TYPE_INT or legacy_count < 0 or legacy_count >= runs.size() or policy.runs.size() != runs.size() - legacy_count:
+		return false
+	if payload.get("generation") == 1 and (legacy_count != 0 or runs.size() != 1):
+		return false
+	for index in range(policy.runs.size()):
+		var entry: Variant = policy.runs[index]
+		if not entry is Dictionary or entry.size() != 2 or not entry.has_all(["run_id", "xp_multiplier"]):
+			return false
+		if not entry.run_id is String or entry.run_id != runs[legacy_count + index] or typeof(entry.xp_multiplier) != TYPE_INT or entry.xp_multiplier not in [1, 10]:
+			return false
+	var recovery: Variant = payload.get("recovery")
+	# Projection is staged before the playable checkpoint is attached.
+	return not payload.has("recovery") or (recovery is Dictionary and recovery.get("run_id") == runs.back())
 
 
 static func _normalize_json_numbers(value: Variant) -> Variant:
@@ -165,6 +202,9 @@ static func validate_replacement(current: Dictionary, candidate: Dictionary) -> 
 		return {"success": false, "reason": "profile_version_transition_requires_verified_migration"}
 	if candidate.generation != current.generation + 1:
 		return {"success": false, "reason": "stale_or_nonsequential_generation"}
+	if current.has("run_reward_policy") or candidate.has("run_reward_policy"):
+		var policy_continuity := _validate_run_reward_replacement(current, candidate)
+		if not policy_continuity.success: return policy_continuity
 	var previous_development: Dictionary = current.get("permanent",{}).get("development",{})
 	var next_development: Dictionary = candidate.get("permanent",{}).get("development",{})
 	if not previous_development.is_empty() or not next_development.is_empty():
@@ -175,6 +215,27 @@ static func validate_replacement(current: Dictionary, candidate: Dictionary) -> 
 	for receipt: Dictionary in candidate.get("settlements",[]): receipt_map[receipt.receipt_id] = receipt
 	for receipt: Dictionary in current.get("settlements",[]):
 		if receipt_map.get(receipt.receipt_id) != receipt: return {"success":false,"reason":"settlement_removed_or_changed"}
+	return {"success": true}
+
+
+static func _validate_run_reward_replacement(current: Dictionary, candidate: Dictionary) -> Dictionary:
+	if not candidate.has("run_reward_policy"):
+		return {"success": false, "reason": "run_reward_profile_downgrade"}
+	var old_runs: Array = current.get("run_history", [])
+	var old_entry: Dictionary = current.get("recovery", {})
+	var new_entry: Dictionary = candidate.get("recovery", {})
+	if old_runs.is_empty() or old_entry.get("run_id") != old_runs.back() or new_entry.is_empty():
+		return {"success": false, "reason": "verified_run_boundary_required"}
+	var previous: Dictionary = current.get("run_reward_policy", {"legacy_run_count": old_runs.size(), "runs": []})
+	var next: Dictionary = candidate.run_reward_policy
+	if next.legacy_run_count != previous.legacy_run_count or next.runs.slice(0, previous.runs.size()) != previous.runs:
+		return {"success": false, "reason": "run_reward_policy_history_changed"}
+	if next.runs.size() == previous.runs.size() and new_entry.run_id == old_entry.run_id:
+		return {"success": true}
+	if next.runs.size() != previous.runs.size() + 1 or new_entry.phase != "entry" or new_entry.wave_id != "wave_1" or old_entry.phase not in ["entry", "complete"]:
+		return {"success": false, "reason": "run_reward_policy_requires_new_wave_one_entry"}
+	if candidate.xp != current.xp or candidate.permanent.get("award_receipts") != current.permanent.get("award_receipts"):
+		return {"success": false, "reason": "new_run_entry_awards_changed"}
 	return {"success": true}
 
 

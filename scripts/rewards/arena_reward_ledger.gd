@@ -25,14 +25,34 @@ var processed_defeat_event_ids: Dictionary = {}
 var collected_world_item_ids: Dictionary = {}
 var processed_purchase_request_ids: Dictionary = {}
 var _next_world_item_sequence: int = 0
+var _xp_multiplier: int = 0
 var profile_ownership: Dictionary = {}
 
 
-func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int, p_initial_expc: int = 0) -> Dictionary:
-	if not [MODE_NORMAL, MODE_DEV_NORMAL, MODE_TEST].has(p_mode):
+static func legacy_xp_multiplier(p_mode: String) -> int:
+	match p_mode:
+		MODE_NORMAL: return 1
+		MODE_DEV_NORMAL: return 10
+		MODE_TEST: return 0
+	return -1
+
+
+static func resolve_run_policy(p_mode: String, requested: Variant = null) -> Dictionary:
+	var legacy := legacy_xp_multiplier(p_mode)
+	if legacy < 0:
 		return {"success": false, "reason": "unsupported_reward_mode"}
+	var multiplier: Variant = legacy if requested == null else requested
+	if typeof(multiplier) != TYPE_INT or (multiplier != 0 if p_mode == MODE_TEST else multiplier not in [1, 10]):
+		return {"success": false, "reason": "invalid_run_xp_multiplier"}
+	return {"success": true, "mode": p_mode, "xp_multiplier": multiplier}
+
+
+func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int, p_initial_expc: int = 0, xp_multiplier: Variant = null) -> Dictionary:
+	var policy := resolve_run_policy(p_mode, xp_multiplier)
+	if not policy.success: return policy
 	if p_initial_expc < 0: return {"success":false,"reason":"invalid_initial_expc"}
 	mode = p_mode
+	_xp_multiplier = policy.xp_multiplier
 	player_actor_id = p_player_actor_id
 	player_level = p_player_level
 	initial_expc = p_initial_expc
@@ -78,7 +98,7 @@ func process_defeat(
 		blocked_event_id = blocked_event.event_id
 	var source_xp := int(reward.get("xp", 0))
 	var arena_xp := int(Catalog.ARENA_XP_OVERRIDES.get(creature_id, 0))
-	var xp := arena_xp * (10 if mode == MODE_DEV_NORMAL else 1)
+	var xp := arena_xp * _xp_multiplier
 	if not reward.is_empty():
 		earned_xp += xp
 		current_wave_earned_xp += xp
@@ -90,7 +110,7 @@ func process_defeat(
 		"xp": xp,
 		"prime_v3_xp": source_xp,
 		"arena_xp": arena_xp,
-		"xp_multiplier": 10 if mode == MODE_DEV_NORMAL else 1,
+		"xp_multiplier": _xp_multiplier,
 		"arena_source_ref": "Task 36G owner-approved Arena XP override",
 		"source_ref": reward.get("source_ref", ""),
 	}
@@ -295,6 +315,9 @@ func to_dictionary() -> Dictionary:
 		"spending_available": mode != MODE_TEST,
 		"spending_blocked_reason": "" if mode != MODE_TEST else "test_mode_advancement_prohibited",
 	}
+	# Legacy profiles derive the policy from their namespace and retain the
+	# existing checkpoint representation. Only disposable overrides need a field.
+	if _xp_multiplier != legacy_xp_multiplier(mode): snapshot["xp_multiplier"] = _xp_multiplier
 	if not profile_ownership.is_empty(): snapshot["profile_ownership"] = profile_ownership.duplicate(true)
 	return snapshot
 

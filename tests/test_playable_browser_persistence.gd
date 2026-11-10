@@ -1,6 +1,7 @@
 extends RefCounted
 
 const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
+const PlayableTests = preload("res://tests/test_playable_vaelis_persistence.gd")
 var failures: Array[String] = []
 
 # Native host-state tests only. Actual IndexedDB acceptance is a separate Web
@@ -63,17 +64,22 @@ func run() -> Array[String]:
 	var guard := c._session
 	c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	check(c._session == guard and c._browser_transition_blocked(),"Selection must retain old session while loading.")
+	check(c._web_operation.reward_policy.xp_multiplier == 1,"Web request captures the NORMAL XP policy before awaiting storage.")
 	check(not c._player.is_physics_processing(),"Pending I/O must also pause the independent Running/recovery movement model.")
 	pump(c,false)
 	check(c._web_operation.get("phase") == "confirmation" and backend.histories.is_empty(),"Missing profile requires explicit confirmation, without starter publication.")
 	c._web_creation_dialog.get_ok_button().pressed.emit()
+	# Simulate stale UI selection data during the pending request.
+	c._encounter_selector_index = 8
 	pump(c)
+	c._encounter_selector_index = 0
 	check(c._web_operation.is_empty() and c._session._playable_persistence is PlayableBrowserPersistence,"Actual selection/confirmation must produce acknowledged playable Vaelis.")
 	if not c._web_operation.is_empty():
 		check(false,"Admission failed: %s" % c._web_operation)
 		finish(scene)
 		return failures
 	var session := c._session
+	check(session.get_run_reward_policy().xp_multiplier == 1 and not session._playable_persistence._prior.recovery.ledger.has("xp_multiplier"),"Web admission uses the captured NORMAL policy and the existing checkpoint shape.")
 	check(session._playable_persistence.generation == 1 and session.get_actor_state(&"player").inventory_quantities.prime_v3_gold == 75,"Exactly one source-backed starter grant.")
 	c._update_presentation()
 	check(c._combat_status.max_lines_visible >= c._combat_status.get_line_count(),"Actual HUD must expose the persistence status line rather than clip it.")
@@ -108,6 +114,7 @@ func run() -> Array[String]:
 	c._on_encounter_button_pressed()
 	pump(c)
 	check(c._web_operation.is_empty() and c._session != session and c._session._current_reward_wave_id() == "wave_2","Same exact proposal can retry and safely activate Wave 2.")
+	check(c._session.get_run_reward_policy() == session.get_run_reward_policy(),"The async NEXT WAVE candidate keeps the admitted XP policy.")
 	check(c._session.get_actor_state(&"player").current_hpc == 3 and c._session.get_actor_state(&"player").resources.mana == 7,"NEXT WAVE does not refill resources.")
 	check(c._session.simulation.get_resolved_event_count() >= session.simulation.get_resolved_event_count(),"Candidate preserves accumulated authoritative history.")
 	var entry: Dictionary = c._session._playable_persistence._prior.duplicate(true)
@@ -118,15 +125,48 @@ func run() -> Array[String]:
 	c._on_encounter_button_pressed()
 	pump(c)
 	check(c._session._current_reward_wave_id() == "wave_2" and c._session.get_actor_state(&"player").current_hpc == 3,"RETRY restores exact secured entry, no refill.")
+	check(c._session.get_run_reward_policy() == session.get_run_reward_policy(),"RETRY restores the same run's legacy XP policy.")
 	c._on_encounter_button_pressed()
 	c._session.set_opponent_behavior_enabled(false)
 	c._session.get_actor_state(&"player").current_hpc = 0
 	c._session.advance_by(1)
-	c._on_return_to_wave_one_pressed()
+	var count_before_v4: int = backend.histories["prod_vaelis_thorn"].size()
+	c._session._playable_persistence.browser.inject_test_fault("abort")
+	c._dev_tools_button.pressed.emit()
+	c._xp_multiplier_button.pressed.emit()
+	c._return_wave_one_button.pressed.emit()
+	check(c._web_operation.get("reward_policy",{}).get("xp_multiplier") == 10 and c._xp_multiplier_button.disabled,"Authorized RETURN captures and locks the switch before browser I/O.")
+	c._xp_multiplier_button.pressed.emit()
+	c._dev_tools_button.pressed.emit()
 	pump(c)
+	check(c._web_operation.get("phase") == "failed" and backend.histories["prod_vaelis_thorn"].size() == count_before_v4,"Aborted V4 entry leaves the verified V2 head intact.")
+	var pending_service: PlayableBrowserPersistence = c._web_operation.service
+	var exact_document: String = pending_service._prepared.document
+	pending_service.browser.inject_test_fault("lost_ack")
+	c._on_encounter_button_pressed(); pump(c)
+	check(c._web_operation.get("phase") == "failed" and backend.histories["prod_vaelis_thorn"].size() == count_before_v4 + 1,"Lost acknowledgment cannot adopt the new V4 entry.")
+	c._on_encounter_button_pressed(); pump(c)
+	check(c._web_operation.is_empty() and backend.histories["prod_vaelis_thorn"].size() == count_before_v4 + 1 and backend.histories["prod_vaelis_thorn"].back().document == exact_document,"Exact retry reconciles one V4 generation without another publication.")
 	check(c._session._current_reward_wave_id() == "wave_1" and c._session._playable_persistence._prior.xp == entry.xp,"RETURN preserves secured XP and starts Wave 1.")
+	var bound: Dictionary = CharacterSaveContract.decode(exact_document)
+	check(bound.version == 4 and bound.payload.run_reward_policy.runs.back() == {"run_id":bound.payload.recovery.run_id,"xp_multiplier":10} and c._session.get_run_reward_policy().xp_multiplier == 10,"Verified Web entry atomically binds the captured ×10 policy.")
 	var first_run: String = entry.recovery.run_id
 	check(c._session._playable_persistence.run_id != first_run,"New circuit has unique reward/run identity.")
+	var playable := PlayableTests.new()
+	playable._defeat_wave(c._session)
+	pump(c)
+	check(playable._failures.is_empty() and c._session._playable_persistence._prior.xp.earned > entry.xp.earned,"A boosted V4 Web run secures real combat XP.")
+	for award: Dictionary in c._session.get_reward_state().awards:
+		check(award.xp_multiplier == 10 and award.xp == award.arena_xp * 10,"V4 Web awards use the bound ×10 policy.")
+	c._on_encounter_button_pressed(); pump(c)
+	check(c._session._current_reward_wave_id() == "wave_2" and c._session.get_run_reward_policy().xp_multiplier == 10,"The Web NEXT WAVE candidate retains the V4 multiplier.")
+	c._session.get_actor_state(&"player").current_hpc = 0
+	c._session.advance_by(1)
+	c._on_encounter_button_pressed(); pump(c)
+	check(c._session.get_run_reward_policy().xp_multiplier == 10,"Web RETRY reloads ×10 from the verified V4 Wave 2 entry.")
+	c._dev_tools_button.pressed.emit()
+	check(c._xp_multiplier_button.disabled and c._xp_multiplier_button.text == "XP ×10: ON\nLOCKED","Web RETRY displays the recovered multiplier, not the fresh default.")
+	c._dev_tools_button.pressed.emit()
 	for iteration in range(2):
 		var old_record: Dictionary = c._session._playable_persistence._prior.duplicate(true)
 		var old_run: String = c._session._playable_persistence.run_id
@@ -136,6 +176,7 @@ func run() -> Array[String]:
 		c._session.advance_by(1)
 		c._on_return_to_wave_one_pressed(); pump(c)
 		check(c._session._playable_persistence.run_id != old_run and c._session._playable_persistence._prior.items == old_record.items and c._session._playable_persistence._prior.xp == old_record.xp,"Repeated legitimate RETURN creates a new run without replaying rewards/starters.")
+		check(c._session.get_run_reward_policy().xp_multiplier == 1,"The current NORMAL UI still selects ×1 for a genuinely new run.")
 	# Compare the public contract representation after its documented JSON-number
 	# normalization, rather than Godot-only int/float Variant storage types.
 	var retained: Dictionary = CharacterSaveContract.decode(CharacterSaveContract.encode(c._session._playable_persistence._prior).text).payload
@@ -154,12 +195,18 @@ func run() -> Array[String]:
 	var normal_count: int = backend.histories["prod_vaelis_thorn"].size()
 	c._encounter_selector.pressed.emit()
 	check(c._session._playable_persistence == null and c._session._reward_mode == "test","Actual TEST selection remains nonpersistent.")
+	c._dev_tools_button.pressed.emit()
+	check(c._xp_multiplier_button.disabled and c._xp_multiplier_button.text.ends_with("NO XP") and c._session.get_run_reward_policy().xp_multiplier == 0,"TEST displays zero XP and cannot select a boost.")
+	c._xp_multiplier_button.pressed.emit()
+	check(not c._next_run_xp_boost,"A TEST button request cannot stage a boost.")
+	c._dev_tools_button.pressed.emit()
 	pump(c)
 	for index in range(7): c._encounter_selector.pressed.emit()
 	pump(c)
 	check(c._encounter_selector_index == 8 and c._session._playable_persistence != null and c._session._playable_persistence.profile_id == "dev_vaelis_thorn","Pending mode selection cannot revert the authorized DEV namespace: %s / %s / %s" % [c._encounter_selector_index,c._web_operation,c._last_ui_message])
 	check(backend.histories["prod_vaelis_thorn"].size() == normal_count and backend.histories.get("dev_vaelis_thorn",[]).size() == 1,"TEST/DEV selection cannot rewrite NORMAL progression.")
 	if c._session._playable_persistence != null:
+		check(c._session.get_run_reward_policy().xp_multiplier == 1 and c._session._playable_persistence._prior.run_reward_policy.legacy_run_count == 0,"First DEV-namespace character selection uses the new-run default without changing namespace.")
 		c._session.set_opponent_behavior_enabled(false)
 		c._on_encounter_button_pressed()
 		for wave_number in range(1,6):
@@ -168,8 +215,16 @@ func run() -> Array[String]:
 			c._on_encounter_button_pressed(); pump(c)
 		check(c._session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY and c._session._playable_persistence._prior.recovery.phase == "complete","Wave 5 completion publishes the complete-circuit checkpoint.")
 		var completed_xp: Dictionary = c._session._playable_persistence._prior.xp.duplicate(true)
+		finish(scene)
+		scene = make_scene(); c = scene.get_node("CombatController")
+		c._encounter_selector_index = 8
+		c._character_selector.pressed.emit(); pump(c)
+		c._dev_tools_button.pressed.emit()
+		check(c._session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY and not c._xp_multiplier_button.disabled,"A verified completed Web circuit enables the next-run switch even after reload.")
+		c._xp_multiplier_button.pressed.emit()
 		c._on_encounter_button_pressed(); pump(c)
 		check(c._session._current_reward_wave_id() == "wave_1" and c._session._playable_persistence._prior.xp == completed_xp,"Post-completion NEW RUN retains secured character progression.")
+		check(c._session._playable_persistence._prior.run_reward_policy.runs.back().xp_multiplier == 10 and c._xp_multiplier_button.disabled,"Web NEW RUN binds the selected ×10 at the verified Wave 1 entry.")
 	var other := make_scene()
 	var other_controller: ArenaCombatController = other.get_node("CombatController")
 	other_controller._encounter_selector_index = 8
@@ -178,6 +233,14 @@ func run() -> Array[String]:
 	other_controller._update_presentation()
 	check(other_controller._encounter_button.text == "RETRY STORAGE" and other_controller._combat_status.max_lines_visible >= other_controller._combat_status.get_line_count() and other_controller._combat_status.text.contains("Character currently open in another tab"),"Unavailable storage remains actionable and its status is not clipped.")
 	finish(other)
+	finish(scene)
+	var normal_history: Array = backend.histories["prod_vaelis_thorn"]
+	var tampered: Dictionary = CharacterSaveContract.decode(normal_history.back().document).payload
+	tampered.run_reward_policy.runs[0].xp_multiplier = 1
+	normal_history.back().document = CharacterSaveContract.encode(tampered).text
+	scene = make_scene(); c = scene.get_node("CombatController")
+	c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS); pump(c)
+	check(c._web_operation.get("phase") == "failed" and c._web_operation.service._prepared.is_empty() and normal_history.size() == normal_count,"A checksummed V4 policy rewrite is rejected before any publication proposal.")
 	finish(scene)
 	if not backend.histories.has("dev_vaelis_thorn"):
 		PlayableBrowserPersistence.test_factory = Callable()
@@ -191,9 +254,35 @@ func run() -> Array[String]:
 	c._on_character_selector_pressed(); pump(c)
 	check(c._session._player_character_id == Fixture.PLAYER_CHARACTER_GUARD and c._web_operation.is_empty(),"Unsupported storage can safely return to nonpersistent Guard without deleting data.")
 	finish(scene)
+	check_first_browser_creation()
 	PlayableBrowserPersistence.test_factory = Callable()
 	PlayableCharacterPersistence.test_nonpersistent = true
 	return failures
+
+func check_first_browser_creation() -> void:
+	var backend := Backend.new()
+	PlayableBrowserPersistence.test_factory = func() -> CharacterBrowserStorage: return CharacterBrowserStorage.new(backend.transport)
+	var scene := make_scene()
+	var c: ArenaCombatController = scene.get_node("CombatController")
+	c._dev_tools_button.pressed.emit()
+	c._xp_multiplier_button.pressed.emit()
+	c._character_selector.pressed.emit()
+	pump(c,false)
+	check(c._web_operation.get("phase") == "confirmation" and c._xp_multiplier_button.disabled and backend.histories.is_empty(),"The first ×10 Web selection is captured before confirmation and publishes nothing prematurely.")
+	c._xp_multiplier_button.pressed.emit()
+	c._dev_tools_button.pressed.emit()
+	pump(c)
+	var history: Array = backend.histories.get("prod_vaelis_thorn",[])
+	check(history.size() == 1,"First Web creation must publish exactly one generation.")
+	if history.size() == 1:
+		var first := CharacterSaveContract.decode(history[0].document)
+		check(first.version == 4 and first.payload.run_reward_policy.runs == [{"run_id":first.payload.recovery.run_id,"xp_multiplier":10}],"The verified first browser generation uses the pre-admission choice.")
+	finish(scene)
+	scene = make_scene(); c = scene.get_node("CombatController")
+	c._dev_tools_button.pressed.emit()
+	c._character_selector.pressed.emit(); pump(c)
+	check(c._session._playable_persistence != null and c._xp_multiplier_button.text == "XP ×10: ON\nLOCKED" and c._xp_multiplier_button.disabled and history.size() == 1,"Cold Web reload ignores default OFF and displays the committed ×10 without republishing.")
+	finish(scene)
 
 func make_scene() -> Node:
 	var scene := (load("res://scenes/test_arena.tscn") as PackedScene).instantiate()

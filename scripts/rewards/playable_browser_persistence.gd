@@ -13,18 +13,22 @@ var _phase := ""
 var _starter := {}
 var _new_run := false
 var _defeated := {}
+var _requested_xp_multiplier: Variant = null
 var _async: CharacterBrowserPersistence
 var _browser_result := {"success":false,"state":"unavailable","reason":"not_initialized"}
 var _confirmed_missing := false
 var _owns_lease := false
 
-func open_browser(p_mode: String, previous: PlayableBrowserPersistence = null, new_run: bool = false, defeated: Dictionary = {}) -> Dictionary:
+func open_browser(p_mode: String, previous: PlayableBrowserPersistence = null, new_run: bool = false, defeated: Dictionary = {}, xp_multiplier: Variant = null) -> Dictionary:
+	var requested := ArenaRewardLedger.resolve_run_policy(p_mode, xp_multiplier)
+	if not requested.success: return _error("failed", requested.reason)
 	mode = p_mode
 	_starter = Admission.prepare_starter(&"vaelis_thorn",mode)
 	if not _starter.get("success",false): return _starter
 	source = _starter.source
 	profile_id = _starter.profile_id
 	_new_run = new_run
+	_requested_xp_multiplier = xp_multiplier
 	_defeated = defeated.duplicate(true)
 	owner = "session_"+Crypto.new().generate_random_bytes(12).hex_encode()
 	if previous != null and previous.profile_id == profile_id and previous._owns_lease:
@@ -62,11 +66,11 @@ func poll_browser() -> Dictionary:
 	if _phase == "inspect":
 		var history := Browser.inspection(response,profile_id)
 		if not history.get("success",false): return _error("recovery_required",history.get("reason","invalid_history"))
-		if history.generations.is_empty() and not _confirmed_missing:
+		if history.generations.is_empty() and not _new_run and not _confirmed_missing:
 			_browser_result = {"success":false,"state":"confirmation_required","reason":"new_character_confirmation_required"}
 			_status = {"persistent":false,"state":"confirmation_required","text":"No saved character. Confirm creation.","reason":"new_character_confirmation_required"}
 			return _browser_result
-		var opened := open_verified_history(_starter,history,_new_run,_defeated)
+		var opened := open_verified_history(_starter, history, _new_run, _defeated, _requested_xp_multiplier)
 		if not opened.success: return _error("recovery_required",opened.get("reason","character_validation_failed"))
 		_browser_result = {"success":true,"state":"loaded"}
 		_phase = "loaded"

@@ -109,6 +109,12 @@ static func _find_transaction(prepared: Dictionary, inspection: Dictionary) -> D
 static func _validate_receipts(payload: Dictionary) -> Dictionary:
 	if not payload.get("settlements") is Array: return _result("failure","settlement_set_required")
 	if not payload.get("permanent") is Dictionary or not payload.permanent.get("award_receipts") is Array or not payload.get("lineage") is Dictionary or not payload.lineage.get("run_id") is String: return _result("failure","incomplete_permanent_profile")
+	var multipliers := {}
+	if payload.has("run_reward_policy"):
+		if not payload.has("recovery"): return _result("blocked", "verified_run_boundary_required")
+		if payload.generation == 1 and (payload.recovery.phase != "entry" or payload.recovery.wave_id != "wave_1" or not payload.permanent.award_receipts.is_empty()):
+			return _result("blocked", "run_reward_policy_requires_new_wave_one_entry")
+		multipliers = Profiles.run_xp_multipliers(payload)
 	var ids := {}
 	var effects := {}
 	var awards := {}
@@ -132,11 +138,17 @@ static func _validate_receipts(payload: Dictionary) -> Dictionary:
 		if receipt.kind in ["item","currency"]:
 			if origins.has(receipt.content.provenance_digest): return _result("conflict","duplicate_acquisition_origin")
 			origins[receipt.content.provenance_digest] = true
-		if receipt.kind == "xp": awards[receipt.content.award_id] = receipt.content.amount
+		if receipt.kind == "xp": awards[receipt.content.award_id] = receipt
 		elif receipt.kind == "purchase": purchases[receipt.content.purchase_id] = receipt.content.cost
 	for award: Variant in payload.permanent.award_receipts:
 		if not award is Dictionary or not award.has_all(["award_id","xp"]): return _result("failure","invalid_award_receipt")
-		if awards.get(award.award_id) != award.xp: return _result("blocked","xp_settlement_missing_or_mismatched")
+		var settlement: Dictionary = awards.get(award.award_id, {})
+		if settlement.get("content", {}).get("amount") != award.xp: return _result("blocked","xp_settlement_missing_or_mismatched")
+		if not multipliers.is_empty():
+			var verified := Profiles.validate_playable_xp_award(payload, award, multipliers)
+			if not verified.success: return _result("blocked", verified.reason)
+			if settlement.run_id != verified.run_id or settlement.wave_id != verified.wave_id:
+				return _result("blocked", "xp_settlement_run_or_wave_mismatch")
 	for purchase: Dictionary in payload.purchases:
 		if not purchase.has_all(["purchase_id","cost"]): return _result("failure","invalid_purchase_receipt")
 		if purchases.get(purchase.purchase_id) != purchase.cost: return _result("blocked","purchase_settlement_missing_or_mismatched")

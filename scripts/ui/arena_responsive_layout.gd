@@ -42,6 +42,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 @onready var _character_selector: Button = get_node_or_null(character_selector_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
 @onready var _dev_tools_button: Button = get_node_or_null(dev_tools_button_path)
+@onready var _xp_multiplier_button: Button = _dev_tools_button.get_parent().get_node_or_null("XpMultiplierButton") if _dev_tools_button != null else null
 @onready var _attack_readiness: Control = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness: Control = get_node_or_null(run_readiness_path)
 @onready var _log_button: Button = get_node_or_null(log_button_path)
@@ -106,6 +107,9 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		toolbar_keys.insert(3, "debug_button_rect")
 		preferred_widths.insert(2, 116.0 if compact else 132.0)
 		preferred_widths.insert(3, 108.0 if compact else 124.0)
+		if toolbar_minimums.has("xp_multiplier_rect"):
+			toolbar_keys.insert(2, "xp_multiplier_rect")
+			preferred_widths.insert(2, 116.0)
 	if toolbar_minimums.has("return_wave_one_rect"):
 		toolbar_keys.insert(toolbar_keys.size() - 1, "return_wave_one_rect")
 		preferred_widths.insert(preferred_widths.size() - 1, 184.0)
@@ -213,6 +217,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"return_wave_one_rect": toolbar_rects.get("return_wave_one_rect",Rect2()),
 		"encounter_selector_rect": selector_button_rect,
 		"dev_tools_button_rect": toolbar_rects.dev_tools_button_rect,
+		"xp_multiplier_rect": toolbar_rects.get("xp_multiplier_rect", Rect2()),
 		"debug_button_rect": toolbar_rects.get("debug_button_rect", Rect2()),
 		"log_button_rect": toolbar_rects.get("log_button_rect", Rect2()),
 		"transcript_panel_rect": transcript_panel_rect,
@@ -259,6 +264,10 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button, _dev_tools_button]
 	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect", "dev_tools_button_rect"]
 	var font_sizes := [13.0, 13.0, 14.0, 16.0, 13.0]
+	if _xp_multiplier_button != null and _xp_multiplier_button.visible:
+		buttons.append(_xp_multiplier_button)
+		keys.append("xp_multiplier_rect")
+		font_sizes.append(12.0)
 	var return_button := _return_wave_one_button()
 	if return_button != null and return_button.visible:
 		buttons.append(return_button)
@@ -298,6 +307,8 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_apply_control_rect(_encounter_selector, metrics["encounter_selector_rect"])
 	_apply_control_rect(_debug_button, metrics["debug_button_rect"])
 	_apply_control_rect(_dev_tools_button, metrics["dev_tools_button_rect"])
+	if _xp_multiplier_button != null and _xp_multiplier_button.visible:
+		_apply_control_rect(_xp_multiplier_button, metrics["xp_multiplier_rect"])
 	_apply_control_rect(_attack_readiness, metrics["attack_readiness_rect"])
 	_apply_control_rect(_run_readiness, metrics["run_readiness_rect"])
 	_apply_control_rect(_log_button, metrics["log_button_rect"])
@@ -340,6 +351,7 @@ func _toolbar_labels() -> Array[String]:
 		labels.append(button.text if button != null else "")
 	var return_button := _return_wave_one_button()
 	labels.append(return_button.text if return_button != null and return_button.visible else "")
+	labels.append(_xp_multiplier_button.text if _xp_multiplier_button != null and _xp_multiplier_button.visible else "")
 	return labels
 
 
