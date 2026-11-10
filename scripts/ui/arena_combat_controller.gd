@@ -46,6 +46,7 @@ const ACTOR_HPC_LABEL_OUTLINE_COLOR := Color(0.015, 0.025, 0.04, 0.68)
 @export var seed_input_path: NodePath
 @export var seed_apply_button_path: NodePath
 @export var debug_button_path: NodePath
+@export var dev_tools_button_path: NodePath
 @export var attack_readiness_path: NodePath
 @export var run_readiness_path: NodePath
 @export var log_button_path: NodePath
@@ -63,6 +64,7 @@ var _event_cursor: int = 0
 var _event_history_generation: int = -1
 var _log_lines: Array[String] = []
 var _debug_log_lines: Array[String] = []
+var _dev_tools_enabled := false
 var _applied_displacement_event_ids: Dictionary = {}
 var _pending_player_displacement_event_ids: Array[String] = []
 var _cached_transcript_text := ""
@@ -142,6 +144,7 @@ var _backup_actions: CharacterBackupActions
 @onready var _seed_input: LineEdit = get_node_or_null(seed_input_path)
 @onready var _seed_apply_button: Button = get_node_or_null(seed_apply_button_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
+@onready var _dev_tools_button: Button = get_node_or_null(dev_tools_button_path)
 @onready var _attack_readiness = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness = get_node_or_null(run_readiness_path)
 @onready var _log_button: Button = get_node_or_null(log_button_path)
@@ -188,6 +191,8 @@ func _ready() -> void:
 		_seed_apply_button.pressed.connect(_on_seed_apply_pressed)
 	if _debug_button != null and not _debug_button.pressed.is_connected(_on_debug_button_pressed):
 		_debug_button.pressed.connect(_on_debug_button_pressed)
+	if _dev_tools_button != null and not _dev_tools_button.pressed.is_connected(_on_dev_tools_pressed):
+		_dev_tools_button.pressed.connect(_on_dev_tools_pressed)
 	if _log_button != null and not _log_button.pressed.is_connected(_on_log_button_pressed):
 		_log_button.pressed.connect(_on_log_button_pressed)
 	if _close_log_button != null and not _close_log_button.pressed.is_connected(_on_close_log_button_pressed):
@@ -291,10 +296,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.physical_keycode == KEY_R:
 			_reset_encounter()
 			get_viewport().set_input_as_handled()
-		elif event.physical_keycode == KEY_F3:
+		elif _dev_tools_enabled and event.physical_keycode == KEY_F3:
 			set_debug_overlay_visible(not is_debug_overlay_visible())
 			get_viewport().set_input_as_handled()
-		elif event.physical_keycode == KEY_F4:
+		elif _dev_tools_enabled and event.physical_keycode == KEY_F4:
 			set_transcript_visible(not is_transcript_visible())
 			get_viewport().set_input_as_handled()
 		elif event.physical_keycode == KEY_Q:
@@ -421,6 +426,8 @@ func get_seed_ui_state_for_testing() -> Dictionary:
 
 
 func set_debug_overlay_visible(visible: bool) -> void:
+	if visible and not _dev_tools_enabled:
+		return
 	if _developer_debug != null:
 		_developer_debug.visible = visible
 	if _debug_button != null:
@@ -432,6 +439,8 @@ func is_debug_overlay_visible() -> bool:
 
 
 func set_transcript_visible(visible: bool) -> void:
+	if visible and not _dev_tools_enabled:
+		return
 	if visible:
 		_clear_attack_hold_intent()
 	if _transcript_panel != null:
@@ -535,6 +544,21 @@ func set_application_focus_for_testing(has_focus: bool) -> void:
 	_update_presentation()
 
 
+func _on_dev_tools_pressed() -> void:
+	_dev_tools_enabled = not _dev_tools_enabled
+	_dev_tools_button.text = "DEV ON" if _dev_tools_enabled else "DEV OFF"
+	if not _dev_tools_enabled:
+		set_debug_overlay_visible(false)
+		set_transcript_visible(false)
+	if _debug_button != null:
+		_debug_button.visible = _dev_tools_enabled
+	if _log_button != null:
+		_log_button.visible = _dev_tools_enabled
+	_update_seed_editing_controls()
+	_update_developer_refresh_control()
+	_update_recent_results()
+
+
 func _on_debug_button_pressed() -> void:
 	set_debug_overlay_visible(not is_debug_overlay_visible())
 
@@ -548,6 +572,8 @@ func _on_close_log_button_pressed() -> void:
 
 
 func _on_copy_log_button_pressed() -> void:
+	if not is_transcript_visible():
+		return
 	var result := LogExporter.request_copy(_build_transcript_text())
 	_web_copy_pending = bool(result.get("pending", false))
 	_set_transcript_feedback(
@@ -558,6 +584,8 @@ func _on_copy_log_button_pressed() -> void:
 
 
 func _on_save_log_button_pressed() -> void:
+	if not is_transcript_visible():
+		return
 	var result := LogExporter.save_text(_build_transcript_text(), _authoritative_seed(), _session.get_resolved_event_count())
 	if not result.get("success", false):
 		_set_transcript_feedback("Save failed: %s" % _friendly_reason(String(result.get("reason", "unknown"))))
@@ -914,12 +942,13 @@ func _select_player_character(player_character_id: StringName) -> Dictionary:
 
 
 func _on_seed_apply_pressed() -> void:
-	if _seed_input != null:
+	if _dev_tools_enabled and _seed_input != null:
 		_apply_selected_seed(_seed_input.text)
 
 
 func _on_seed_text_submitted(seed_text: String) -> void:
-	_apply_selected_seed(seed_text)
+	if _dev_tools_enabled:
+		_apply_selected_seed(seed_text)
 
 
 func _apply_selected_seed(seed_text: String) -> Dictionary:
@@ -1927,7 +1956,7 @@ func _on_advancement_option_selected(_index: int) -> void:
 
 
 func _on_developer_refresh_pressed() -> void:
-	if _browser_transition_blocked(): return
+	if not _dev_tools_enabled or _browser_transition_blocked(): return
 	var result := _session.request_developer_character_refresh()
 	_last_ui_message = "DEV ONLY: character resources refreshed." if result.get("success",false) else "Developer refresh blocked: %s" % _friendly_reason(String(result.get("reason","rejected")))
 	_update_rewards_panel(true)
@@ -2191,10 +2220,7 @@ func _update_rewards_panel_text(
 	if _inventory_use_button != null:
 		_inventory_use_button.disabled = item.is_empty() or not item.get("usable", false)
 		_inventory_use_button.tooltip_text = "Use the selected consumable" if item.get("usable",false) else "USE applies only to an available, verified consumable; weapon attacks use ATTACK."
-	if _developer_refresh_button != null:
-		_developer_refresh_button.visible = _session.get_reward_mode() == ArenaRewardLedger.MODE_DEV_NORMAL and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME
-		var refresh_player := _session.get_actor_state(Fixture.PLAYER_ID)
-		_developer_refresh_button.disabled = refresh_player == null or refresh_player.current_hpc == null or int(refresh_player.current_hpc) <= 0
+	_update_developer_refresh_control()
 	for operation: String in _weapon_handling_buttons:
 		var preview := _session.simulation.get_weapon_handling_preview(Fixture.PLAYER_ID, StringName(item.get("definition_id", "")), operation)
 		var button: Button = _weapon_handling_buttons[operation]
@@ -2417,22 +2443,10 @@ func _update_presentation() -> void:
 			_character_selector.disabled = false
 	if _nac_settings_panel != null and _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		_nac_settings_panel.visible = false
-	var seed_editable := not _browser_transition_blocked() and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
 	if _seed_label != null:
 		_seed_label.text = "SEED %d" % _authoritative_seed()
-	if _seed_input != null:
-		if not seed_editable and _seed_input.has_focus():
-			_seed_input.release_focus()
-		_seed_input.visible = seed_editable
-		_seed_input.editable = seed_editable
-	if _seed_apply_button != null:
-		if not seed_editable and _seed_apply_button.has_focus():
-			_seed_apply_button.release_focus()
-		_seed_apply_button.visible = seed_editable
-		_seed_apply_button.disabled = not seed_editable
-	if _event_log != null:
-		_event_log.text = "[b]RECENT RESULTS[/b]  (FULL LOG / F4)\n" + "\n".join(PackedStringArray(_log_lines))
-		_event_log.scroll_to_line(maxi(0, _event_log.get_line_count() - 1))
+	_update_seed_editing_controls()
+	_update_recent_results()
 	if is_transcript_visible():
 		_refresh_transcript_view()
 	if _developer_debug != null and _developer_debug.visible:
@@ -2630,6 +2644,36 @@ func _append_debug_log(line: String) -> void:
 	_debug_log_lines.append(line)
 	while _debug_log_lines.size() > MAX_DEBUG_LOG_LINES:
 		_debug_log_lines.pop_front()
+
+
+func _update_seed_editing_controls() -> void:
+	var seed_editable := _dev_tools_enabled and _session != null and not _browser_transition_blocked() and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
+	if _seed_input != null:
+		if not seed_editable and _seed_input.has_focus():
+			_seed_input.release_focus()
+		_seed_input.visible = seed_editable
+		_seed_input.editable = seed_editable
+	if _seed_apply_button != null:
+		if not seed_editable and _seed_apply_button.has_focus():
+			_seed_apply_button.release_focus()
+		_seed_apply_button.visible = seed_editable
+		_seed_apply_button.disabled = not seed_editable
+
+
+func _update_developer_refresh_control() -> void:
+	if _developer_refresh_button == null or _session == null:
+		return
+	_developer_refresh_button.visible = _dev_tools_enabled and _session.get_reward_mode() == ArenaRewardLedger.MODE_DEV_NORMAL and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME
+	var refresh_player := _session.get_actor_state(Fixture.PLAYER_ID)
+	_developer_refresh_button.disabled = _browser_transition_blocked() or refresh_player == null or refresh_player.current_hpc == null or int(refresh_player.current_hpc) <= 0
+
+
+func _update_recent_results() -> void:
+	if _event_log == null:
+		return
+	var log_hint := "  (FULL LOG / F4)" if _dev_tools_enabled else ""
+	_event_log.text = "[b]RECENT RESULTS[/b]" + log_hint + "\n" + "\n".join(PackedStringArray(_log_lines))
+	_event_log.scroll_to_line(maxi(0, _event_log.get_line_count() - 1))
 
 
 func _build_transcript_text() -> String:

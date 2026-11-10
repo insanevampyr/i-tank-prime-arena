@@ -55,6 +55,7 @@ encounter_button_path = NodePath("HUD/UI/EncounterButton")
 encounter_selector_path = NodePath("HUD/UI/EncounterSelector")
 character_selector_path = NodePath("HUD/UI/CharacterSelector")
 debug_button_path = NodePath("HUD/UI/DebugButton")
+dev_tools_button_path = NodePath("HUD/UI/DevToolsButton")
 attack_readiness_path = NodePath("HUD/UI/AttackReadiness")
 run_readiness_path = NodePath("HUD/UI/RunReadiness")
 log_button_path = NodePath("HUD/UI/LogButton")
@@ -103,7 +104,7 @@ offset_right = 650.0
 offset_bottom = 88.0
 theme_override_colors/font_color = Color(0.62, 0.69, 0.76, 1)
 theme_override_font_sizes/font_size = 16
-text = "START; WASD/arrows/touch move; Shift/RUN runs; hold click, Space/Enter, or touch ATTACK; F3 debug"
+text = "START; WASD/arrows/touch move; Shift/RUN runs; hold click, Space/Enter, or touch ATTACK"
 
 [node name="SeedLabel" type="Label" parent="HUD/UI"]
 layout_mode = 0
@@ -117,6 +118,7 @@ text = "SEED 1"
 vertical_alignment = 1
 
 [node name="SeedInput" type="LineEdit" parent="HUD/UI"]
+visible = false
 layout_mode = 0
 offset_left = 150.0
 offset_top = 94.0
@@ -128,6 +130,7 @@ max_length = 20
 placeholder_text = "signed seed"
 
 [node name="SeedApplyButton" type="Button" parent="HUD/UI"]
+visible = false
 layout_mode = 0
 offset_left = 290.0
 offset_top = 94.0
@@ -213,6 +216,7 @@ theme_override_font_sizes/font_size = 16
 text = "START"
 
 [node name="DebugButton" type="Button" parent="HUD/UI"]
+visible = false
 layout_mode = 0
 offset_left = 866.0
 offset_top = 20.0
@@ -224,6 +228,7 @@ theme_override_font_sizes/font_size = 14
 text = "DEBUG"
 
 [node name="LogButton" type="Button" parent="HUD/UI"]
+visible = false
 layout_mode = 0
 offset_left = 744.0
 offset_top = 20.0
@@ -233,6 +238,18 @@ mouse_default_cursor_shape = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 13
 text = "FULL LOG"
+
+[node name="DevToolsButton" type="Button" parent="HUD/UI"]
+layout_mode = 0
+offset_left = 512.0
+offset_top = 20.0
+offset_right = 586.0
+offset_bottom = 72.0
+mouse_default_cursor_shape = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 13
+text = "DEV OFF"
+tooltip_text = "Show or hide developer tools"
 
 [node name="EncounterSelector" type="Button" parent="HUD/UI"]
 layout_mode = 0
@@ -469,6 +486,7 @@ seed_label_path = NodePath("../HUD/UI/SeedLabel")
 seed_input_path = NodePath("../HUD/UI/SeedInput")
 seed_apply_button_path = NodePath("../HUD/UI/SeedApplyButton")
 debug_button_path = NodePath("../HUD/UI/DebugButton")
+dev_tools_button_path = NodePath("../HUD/UI/DevToolsButton")
 attack_readiness_path = NodePath("../HUD/UI/AttackReadiness")
 run_readiness_path = NodePath("../HUD/UI/RunReadiness")
 log_button_path = NodePath("../HUD/UI/LogButton")

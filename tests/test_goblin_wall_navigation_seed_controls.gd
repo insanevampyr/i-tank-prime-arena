@@ -117,7 +117,11 @@ func _test_seed_ui_validation_lock_and_reset_semantics() -> void:
 	var reset_state := controller.get_seed_ui_state_for_testing()
 	_expect_equal(reset_state.get("authoritative_seed"), selected_seed, "RESET must reuse the selected seed.")
 	_expect_equal(session.get_targetable_enemy_ids().size(), 8, "RESET must reproduce the selected seed's Goblin quantity.")
-	_expect_true(not bool(reset_state.get("input_disabled", true)) and not bool(reset_state.get("apply_disabled", true)), "Seed controls must become editable again after RESET.")
+	var dev_button: Button = scene.get_node("HUD/UI/DevToolsButton")
+	var seed_hidden_after_reset: bool = dev_button.text == "DEV OFF" and not reset_state.input_visible and not reset_state.apply_visible and reset_state.input_disabled and reset_state.apply_disabled
+	dev_button.pressed.emit()
+	var dev_seed_state := controller.get_seed_ui_state_for_testing()
+	_expect_true(seed_hidden_after_reset and dev_seed_state.input_visible and dev_seed_state.apply_visible and not dev_seed_state.input_disabled and not dev_seed_state.apply_disabled, "RESET must leave DEV off and restore seed editing eligibility once DEV is enabled.")
 	tree.root.remove_child(scene)
 	scene.free()
 

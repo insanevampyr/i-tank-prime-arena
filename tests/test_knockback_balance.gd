@@ -11,6 +11,7 @@ var _assertions := 0
 func run() -> Array[String]:
 	_test_footing_and_displacement()
 	_test_unavailable_and_negated_sources()
+	_test_zero_damage_bolt()
 	_test_independent_knockbacks_and_replay()
 	print("39J knockback Balance: %d assertions." % _assertions)
 	return _failures
@@ -59,21 +60,40 @@ func _test_unavailable_and_negated_sources() -> void:
 			expected_draws += 1
 		_expect(fixture.sim.random.get_draw_count() == fixture.draws_before_damage + expected_draws, "Ineligible %s/%s cannot consume Balance RNG." % row)
 
-	for mode: String in [ArenaRewardLedger.MODE_TEST, ArenaRewardLedger.MODE_DEV_NORMAL]:
-		var fixture := _resolve_fixture("rage", _seed("rage", 20), "full", "", mode)
-		var event := _knockback(fixture.sim, "rage")
-		_expect(event != null and not event.payload.has("balance_opportunity_id") and fixture.sim.random.get_draw_count() == fixture.draws_before_damage + 1, "Legacy mode still displaces without a Balance draw.")
+	var test_fixture := _resolve_fixture("rage", _seed("rage", 20), "full", "", ArenaRewardLedger.MODE_TEST)
+	var event := _knockback(test_fixture.sim, "rage")
+	_expect(event != null and not event.payload.has("balance_opportunity_id") and test_fixture.sim.random.get_draw_count() == test_fixture.draws_before_damage + 1, "TEST still displaces without a Balance draw.")
+
+
+func _test_zero_damage_bolt() -> void:
+	var seed_value := _seed("force_bolt", 1)
+	var combat_results: Array[Dictionary] = []
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL, ArenaRewardLedger.MODE_TEST]:
+		var fixture := _resolve_fixture("force_bolt", seed_value, "full", "zero_bolt_damage", mode)
+		var sim: CombatSimulation = fixture.sim
+		var damage: CombatEvent = fixture.damage
+		_expect(damage != null and damage.payload.final_damage == 0 and damage.payload.hpc_before == damage.payload.hpc_after, "%s must resolve a zero-damage Bolt without HPC loss." % mode)
+		var event := _knockback(sim, "force_bolt")
+		var target := sim.get_actor_state(TARGET)
+		if mode == ArenaRewardLedger.MODE_TEST:
+			_expect(event != null and not event.payload.has("balance_opportunity_id") and target.position_microfeet == Vector2i(10_000_000, 5_000_000), "TEST retains its zero-damage Bolt displacement without Balance.")
+		else:
+			_expect(event == null and target.position_microfeet == Vector2i(8_000_000, 5_000_000), "%s requires positive damage before Bolt can knock back." % mode)
+			combat_results.append(_combat_evidence(sim))
+		_expect(sim.random.get_draw_count() == fixture.draws_before_damage + 1, "%s consumes only the damage d6." % mode)
+	_expect(combat_results[0] == combat_results[1], "Zero-damage Bolt state, RNG and event history match in NORMAL and DEV NORMAL.")
 
 
 func _test_independent_knockbacks_and_replay() -> void:
-	var reentrant := _resolve_fixture("rage", _seed("rage", 1), "full", "reentrant")
-	var event := _knockback(reentrant.sim, "rage")
-	_expect(event != null and event.payload.resolved_distance_microfeet == DISTANCE, "Reentrant source processing preserves the original displacement.")
-	_expect(reentrant.sim.random.get_draw_count() == reentrant.draws_before_damage + 2, "Reentrant geometry callback cannot repeat Balance.")
-	var count := 0
-	for entry: CombatEvent in reentrant.sim.get_resolved_events():
-		if entry.event_type == &"rage_knockback_resolved": count += 1
-	_expect(count == 1, "Reentrant processing emits exactly one source event.")
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var reentrant := _resolve_fixture("rage", _seed("rage", 1), "full", "reentrant", mode)
+		var event := _knockback(reentrant.sim, "rage")
+		_expect(event != null and event.payload.resolved_distance_microfeet == DISTANCE, "Reentrant source processing preserves the original displacement in %s." % mode)
+		_expect(reentrant.sim.random.get_draw_count() == reentrant.draws_before_damage + 2, "Reentrant geometry callback cannot repeat Balance in %s." % mode)
+		var count := 0
+		for entry: CombatEvent in reentrant.sim.get_resolved_events():
+			if entry.event_type == &"rage_knockback_resolved": count += 1
+		_expect(count == 1, "Reentrant processing emits exactly one source event in %s." % mode)
 	var seed_value := _seed("dual", 1)
 	var replays: Array = []
 	for replay_index in range(2):
@@ -109,7 +129,7 @@ func _resolve_fixture(kind: String, seed_value: int, geometry: String = "full", 
 	if geometry != "full":
 		var clearance := 1_000_000 if geometry == "partial" else 0
 		var wall_x := 2_500_000 - clearance if affected == ATTACKER else 8_500_000 + clearance
-		obstacles.append({"id": "39j_wall", "rect_microfeet": Rect2i(wall_x, 0, 1_000_000, 10_000_000)})
+		obstacles.append({"id": "39j_wall", "rect_microfeet": Rect2i(wall_x, 0, 1_000_000, 10_000_000), "knockback_surface": "solid_wall"})
 	session.configure_battlefield(ArenaBattlefield.new(Rect2i(0, 0, 20_000_000, 10_000_000), obstacles))
 	sim.set_rage_knockback_resolver(session._resolve_rage_knockback)
 	sim.set_attack_final_line_of_sight_resolver(func(_source: StringName, _target: StringName) -> bool: return true)
@@ -165,6 +185,9 @@ func _resolve_fixture(kind: String, seed_value: int, geometry: String = "full", 
 	_expect(sim.resolve_pending_defense(attack_id, "39j_defense", context).success, "Resolve through the ordinary defense boundary.")
 	if gate == "already_prone": sim.set_actor_defense_state(affected, &"aware", PackedStringArray(["prone"]))
 	if gate == "incapacitated": sim.get_actor_state(affected).current_hpc = 1
+	if gate == "zero_bolt_damage":
+		# Inject a fixture-only factor so the real d6 damage path rounds down to zero.
+		sim.get_attack(attack_id).consequence_damage_multipliers.append({"numerator": 1, "denominator": 7})
 	var draws := sim.random.get_draw_count()
 	var mr_before: Variant = sim.get_actor_state(affected).remaining_mr_microfeet
 	var elapsed_before := sim.clock.get_elapsed_us()
@@ -228,6 +251,15 @@ func _knockback(sim: CombatSimulation, kind: String) -> CombatEvent:
 	for event: CombatEvent in sim.get_resolved_events():
 		if event.event_type == StringName(kind + "_knockback_resolved"): return event
 	return null
+
+
+func _combat_evidence(sim: CombatSimulation) -> Dictionary:
+	var snapshot := sim.get_state_snapshot()
+	snapshot.reward_state.erase("mode")
+	var events: Array[Dictionary] = []
+	for event: CombatEvent in sim.get_resolved_events():
+		events.append(event.to_dictionary())
+	return {"snapshot": snapshot, "events": events}
 
 
 func _seed(kind: String, footing: int, gate: String = "") -> int:

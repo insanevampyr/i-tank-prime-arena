@@ -113,6 +113,7 @@ func _test_scene_log_and_crowded_labels() -> void:
 	tree.root.add_child(scene)
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.press_encounter_control_for_testing()
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller.set_transcript_visible(true)
 	_expect_true(controller.is_transcript_visible(), "FULL LOG must open the collapsible transcript viewer.")
 	_expect_true(controller.get_transcript_text_for_testing().contains("Authoritative Encounter Transcript"), "The viewer must expose the complete authoritative transcript text.")
@@ -132,15 +133,19 @@ func _test_scene_log_and_crowded_labels() -> void:
 
 
 func _test_task20_layouts() -> void:
-	for size: Vector2 in [Vector2(915, 412), Vector2(800, 360), Vector2(1280, 720)]:
+	for size: Vector2 in [Vector2(915, 412), Vector2(800, 360), Vector2(1280, 720), Vector2(390, 844)]:
 		var layout := ResponsiveLayout.calculate_layout(size, size)
 		var panel: Rect2 = layout["transcript_panel_rect"]
 		var log_button: Rect2 = layout["log_button_rect"]
 		var debug_button: Rect2 = layout["debug_button_rect"]
 		var encounter_button: Rect2 = layout["encounter_button_rect"]
+		var dev_button: Rect2 = layout["dev_tools_button_rect"]
 		_expect_true(panel.position.x >= 0.0 and panel.position.y >= 0.0 and panel.end.x <= size.x and panel.end.y <= size.y, "The full transcript panel must remain inside supported viewports.")
 		_expect_true(log_button.position.x >= 0.0 and log_button.end.x <= size.x, "The FULL LOG control must remain visible at supported widths.")
 		_expect_true(not log_button.intersects(debug_button) and not debug_button.intersects(encounter_button), "The FULL LOG, DEBUG and START/RESET controls must not overlap.")
+		_expect_true(Rect2(Vector2.ZERO, size).encloses(dev_button) and not dev_button.intersects(panel) and not dev_button.intersects(log_button), "DEV stays reachable while FULL LOG is open, including in wrapped layouts.")
+		var hidden := ResponsiveLayout.calculate_layout(size, size, {}, false)
+		_expect_true(hidden["debug_button_rect"] == Rect2() and hidden["log_button_rect"] == Rect2() and Rect2(Vector2.ZERO, size).encloses(hidden["dev_tools_button_rect"]), "Hidden tools leave toolbar space free while the DEV switch stays reachable.")
 
 
 func _player_opening_session(player_position: Vector2i, opponent_position: Vector2i) -> ArenaCombatSession:

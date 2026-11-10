@@ -2782,7 +2782,7 @@ func resolve_nac_projectile_damage(attack_instance_id: String, request_id: Strin
 		"final_damage": final_damage, "hpc_before": hpc_before,
 		"hpc_after": int(target_state.current_hpc), "damage_applied": final_damage > 0,
 	}, parent_event_id, PackedStringArray(), {"hpc": final_damage})
-	if final_damage > 0 or _reward_state.get("mode") != ArenaRewardLedger.MODE_NORMAL:
+	if final_damage > 0 or not _uses_normal_footing_rules():
 		_apply_special_projectile_knockback(attack, event.event_id)
 	if interrupt_executing_action: _schedule_nac_physical_action_interruption(attack, event.event_id)
 	return _success({"final_damage": final_damage, "event_id": event.event_id})
@@ -2928,7 +2928,7 @@ func _resolve_source_knockback(
 	var state := get_actor_state(target_id)
 	if state == null:
 		return
-	var use_balance: bool = _reward_state.get("mode") == ArenaRewardLedger.MODE_NORMAL
+	var use_balance := _uses_normal_footing_rules()
 	var opportunity_id := "%s:%s:%s" % [parent_event_id, kind, target_id]
 	if use_balance:
 		if _knockback_opportunity_ids.has(opportunity_id):
@@ -2959,7 +2959,7 @@ func _resolve_source_knockback(
 	if kind == "rage_knockback" or use_balance:
 		payload["blocked"] = blocked
 		payload["collision_reason"] = String(result.get("reason", ""))
-	if use_balance or _reward_state.get("mode") == ArenaRewardLedger.MODE_DEV_NORMAL:
+	if use_balance:
 		var contact: Dictionary = result.get("collision_contact", {"status": "unsupported", "reason": "contact_evidence_unavailable"}).duplicate(true)
 		if contact.status == "verified_static_wall":
 			contact["impact_id"] = opportunity_id + ":impact"
@@ -2977,6 +2977,11 @@ func _resolve_source_knockback(
 				if not check.check_success:
 					_add_actor_condition(state, "prone")
 	_record_resolved_event(clock.get_elapsed_us(), StringName(kind + "_resolved"), _get_actor_initiative(String(source_id)), source_id, target_id, payload, parent_event_id)
+
+
+func _uses_normal_footing_rules() -> bool:
+	var mode: Variant = _reward_state.get("mode")
+	return mode == ArenaRewardLedger.MODE_NORMAL or mode == ArenaRewardLedger.MODE_DEV_NORMAL
 
 
 func schedule_interruption(
@@ -5680,7 +5685,7 @@ func _resolve_critical_knockdown(
 	effect: Dictionary,
 	profile: CombatDefenseProfile
 ) -> void:
-	var use_balance: bool = _reward_state.get("mode") == ArenaRewardLedger.MODE_NORMAL
+	var use_balance := _uses_normal_footing_rules()
 	var effect_id := String(effect["effect_id"])
 	# Each effect selects exactly one actor within this causal critical record.
 	if use_balance and (record.applied_effect_ids.has(effect_id) or record.blocked_effect_ids.has(effect_id)):

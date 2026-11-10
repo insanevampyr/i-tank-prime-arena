@@ -117,6 +117,7 @@ func _test_presentation_controls() -> void:
 	controller.press_encounter_control_for_testing()
 	var session := controller.get_combat_session_for_testing()
 	session.set_opponent_behavior_enabled(false)
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller._update_rewards_panel(true)
 	_expect(not controller._developer_refresh_button.visible,"Actual refresh button must be hidden during combat.")
 	for id: String in session.get_targetable_enemy_ids(): session.get_actor_state(StringName(id)).current_hpc = 0

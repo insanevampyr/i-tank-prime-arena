@@ -20,11 +20,17 @@ func _test_seed_focus_lifecycle_and_target_cycle() -> void:
 		return
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	var seed_input := scene.get_node("HUD/UI/SeedInput") as LineEdit
+	var dev_button: Button = scene.get_node("HUD/UI/DevToolsButton")
+	_expect_true(not controller.get_seed_ui_state_for_testing().input_visible, "Seed editing is hidden while DEV is off.")
+	dev_button.pressed.emit()
 	var ready := controller.get_seed_ui_state_for_testing()
 	_expect_true(ready.get("input_visible", false) and ready.get("apply_visible", false), "READY must show the editable seed input and APPLY control.")
 	_expect_true(not ready.get("input_disabled", true) and not ready.get("apply_disabled", true), "READY seed controls must be enabled.")
 	seed_input.grab_focus()
 	_expect_true(seed_input.has_focus(), "Seed entry must retain normal text focus before START.")
+	dev_button.pressed.emit()
+	_expect_true(not seed_input.visible and not seed_input.has_focus(), "Turning DEV off hides seed editing and releases its focus.")
+	dev_button.pressed.emit()
 	_expect_true(controller.set_seed_text_for_testing("3").get("success", false), "The representative four-Goblin seed must be valid in READY state.")
 	_expect_true(controller.select_encounter_fixture_for_testing(Fixture.ENCOUNTER_WAVE_ONE_GOBLINS).get("success", false), "Wave 1 must remain selectable after seed entry.")
 	var session := controller.get_combat_session_for_testing()

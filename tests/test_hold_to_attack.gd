@@ -115,6 +115,7 @@ func _test_release_focus_log_and_ui_focus() -> void:
 	_expect_equal(_count_player_declarations(session), 1, "Focus loss must not leave a stuck repeat after the already-started attack completes.")
 
 	_press_attack_key(controller, KEY_SPACE)
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller.set_transcript_visible(true)
 	_expect_true(not controller.get_attack_hold_state_for_testing()["active"], "Opening FULL LOG must clear held attack intent.")
 	controller.set_transcript_visible(false)

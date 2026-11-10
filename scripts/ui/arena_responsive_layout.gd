@@ -19,6 +19,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 @export var encounter_selector_path: NodePath
 @export var character_selector_path: NodePath
 @export var debug_button_path: NodePath
+@export var dev_tools_button_path: NodePath
 @export var attack_readiness_path: NodePath
 @export var run_readiness_path: NodePath
 @export var log_button_path: NodePath
@@ -40,6 +41,7 @@ const WORLD_PRESENTATION_EXTENT_FEET := Vector2(48.0, 27.0)
 @onready var _encounter_selector: Button = get_node_or_null(encounter_selector_path)
 @onready var _character_selector: Button = get_node_or_null(character_selector_path)
 @onready var _debug_button: Button = get_node_or_null(debug_button_path)
+@onready var _dev_tools_button: Button = get_node_or_null(dev_tools_button_path)
 @onready var _attack_readiness: Control = get_node_or_null(attack_readiness_path)
 @onready var _run_readiness: Control = get_node_or_null(run_readiness_path)
 @onready var _log_button: Button = get_node_or_null(log_button_path)
@@ -66,7 +68,7 @@ func _process(_delta: float) -> void:
 		_apply_layout(viewport_size, display_size)
 
 
-static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO, toolbar_minimums: Dictionary = {}) -> Dictionary:
+static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO, toolbar_minimums: Dictionary = {}, show_dev_tools: bool = true) -> Dictionary:
 	var safe_size := Vector2(maxf(viewport_size.x, 1.0), maxf(viewport_size.y, 1.0))
 	var safe_display_size := safe_size if display_size.is_zero_approx() else Vector2(maxf(display_size.x, 1.0), maxf(display_size.y, 1.0))
 	var canvas_scale := minf(safe_display_size.x / safe_size.x, safe_display_size.y / safe_size.y)
@@ -95,13 +97,18 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	var seed_apply_button_rect := Rect2(seed_input_rect.end.x + seed_gap, seed_y, seed_button_width, seed_height)
 	var character_selector_rect := Rect2(seed_apply_button_rect.end.x + seed_gap, seed_y, (176.0 if compact else 200.0) / canvas_scale, seed_height)
 	var toolbar_gap := (12.0 if compact else 16.0) / canvas_scale
-	# One minimum-aware toolbar allocation, rather than four independent fixed
+	# One minimum-aware toolbar allocation, rather than independent fixed
 	# rectangles which Godot can silently expand into their neighbours.
-	var toolbar_keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
-	var preferred_widths := [104.0 if compact else 132.0, 116.0 if compact else 132.0, 108.0 if compact else 124.0, 104.0 if compact else 120.0]
+	var toolbar_keys := ["encounter_selector_rect", "dev_tools_button_rect", "encounter_button_rect"]
+	var preferred_widths := [104.0 if compact else 132.0, 76.0, 104.0 if compact else 120.0]
+	if show_dev_tools:
+		toolbar_keys.insert(2, "log_button_rect")
+		toolbar_keys.insert(3, "debug_button_rect")
+		preferred_widths.insert(2, 116.0 if compact else 132.0)
+		preferred_widths.insert(3, 108.0 if compact else 124.0)
 	if toolbar_minimums.has("return_wave_one_rect"):
-		toolbar_keys.insert(3,"return_wave_one_rect")
-		preferred_widths.insert(3,184.0)
+		toolbar_keys.insert(toolbar_keys.size() - 1, "return_wave_one_rect")
+		preferred_widths.insert(preferred_widths.size() - 1, 184.0)
 	var toolbar_height := (48.0 if compact else 52.0) / canvas_scale
 	var toolbar_width := toolbar_gap * float(toolbar_keys.size()-1)
 	var widths: Array[float] = []
@@ -130,8 +137,6 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		row_x += widths[index] + toolbar_gap
 	var encounter_button_rect: Rect2 = toolbar_rects.encounter_button_rect
 	var selector_button_rect: Rect2 = toolbar_rects.encounter_selector_rect
-	var debug_button_rect: Rect2 = toolbar_rects.debug_button_rect
-	var log_button_rect: Rect2 = toolbar_rects.log_button_rect
 	var debug_y := maxf(seed_label_rect.end.y, toolbar_y + toolbar_height) + ((6.0 if compact else 14.0) / canvas_scale)
 	var touch_layout := MobileTouchControlsClass.calculate_layout(safe_size, safe_display_size)
 	var debug_bottom_limit: float = touch_layout["control_top"] - (10.0 / canvas_scale)
@@ -180,11 +185,12 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		safe_size.x - margin * 2.0,
 		maxf(42.0 / canvas_scale, debug_bottom_limit - debug_y)
 	)
+	var transcript_y := maxf(seed_label_rect.end.y, toolbar_y + toolbar_height) + line_gap
 	var transcript_panel_rect := Rect2(
 		margin,
-		seed_label_rect.end.y + line_gap,
+		transcript_y,
 		safe_size.x - margin * 2.0,
-		maxf(120.0 / canvas_scale, debug_bottom_limit - seed_label_rect.end.y - line_gap)
+		maxf(120.0 / canvas_scale, debug_bottom_limit - transcript_y)
 	)
 	return {
 		"viewport_size": safe_size,
@@ -206,8 +212,9 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"encounter_button_rect": encounter_button_rect,
 		"return_wave_one_rect": toolbar_rects.get("return_wave_one_rect",Rect2()),
 		"encounter_selector_rect": selector_button_rect,
-		"debug_button_rect": debug_button_rect,
-		"log_button_rect": log_button_rect,
+		"dev_tools_button_rect": toolbar_rects.dev_tools_button_rect,
+		"debug_button_rect": toolbar_rects.get("debug_button_rect", Rect2()),
+		"log_button_rect": toolbar_rects.get("log_button_rect", Rect2()),
 		"transcript_panel_rect": transcript_panel_rect,
 		"attack_readiness_rect": attack_readiness_rect,
 		"run_readiness_rect": run_readiness_rect,
@@ -240,6 +247,7 @@ func _on_viewport_size_changed() -> void:
 
 
 func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO) -> void:
+	var viewport_changed := not viewport_size.is_equal_approx(_last_viewport_size)
 	_last_viewport_size = viewport_size
 	_last_display_size = viewport_size if display_size.is_zero_approx() else display_size
 	var scale_metrics := calculate_layout(viewport_size, display_size)
@@ -248,9 +256,9 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	var inventory_button := get_node_or_null("HUD/UI/CombatInventory") as Button
 	if inventory_button != null:
 		minimums["inventory_bottom"] = inventory_button.get_rect().end.y
-	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button]
-	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect"]
-	var font_sizes := [13.0, 13.0, 14.0, 16.0]
+	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button, _dev_tools_button]
+	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect", "dev_tools_button_rect"]
+	var font_sizes := [13.0, 13.0, 14.0, 16.0, 13.0]
 	var return_button := _return_wave_one_button()
 	if return_button != null and return_button.visible:
 		buttons.append(return_button)
@@ -262,14 +270,16 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 			button.add_theme_font_size_override("font_size", maxi(1, roundi(font_sizes[index] / scale)))
 			minimums[keys[index]] = button.get_combined_minimum_size()
 	_last_toolbar_labels = _toolbar_labels()
-	var metrics := calculate_layout(viewport_size, display_size, minimums)
-	var battlefield_metrics := calculate_battlefield_presentation(viewport_size)
-	var pixels_per_foot := float(battlefield_metrics["pixels_per_foot"])
-	if _battlefield != null:
-		_battlefield.pixels_per_foot = pixels_per_foot
-		_battlefield.queue_redraw()
-	if _combat_controller != null:
-		_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot, viewport_size)
+	var show_dev_tools := _debug_button != null and _debug_button.visible
+	var metrics := calculate_layout(viewport_size, display_size, minimums, show_dev_tools)
+	if viewport_changed:
+		var battlefield_metrics := calculate_battlefield_presentation(viewport_size)
+		var pixels_per_foot := float(battlefield_metrics["pixels_per_foot"])
+		if _battlefield != null:
+			_battlefield.pixels_per_foot = pixels_per_foot
+			_battlefield.queue_redraw()
+		if _combat_controller != null:
+			_combat_controller.set_world_presentation_pixels_per_foot(pixels_per_foot, viewport_size)
 	if _title != null:
 		_title.clip_text = true
 	_apply_control_rect(_title, metrics["title_rect"])
@@ -287,6 +297,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	if return_button != null and return_button.visible: _apply_control_rect(return_button,metrics["return_wave_one_rect"])
 	_apply_control_rect(_encounter_selector, metrics["encounter_selector_rect"])
 	_apply_control_rect(_debug_button, metrics["debug_button_rect"])
+	_apply_control_rect(_dev_tools_button, metrics["dev_tools_button_rect"])
 	_apply_control_rect(_attack_readiness, metrics["attack_readiness_rect"])
 	_apply_control_rect(_run_readiness, metrics["run_readiness_rect"])
 	_apply_control_rect(_log_button, metrics["log_button_rect"])
@@ -296,10 +307,12 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	if _instructions != null:
 		_instructions.add_theme_font_size_override("font_size", metrics["instructions_font_size"])
 		_instructions.text = (
-			"START | Move: WASD/touch | Run: Shift/RUN | Attack | F3 debug | F4 log"
+			"START | Move: WASD/touch | Run: Shift/RUN | Attack"
 			if metrics["compact"]
-			else "START; WASD/touch moves; Shift/RUN runs; click attacks once; hold Space/Enter or touch ATTACK; R resets; F3 debug; F4 full log"
+			else "START | WASD/touch moves | Shift/RUN runs | Click attacks once | Hold Space/Enter or touch ATTACK | R resets"
 		)
+		if show_dev_tools:
+			_instructions.text += " | F3 debug | F4 log"
 	if _seed_label != null:
 		_seed_label.add_theme_font_size_override("font_size", metrics["instructions_font_size"])
 	if _seed_input != null:
@@ -323,7 +336,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 
 func _toolbar_labels() -> Array[String]:
 	var labels: Array[String] = []
-	for button: Button in [_encounter_selector, _log_button, _debug_button, _encounter_button]:
+	for button: Button in [_encounter_selector, _log_button, _debug_button, _encounter_button, _dev_tools_button]:
 		labels.append(button.text if button != null else "")
 	var return_button := _return_wave_one_button()
 	labels.append(return_button.text if return_button != null and return_button.visible else "")

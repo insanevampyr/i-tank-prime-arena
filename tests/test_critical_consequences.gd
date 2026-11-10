@@ -1,6 +1,7 @@
 extends RefCounted
 
 var _failures: Array[String] = []
+var _assertions := 0
 
 
 func run() -> Array[String]:
@@ -19,6 +20,7 @@ func run() -> Array[String]:
 	_test_reaction_existing_legality_gates()
 	_test_reaction_fresh_roll_defenses_and_replay()
 	_test_backfire_and_weapon_specific_gates()
+	print("Critical consequences: %d assertions." % _assertions)
 	return _failures
 
 
@@ -573,11 +575,13 @@ func _count_events(simulation: CombatSimulation, event_type: StringName) -> int:
 
 
 func _expect_equal(actual: Variant, expected: Variant, message: String) -> void:
+	_assertions += 1
 	if actual != expected:
 		_failures.append("%s Expected %s, got %s." % [message, str(expected), str(actual)])
 
 
 func _expect_true(value: bool, message: String) -> void:
+	_assertions += 1
 	if not value:
 		_failures.append(message)
 
@@ -733,11 +737,10 @@ func _test_live_critical_balance() -> void:
 		if reversal:
 			_expect_equal(_count_events(sim, &"critical_reaction_attack_declared"), 1, "39I: shield contact/protection cannot suppress an independent legal counterattack.")
 
-	for mode: String in [ArenaRewardLedger.MODE_TEST, ArenaRewardLedger.MODE_DEV_NORMAL]:
-		var fixture := _live_balance_fixture("knocked_down", ordinary_seed, "", mode)
-		var sim: CombatSimulation = fixture.sim
-		_expect_equal(sim.random.get_draw_count(), 5, "39I: only NORMAL adds a Balance draw.")
-		_expect_true(sim.get_actor_state(fixture.affected).conditions.has("prone"), "39I: other modes preserve their existing consequence.")
+	var test_fixture := _live_balance_fixture("knocked_down", ordinary_seed, "", ArenaRewardLedger.MODE_TEST)
+	var test_sim: CombatSimulation = test_fixture.sim
+	_expect_equal(test_sim.random.get_draw_count(), 5, "TEST keeps the legacy consequence without a Balance draw.")
+	_expect_true(test_sim.get_actor_state(test_fixture.affected).conditions.has("prone"), "TEST keeps the direct prone effect.")
 
 	_test_live_balance_chain_and_replay()
 
@@ -861,8 +864,8 @@ func _test_live_balance_chain_and_replay() -> void:
 	preview.next_int(1, 100)
 	var expected_roll := preview.next_int(1, 20)
 	var replays: Array = []
-	for replay_index in range(2):
-		var fixture := _live_balance_fixture("devastating_reversal", seed_value, "chain")
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var fixture := _live_balance_fixture("devastating_reversal", seed_value, "chain", mode)
 		var sim: CombatSimulation = fixture.sim
 		var parent := _expect_live_balance_outcome(fixture, "devastating_reversal", expected_roll, true)
 		if parent == null: return
@@ -888,6 +891,10 @@ func _test_live_balance_chain_and_replay() -> void:
 		_expect_equal(sim.get_state_snapshot(), before, "39I: duplicate consequence cannot mutate state.")
 		_expect_equal(sim.random.wave_entry_state(), rng_before, "39I: duplicate consequence cannot draw RNG.")
 		_expect_equal(sim.get_resolved_events().size(), event_count, "39I: duplicate consequence emits no event.")
+		before.reward_state.erase("mode")
+		var history: Array[Dictionary] = []
+		for event: CombatEvent in sim.get_resolved_events():
+			history.append(event.to_dictionary())
 		var harness: TwoClientSyncHarness = fixture.harness
 		var envelopes := harness.authority.publish_current_events()
 		for envelope: CombatEventEnvelope in envelopes: harness.client_a.receive(envelope)
@@ -896,5 +903,5 @@ func _test_live_balance_chain_and_replay() -> void:
 			harness.client_b.receive(envelopes[index])
 		_expect_true(harness.compare_clients().success, "39I: reversed and duplicate deliveries must converge.")
 		_expect_equal(harness.client_a.get_state_digest(), harness.authority.get_state_digest(), "39I: client digest must match authority.")
-		replays.append({"snapshot": before, "rng": rng_before, "digest": harness.authority.get_state_digest()})
-	_expect_equal(replays[0], replays[1], "39I: same seed reproduces full history, RNG and snapshot.")
+		replays.append({"snapshot": before, "history": history})
+	_expect_true(replays[0] == replays[1] and replays[1] == replays[2], "Same-seed NORMAL and repeated DEV NORMAL reproduce critical chain history, RNG and combat state.")

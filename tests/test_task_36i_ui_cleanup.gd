@@ -103,6 +103,7 @@ func _test_overlay_lifecycle() -> void:
 	_expect(not controller.is_rewards_panel_visible_for_testing(), "Player can dismiss automatic victory rewards.")
 	scene.get_node("HUD/UI/CombatInventory").emit_signal("pressed")
 	_expect(controller.is_rewards_panel_visible_for_testing(), "Existing inventory button opens downtime rewards.")
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	_expect(controller._developer_refresh_button.is_visible_in_tree() and not controller._developer_refresh_button.disabled, "DEV refresh remains accessible in explicitly opened downtime.")
 	var selected := mini(1, controller._inventory_entries.size() - 1)
 	controller._inventory_option.select(selected)
@@ -146,7 +147,12 @@ func _test_toolbar_geometry() -> void:
 	var ui := scene.get_node("HUD/UI") as Control
 	# Isolated geometry fixture: emulate each parent viewport synchronously.
 	ui.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	var buttons: Array[Button] = [ui.get_node("EncounterSelector"), ui.get_node("LogButton"), ui.get_node("DebugButton"), ui.get_node("EncounterButton")]
+	var dev_button: Button = ui.get_node("DevToolsButton")
+	var log_button: Button = ui.get_node("LogButton")
+	var debug_button: Button = ui.get_node("DebugButton")
+	_expect(dev_button.is_visible_in_tree() and not log_button.is_visible_in_tree() and not debug_button.is_visible_in_tree(), "The DEV switch stays visible while diagnostics are hidden.")
+	dev_button.pressed.emit()
+	var buttons: Array[Button] = [ui.get_node("EncounterSelector"), log_button, debug_button, ui.get_node("EncounterButton"), dev_button]
 	buttons[0].text = "DEV NORMAL — XP ×10"
 	for display in [Vector2(1650, 928), Vector2(1152, 648), Vector2(960, 540), Vector2(800, 450), Vector2(800, 360), Vector2(915, 412), Vector2(390, 844)]:
 		# Include stretched browser canvas and unscaled viewports.

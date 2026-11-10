@@ -69,6 +69,12 @@ func _test_test_mode_selector_and_fresh_reset() -> void:
 	_expect_true(vaelis.get("success", false), "TEST MODE must preserve character selection.")
 	controller.select_test_wave_for_testing(5)
 	var session := controller.get_combat_session_for_testing()
+	var before := session.get_state_snapshot()
+	var dev_button: Button = scene.get_node("HUD/UI/DevToolsButton")
+	dev_button.pressed.emit()
+	_expect_equal(session.get_reward_mode(), ArenaRewardLedger.MODE_TEST, "DEV ON cannot change the TEST reward policy.")
+	dev_button.pressed.emit()
+	_expect_true(controller.get_combat_session_for_testing() == session and session.get_state_snapshot() == before, "DEV visibility preserves the selected TEST fixture and authority.")
 	var initial_player := session.get_actor_state(Fixture.PLAYER_ID).to_dictionary()
 	controller.press_encounter_control_for_testing()
 	session.get_actor_state(Fixture.PLAYER_ID).current_hpc = 1

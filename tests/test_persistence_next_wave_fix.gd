@@ -63,6 +63,17 @@ func _exercise(root: String, fail_write: bool) -> Dictionary:
 	_expect(controller.is_rewards_panel_visible_for_testing(),"Victory must display downtime rewards.")
 	_expect(session.get_character_persistence_status().persistent,"A concurrent final kill must secure victory without bypassing pending-action validation.")
 	controller._on_collect_loot_pressed()
+	var dev_button: Button = scene.get_node("HUD/UI/DevToolsButton")
+	var profile_before := session._playable_persistence
+	var status_before := session.get_character_persistence_status()
+	var snapshot_before := session.get_state_snapshot()
+	dev_button.pressed.emit()
+	_expect(controller._developer_refresh_button.is_visible_in_tree() and not controller._developer_refresh_button.disabled,"DEV ON exposes authorized DEV NORMAL refresh in downtime.")
+	dev_button.pressed.emit()
+	controller._on_developer_refresh_pressed()
+	_expect(not controller._developer_refresh_button.visible and session.get_state_snapshot() == snapshot_before,"DEV OFF hides refresh and its inactive button cannot change the character.")
+	_expect(controller.get_combat_session_for_testing() == session and session._playable_persistence == profile_before and session.get_character_persistence_status() == status_before,"Toggling DEV preserves the admitted profile and acknowledged checkpoint.")
+	dev_button.pressed.emit()
 	controller._on_developer_refresh_pressed()
 	# Spending fixtures distinguish approved explicit DEV refresh from an
 	# unauthorized refill performed by NEXT WAVE itself.

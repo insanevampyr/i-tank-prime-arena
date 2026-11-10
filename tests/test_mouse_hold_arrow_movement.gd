@@ -124,6 +124,7 @@ func _test_mouse_cancellation_and_independent_sources() -> void:
 	_expect_true(not controller.get_attack_hold_state_for_testing()["active"], "Application focus loss must clear every held attack source.")
 	controller.set_application_focus_for_testing(true)
 	controller.set_mouse_attack_for_testing(opponent.global_position, true)
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller.set_transcript_visible(true)
 	_expect_true(not controller.get_attack_hold_state_for_testing()["mouse"], "Opening FULL LOG must clear mouse-held intent.")
 	controller.set_transcript_visible(false)

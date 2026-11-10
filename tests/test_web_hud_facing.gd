@@ -128,6 +128,7 @@ func _test_always_visible_facing_and_reset() -> void:
 	var scaled_tip_distance := player_marker.to_global(player_marker.polygon[1]).distance_to(player.global_position)
 	_expect_true(is_equal_approx(scaled_tip_distance, 38.0 * 40.0 / 24.0), "The facing marker offset must scale with the responsive actor presentation.")
 	var event_count := controller.get_combat_session_for_testing().get_resolved_event_count()
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller.set_debug_overlay_visible(true)
 	_expect_true(player_marker.visible and opponent_marker.visible, "Opening DEBUG must not change always-visible facing indicators.")
 	controller.set_debug_overlay_visible(false)
@@ -197,6 +198,7 @@ func _test_seeded_goblin_facing_markers() -> void:
 				var state := session.get_actor_state(StringName(actor_id))
 				_expect_true(is_equal_approx(marker.rotation_degrees, ArenaCombatController.facing_rotation_degrees(state.facing_millidegrees)), "Goblin marker orientation must come from authoritative facing.")
 				_expect_marker_clear_of_actor_and_hpc(marker, visual.get_node("Label") as Label, "Goblin")
+		scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 		controller.set_debug_overlay_visible(true)
 		controller.set_debug_overlay_visible(false)
 		for actor_id: String in goblin_ids:

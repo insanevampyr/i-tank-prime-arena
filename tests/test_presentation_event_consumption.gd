@@ -74,6 +74,7 @@ func _test_transcript_cache_refreshes_only_when_history_changes() -> void:
 		return
 	tree.root.add_child(scene)
 	var controller: ArenaCombatController = scene.get_node("CombatController")
+	scene.get_node("HUD/UI/DevToolsButton").emit_signal("pressed")
 	controller.set_transcript_visible(true)
 	var first_metrics := controller.get_event_consumption_metrics_for_testing()
 	var first_text := controller.get_transcript_text_for_testing()

@@ -97,26 +97,28 @@ func _test_unsupported_contacts() -> void:
 
 func _test_live_source_contact() -> void:
 	for kind: String in ["rage", "force_bolt", "force_shield"]:
-		var seed_value := _seed(kind, 1)
-		var mode_results: Array = []
-		for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
-			var fixture := _resolve_fixture(kind, seed_value, "partial", "", mode)
-			var event := _knockback(fixture.sim, kind)
-			_expect(event != null and event.payload.has("collision_contact"), "Actual %s source emits contact evidence in %s." % [kind, mode])
-			if event == null or not event.payload.has("collision_contact"): continue
-			var contact: Dictionary = event.payload.collision_contact
-			_expect(contact.get("prevented_microfeet") == 1_000_000 and contact.get("impact_id") == "%s:%s_knockback:%s:impact" % [event.parent_event_id, kind, event.target_actor_id], "Source impact identity derives from damage cause, kind and affected actor.")
-			_expect(event.payload.resolved_distance_microfeet == 1_000_000, "Both modes keep the legal source displacement.")
-			var normal := mode == ArenaRewardLedger.MODE_NORMAL
-			_expect(fixture.sim.random.get_draw_count() == fixture.draws_before_damage + (2 if normal else 1), "Geometry adds no RNG to the existing mode-specific Balance behavior.")
-			if normal:
-				_expect(event.payload.balance_check.natural_roll == 1 and event.payload.balance_check.rng_draw_index == fixture.draws_before_damage + 2, "Preserve the existing Balance value and draw slot.")
-			mode_results.append(contact)
-		_expect(mode_results.size() == 2 and mode_results[0] == mode_results[1], "NORMAL and DEV NORMAL use identical source contact evidence.")
+		for row: Array in [["partial", 1, 1_000_000], ["blocked", 20, 0]]:
+			var seed_value := _seed(kind, row[1])
+			var mode_results: Array[Dictionary] = []
+			for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+				var fixture := _resolve_fixture(kind, seed_value, row[0], "", mode)
+				var sim: CombatSimulation = fixture.sim
+				var event := _knockback(sim, kind)
+				_expect(event != null and event.payload.has("collision_contact"), "Actual %s source emits contact evidence in %s." % [kind, mode])
+				if event == null or not event.payload.has("collision_contact"): continue
+				var contact: Dictionary = event.payload.collision_contact
+				_expect(contact.get("status") == "verified_static_wall" and contact.get("prevented_microfeet") == DISTANCE - row[2] and contact.get("impact_id") == "%s:%s_knockback:%s:impact" % [event.parent_event_id, kind, event.target_actor_id], "Source impact identity derives from damage cause, kind and affected actor.")
+				_expect(event.payload.resolved_distance_microfeet == row[2], "Both modes keep the legal source displacement, including zero travel.")
+				var check: Dictionary = event.payload.get("balance_check", {})
+				_expect(check.get("natural_roll") == row[1] and check.get("check_success") == (row[1] == 1) and check.get("rng_draw_index") == fixture.draws_before_damage + 2, "Both modes use the same natural roll, result and draw slot.")
+				_expect(sim.random.get_draw_count() == fixture.draws_before_damage + 2, "A verified wall contact adds one Balance d20 and no collision draw.")
+				mode_results.append(_combat_evidence(sim))
+			_expect(mode_results.size() == 2 and mode_results[0] == mode_results[1], "NORMAL and DEV NORMAL have identical combat state, RNG and causal history for %s/%s." % [kind, row[0]])
 
 	var replays: Array = []
-	for index in range(2):
-		var fixture := _resolve_fixture("rage", _seed("rage", 20), "partial")
+	for mode: String in [ArenaRewardLedger.MODE_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL, ArenaRewardLedger.MODE_DEV_NORMAL]:
+		var fixture := _resolve_fixture("rage", _seed("rage", 20), "partial", "", mode)
+		var evidence := _combat_evidence(fixture.sim)
 		var harness: TwoClientSyncHarness = fixture.harness
 		var envelopes := harness.authority.publish_current_events()
 		for envelope: CombatEventEnvelope in envelopes: harness.client_a.receive(envelope)
@@ -124,15 +126,6 @@ func _test_live_source_contact() -> void:
 			harness.client_b.receive(envelopes[reverse_index])
 			harness.client_b.receive(envelopes[reverse_index])
 		_expect(harness.compare_clients().success and harness.client_a.get_state_digest() == harness.authority.get_state_digest(), "Contact evidence converges on both clients despite reordering and duplicate delivery.")
-		var snapshot: Dictionary = fixture.sim.get_state_snapshot()
-		_expect(snapshot.schema_version == 12, "The existing event payload carries evidence with schema 12.")
-		replays.append({"snapshot": snapshot, "rng": fixture.sim.random.wave_entry_state(), "digest": harness.authority.get_state_digest()})
-	_expect(replays[0] == replays[1], "Same-seed replay reproduces collision evidence, Balance and state.")
-
-
-# Reuse the real 39J source fixture. Supply authored wall metadata before damage.
-func _damage(sim: CombatSimulation, kind: String, attack_id: String, request_id: String) -> Dictionary:
-	var session := sim._rage_knockback_resolver.get_object() as ArenaCombatSession
-	var x := 1_500_000 if kind == "force_shield" else 9_500_000
-	session.configure_battlefield(ArenaBattlefield.new(BOUNDS, [_wall("39l_wall", Rect2i(x, 0, 1_000_000, 10_000_000))]))
-	return super._damage(sim, kind, attack_id, request_id)
+		_expect(evidence.snapshot.schema_version == 12, "The existing event payload carries evidence with schema 12.")
+		replays.append(evidence)
+	_expect(replays[0] == replays[1] and replays[1] == replays[2], "Same-seed NORMAL and repeated DEV NORMAL reproduce contact, Balance and combat history.")
