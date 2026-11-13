@@ -12,6 +12,7 @@ static func build_text(session: ArenaCombatSession, seed_value: int, build_versi
 	var lines := PackedStringArray([
 		"ITank Prime: Arena - Authoritative Encounter Transcript",
 		"Project version: %s" % build_version,
+		ArenaBuildIdentity.transcript_header(),
 		"Godot: %s" % Engine.get_version_info().get("string", "unknown"),
 		"Seed: %d" % seed_value,
 		"Fixture: %s" % String(session.get_encounter_fixture_id()),

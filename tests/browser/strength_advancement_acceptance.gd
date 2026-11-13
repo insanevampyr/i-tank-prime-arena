@@ -15,7 +15,7 @@ func _process(delta: float) -> void:
 	JavaScriptBridge.eval("window.str37Command='';",true)
 	busy = true
 	if command != "verify":
-		controller._encounter_selector_index = 8
+		controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 		controller._character_selector.pressed.emit()
 		await settle(command in ["buy","prepare"])
 	if not check(controller._session._playable_persistence is PlayableBrowserPersistence,"Actual disposable Web character admitted with IndexedDB/Web Lock"): busy = false; return

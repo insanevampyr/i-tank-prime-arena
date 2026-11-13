@@ -281,6 +281,13 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_last_toolbar_labels = _toolbar_labels()
 	var show_dev_tools := _debug_button != null and _debug_button.visible
 	var metrics := calculate_layout(viewport_size, display_size, minimums, show_dev_tools)
+	if _combat_controller != null and _combat_controller._build_identity_label != null:
+		var build_label: Label = _combat_controller._build_identity_label
+		build_label.add_theme_font_size_override("font_size",maxi(1,roundi(12.0 / scale)))
+		build_label.offset_left = 16.0 / scale
+		build_label.offset_right = minf(viewport_size.x - 16.0 / scale,600.0 / scale)
+		build_label.offset_top = -24.0 / scale
+		build_label.offset_bottom = -4.0 / scale
 	if viewport_changed:
 		var battlefield_metrics := calculate_battlefield_presentation(viewport_size)
 		var pixels_per_foot := float(battlefield_metrics["pixels_per_foot"])

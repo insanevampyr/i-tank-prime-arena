@@ -49,7 +49,7 @@ func make_scene() -> void:
 	# Combat time is explicit; real player physics stays enabled to verify the
 	# host pauses its separate movement/recovery process during persistence.
 	controller.set_physics_process(false)
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 
 func settle(confirm: bool = false) -> void:
 	for index in range(1200):
@@ -69,7 +69,7 @@ func settle(confirm: bool = false) -> void:
 	check(false,"Storage timeout (not a missing character)")
 
 func run_lifecycle(save_mode: String = "dev_normal") -> void:
-	controller._encounter_selector_index = 0 if save_mode == "normal" else 8
+	controller._profile_namespace = save_mode
 	var other_profile := "dev_vaelis_thorn" if save_mode == "normal" else "prod_vaelis_thorn"
 	var other_before: String = await read_document(other_profile)
 	controller._character_selector.pressed.emit()
@@ -144,7 +144,7 @@ func run_lifecycle(save_mode: String = "dev_normal") -> void:
 	line("LIFECYCLE COMPLETE — %s checks (%s). Reload and load this mode; keep the tab open for contention testing." % [checks,save_mode])
 
 func load_existing(save_mode: String = "dev_normal") -> void:
-	controller._encounter_selector_index = 0 if save_mode == "normal" else 8
+	controller._profile_namespace = save_mode
 	controller._character_selector.pressed.emit()
 	await settle()
 	if controller._web_operation.get("phase") == "failed":

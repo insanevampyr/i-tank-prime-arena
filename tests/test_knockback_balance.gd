@@ -33,10 +33,15 @@ func _test_footing_and_displacement() -> void:
 			_expect(event.payload.resolved_distance_microfeet == row[2] and event.payload.blocked == (row[0] != "full"), "Legal displacement must match geometry independently of Balance.")
 			_expect(abs(state.position_microfeet.x - int(event.payload.start_microfeet[0])) == row[2], "The authoritative actor must occupy the resolved position.")
 			_expect(state.remaining_mr_microfeet == fixture.mr_before, "Forced displacement consumes no voluntary MR.")
-			_expect(check.rng_draw_index == fixture.draws_before_damage + 2 and sim.random.get_draw_count() == check.rng_draw_index, "Damage draws first, then exactly one Balance d20 without rarity.")
+			var collision_dice: int = {"full":0, "partial":1, "blocked":2}[row[0]]
+			_expect(check.rng_draw_index == fixture.draws_before_damage + 2 and sim.random.get_draw_count() == check.rng_draw_index + collision_dice, "Source damage and one Balance d20 keep their draw slots before any wall dice.")
 			_expect(event.parent_event_id == fixture.damage.event_id and check.opportunity_id == event.payload.balance_opportunity_id, "Balance evidence must descend from the source damage event.")
 			_expect(check.inputs.definition_id == "vaelis_thorn" and check.inputs.actor_id == String(event.target_actor_id), "Use the affected actor's sourced skill data.")
-			_check_source_controls(fixture, kind)
+			var collision_damage := 0
+			for impact: CombatEvent in sim.get_resolved_events():
+				if impact.event_type == CombatSimulation.WALL_COLLISION_DAMAGE_EVENT and impact.parent_event_id == event.event_id:
+					collision_damage = impact.payload.final_damage
+			_check_source_controls(fixture, kind, collision_damage)
 			_check_duplicate(fixture, event, kind)
 
 
@@ -130,6 +135,8 @@ func _resolve_fixture(kind: String, seed_value: int, geometry: String = "full", 
 		var clearance := 1_000_000 if geometry == "partial" else 0
 		var wall_x := 2_500_000 - clearance if affected == ATTACKER else 8_500_000 + clearance
 		obstacles.append({"id": "39j_wall", "rect_microfeet": Rect2i(wall_x, 0, 1_000_000, 10_000_000), "knockback_surface": "solid_wall"})
+		if geometry == "dual_wall":
+			obstacles.append({"id": "39j_west_wall", "rect_microfeet": Rect2i(2_500_000, 0, 1_000_000, 10_000_000), "knockback_surface": "solid_wall"})
 	session.configure_battlefield(ArenaBattlefield.new(Rect2i(0, 0, 20_000_000, 10_000_000), obstacles))
 	sim.set_rage_knockback_resolver(session._resolve_rage_knockback)
 	sim.set_attack_final_line_of_sight_resolver(func(_source: StringName, _target: StringName) -> bool: return true)
@@ -212,12 +219,14 @@ func _resolve_fixture(kind: String, seed_value: int, geometry: String = "full", 
 		"elapsed_before": elapsed_before, "timing_before": timing_before}
 
 
-func _check_source_controls(fixture: Dictionary, kind: String) -> void:
+func _check_source_controls(fixture: Dictionary, kind: String, collision_damage: int) -> void:
 	var sim: CombatSimulation = fixture.sim
 	var damage: Dictionary = fixture.damage.payload
 	var target := sim.get_actor_state(TARGET)
 	_expect(sim.clock.get_elapsed_us() == fixture.elapsed_before and [sim.get_actor_state(ATTACKER).next_action_interval_index, target.next_action_interval_index] == fixture.timing_before, "Knockback and Balance neither spend nor refund Acts.")
-	_expect(target.current_hpc == damage.hpc_after and sim.get_actor_state(ATTACKER).current_hpc == 100, "The existing damage is the only HPC change.")
+	var target_impact := 0 if kind == "force_shield" else collision_damage
+	var attacker_impact := collision_damage if kind == "force_shield" else 0
+	_expect(target.current_hpc == damage.hpc_after - target_impact and sim.get_actor_state(ATTACKER).current_hpc == 100 - attacker_impact, "Only the original damage and the attributed wall impact can change HPC.")
 	if kind == "force_bolt":
 		_expect(damage.final_damage == damage.damage_roll and sim.get_actor_state(ATTACKER).resources.mana == 18, "Bolt retains its d6 damage and two-Mana cost.")
 		var action := sim.get_action(sim.get_attack(fixture.ongoing.attack_instance_id).action_instance_id)

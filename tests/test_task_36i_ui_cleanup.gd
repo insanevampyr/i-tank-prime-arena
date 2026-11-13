@@ -76,7 +76,9 @@ func _test_overlay_lifecycle() -> void:
 	var scene := _scene()
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
-	for _index in range(8): controller._on_encounter_selector_pressed()
+	controller._developer_test_mode = false
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
+	controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	controller.get_combat_session_for_testing().set_opponent_behavior_enabled(false)
 	controller.press_encounter_control_for_testing()
 	var session := controller.get_combat_session_for_testing()

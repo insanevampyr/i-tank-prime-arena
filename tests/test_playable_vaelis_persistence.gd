@@ -54,7 +54,7 @@ func _test_first_selected_run(root: String) -> void:
 		PlayableCharacterPersistence.test_run_id = "run_first_" + mode
 		var scene := _scene()
 		var c: ArenaCombatController = scene.get_node("CombatController")
-		c._encounter_selector_index = 0 if boosted else 8
+		c._profile_namespace = mode
 		var button := c._xp_multiplier_button
 		_expect(not button.visible, "XP control starts hidden with DEV OFF.")
 		c._dev_tools_button.pressed.emit()
@@ -63,7 +63,8 @@ func _test_first_selected_run(root: String) -> void:
 			button.pressed.emit()
 			_expect(button.text.begins_with("XP ×10: ON"), "The switch selects ×10 before admission.")
 			c._dev_tools_button.pressed.emit()
-		c._character_selector.pressed.emit()
+		if boosted: c._character_selector.pressed.emit()
+		else: c._select_player_character(Fixture.PLAYER_CHARACTER_VAELIS, ArenaRewardLedger.resolve_run_policy(mode, multiplier))
 		var read := storage.read_profile(profile)
 		_expect(read.get("success",false), "Playable selection must publish the selected first profile.")
 		if not read.get("success",false):
@@ -218,7 +219,7 @@ func _defeat_wave(session: ArenaCombatSession) -> void:
 func _test_developer_progression(root: String) -> void:
 	var scene := _scene()
 	var controller: ArenaCombatController = scene.get_node("CombatController")
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	var selected := controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	_expect(selected.get("success",false),"Developer Vaelis must use its own playable profile: %s" % controller._last_ui_message)
 	if not selected.get("success",false):
@@ -239,7 +240,7 @@ func _test_developer_progression(root: String) -> void:
 	_free(scene)
 	scene = _scene()
 	controller = scene.get_node("CombatController")
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	selected = controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	_expect(selected.get("success",false),"Earned progression must cold-load into playable downtime: %s" % controller._last_ui_message)
 	if selected.get("success",false):
@@ -262,7 +263,7 @@ func _test_developer_progression(root: String) -> void:
 			_free(scene)
 			scene = _scene()
 			controller = scene.get_node("CombatController")
-			controller._encounter_selector_index = 8
+			controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 			selected = controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 			_expect(selected.get("success",false),"Purchased character must cold-load: %s" % controller._last_ui_message)
 			if selected.get("success",false):

@@ -110,10 +110,12 @@ func _test_presentation_controls() -> void:
 	var scene := helper._make_ready_scene()
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
-	# Use the real selector, not a UI-side authority override.
-	for _index in range(9):
-		if controller.get_test_mode_state_for_testing().selector_index == 8: break
-		controller._on_encounter_selector_pressed()
+	# Explicit nonpersistent legacy fixture for existing Refresh presentation tests.
+	controller._encounter_fixture_id = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
+	controller._encounter_selector_index = 0
+	controller._developer_test_mode = false
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
+	controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	controller.press_encounter_control_for_testing()
 	var session := controller.get_combat_session_for_testing()
 	session.set_opponent_behavior_enabled(false)

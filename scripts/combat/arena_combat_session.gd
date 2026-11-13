@@ -807,7 +807,7 @@ func _register_selected_player() -> Dictionary:
 	return {"success": true}
 
 
-func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableCharacterPersistence = null, xp_multiplier: Variant = null) -> Dictionary:
+func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableCharacterPersistence = null, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
 	if _initialized: return _failure("persistence_requires_fresh_session")
 	if not _run_reward_policy.is_empty(): return _failure("run_reward_policy_locked")
 	var policy := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
@@ -818,6 +818,7 @@ func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_
 			return _failure("defeated_profile_mode_mismatch")
 		if (OS.has_feature("web") and browser_service == null) or _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]: return _failure("defeated_profile_encounter_not_authorized")
 	var disposable := _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or mode == ArenaRewardLedger.MODE_TEST or PlayableCharacterPersistence.test_nonpersistent or _encounter_fixture_id in [Fixture.ENCOUNTER_MEDIUM_GUARDS, Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
+	if existing_only and disposable: return _failure("persistent_profile_required")
 	if policy.xp_multiplier != ArenaRewardLedger.legacy_xp_multiplier(mode) and (_profile_binding_requested or (disposable and browser_service != null)):
 		return _failure("xp_override_requires_disposable_run")
 	if disposable:
@@ -825,7 +826,7 @@ func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_
 		return {"success":true,"persistent":false}
 	if OS.has_feature("web") and browser_service == null: return _failure("browser_profile_loading_required")
 	var service := browser_service if browser_service != null else PlayableCharacterPersistence.new()
-	var opened := {"success":true} if browser_service != null else service.open(mode, new_run, defeated_checkpoint, xp_multiplier)
+	var opened := {"success":true} if browser_service != null else service.open(mode, new_run, defeated_checkpoint, xp_multiplier, existing_only)
 	if not opened.success: return opened
 	_run_reward_policy = service.get_run_reward_policy()
 	_playable_persistence = service
@@ -1080,7 +1081,7 @@ func get_character_advancement_eligibility() -> Dictionary:
 		return {"success":false,"reason":"advancement_requires_resolved_actions"}
 	var enemies := _wave_enemy_actor_ids()
 	for event: CombatEvent in simulation.get_resolved_events_from(_reward_event_cursor).get("events",[]):
-		if String(event.event_type) in ["physical_damage_resolved","verified_special_damage_resolved","force_bolt_damage_resolved"] and enemies.has(String(event.target_actor_id)) and int(event.payload.get("hpc_before",0)) > 0 and int(event.payload.get("hpc_after",1)) <= 0:
+		if _is_reward_eligible_defeat(event, enemies):
 			return {"success":false,"reason":"advancement_requires_settled_rewards"}
 	if _playable_persistence != null:
 		var safe := _playable_persistence.mutation_guard()
@@ -2265,16 +2266,21 @@ func _process_reward_events() -> void:
 	var active_enemy_ids := _wave_enemy_actor_ids()
 	for value: Variant in batch.get("events", []):
 		var event := value as CombatEvent
-		if event == null \
-		or not String(event.event_type) in ["physical_damage_resolved", "verified_special_damage_resolved", "force_bolt_damage_resolved"] \
-		or not active_enemy_ids.has(String(event.target_actor_id)):
-			continue
-		var before: Variant = event.payload.get("hpc_before")
-		var after: Variant = event.payload.get("hpc_after")
-		if typeof(before) != TYPE_INT or typeof(after) != TYPE_INT \
-		or int(before) <= 0 or int(after) > 0:
-			continue
-		_reward_ledger.process_defeat(simulation, event.target_actor_id, event.event_id)
+		if _is_reward_eligible_defeat(event, active_enemy_ids):
+			_reward_ledger.process_defeat(simulation, event.target_actor_id, event.event_id)
+
+
+func _is_reward_eligible_defeat(event: CombatEvent, active_enemy_ids: PackedStringArray) -> bool:
+	if event == null or not active_enemy_ids.has(String(event.target_actor_id)):
+		return false
+	if event.event_type == CombatSimulation.WALL_COLLISION_DAMAGE_EVENT:
+		if event.source_actor_id != Fixture.PLAYER_ID:
+			return false
+	elif event.event_type not in [&"physical_damage_resolved", &"verified_special_damage_resolved", &"force_bolt_damage_resolved"]:
+		return false
+	var before: Variant = event.payload.get("hpc_before")
+	var after: Variant = event.payload.get("hpc_after")
+	return typeof(before) == TYPE_INT and typeof(after) == TYPE_INT and before > 0 and after <= 0
 
 
 func _current_reward_wave_id() -> String:

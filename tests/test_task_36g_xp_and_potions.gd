@@ -187,8 +187,10 @@ func _test_developer_launcher() -> void:
 	var scene := (load("res://scenes/test_arena.tscn") as PackedScene).instantiate()
 	tree.root.add_child(scene)
 	var controller := scene.get_node("CombatController") as ArenaCombatController
-	for index in range(8): controller._on_encounter_selector_pressed()
-	_expect(controller.get_combat_session_for_testing().get_reward_mode() == Ledger.MODE_DEV_NORMAL, "Ninth selector entry must be distinct Developer NORMAL.")
+	for index in range(8):
+		controller._on_encounter_selector_pressed()
+		_expect(controller._encounter_selector_index == (index + 1) % 8, "Selector preserves indices 0–7 and wraps without a ninth entry.")
+	_expect(controller.get_combat_session_for_testing().get_reward_mode() == Ledger.MODE_NORMAL, "Eight selections return to NORMAL; DEV is not an encounter.")
 	controller._reset_encounter()
 	_expect(controller.get_combat_session_for_testing().get_reward_state().earned_xp == 0, "RESET clears accelerated temporary XP.")
 	controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)

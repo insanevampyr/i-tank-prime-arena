@@ -33,7 +33,7 @@ func _exercise(root: String, fail_write: bool) -> Dictionary:
 	var scene := PersistenceTests.new()._scene()
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.combat_seed = 1
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	var selected := controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	_expect(selected.get("success",false),"DEV NORMAL must load via actual character selection.")
 	if not selected.get("success",false):
@@ -123,7 +123,7 @@ func _exercise(root: String, fail_write: bool) -> Dictionary:
 		# storage-only mock or a direct hydrated-actor assignment.
 		scene = PersistenceTests.new()._scene()
 		controller = scene.get_node("CombatController")
-		controller._encounter_selector_index = 8
+		controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 		var reopened := controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 		_expect(reopened.get("success",false),"DEV Wave-2 entry must reopen through playable selection.")
 		if reopened.get("success",false):

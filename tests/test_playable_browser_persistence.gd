@@ -70,7 +70,7 @@ func run() -> Array[String]:
 	check(c._web_operation.get("phase") == "confirmation" and backend.histories.is_empty(),"Missing profile requires explicit confirmation, without starter publication.")
 	c._web_creation_dialog.get_ok_button().pressed.emit()
 	# Simulate stale UI selection data during the pending request.
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	pump(c)
 	c._encounter_selector_index = 0
 	check(c._web_operation.is_empty() and c._session._playable_persistence is PlayableBrowserPersistence,"Actual selection/confirmation must produce acknowledged playable Vaelis.")
@@ -158,6 +158,7 @@ func run() -> Array[String]:
 	check(playable._failures.is_empty() and c._session._playable_persistence._prior.xp.earned > entry.xp.earned,"A boosted V4 Web run secures real combat XP.")
 	for award: Dictionary in c._session.get_reward_state().awards:
 		check(award.xp_multiplier == 10 and award.xp == award.arena_xp * 10,"V4 Web awards use the bound ×10 policy.")
+	check(c._session.request_developer_character_refresh().get("reason") == "developer_normal_required","A boosted NORMAL run cannot use legacy DEV Refresh even at downtime.")
 	c._on_encounter_button_pressed(); pump(c)
 	check(c._session._current_reward_wave_id() == "wave_2" and c._session.get_run_reward_policy().xp_multiplier == 10,"The Web NEXT WAVE candidate retains the V4 multiplier.")
 	c._session.get_actor_state(&"player").current_hpc = 0
@@ -195,6 +196,7 @@ func run() -> Array[String]:
 	var normal_count: int = backend.histories["prod_vaelis_thorn"].size()
 	c._encounter_selector.pressed.emit()
 	check(c._session._playable_persistence == null and c._session._reward_mode == "test","Actual TEST selection remains nonpersistent.")
+	check(not c._open_legacy_profile().success and c._web_operation.is_empty(),"The Legacy DEV action cannot open a profile from TEST.")
 	c._dev_tools_button.pressed.emit()
 	check(c._xp_multiplier_button.disabled and c._xp_multiplier_button.text.ends_with("NO XP") and c._session.get_run_reward_policy().xp_multiplier == 0,"TEST displays zero XP and cannot select a boost.")
 	c._xp_multiplier_button.pressed.emit()
@@ -203,7 +205,11 @@ func run() -> Array[String]:
 	pump(c)
 	for index in range(7): c._encounter_selector.pressed.emit()
 	pump(c)
-	check(c._encounter_selector_index == 8 and c._session._playable_persistence != null and c._session._playable_persistence.profile_id == "dev_vaelis_thorn","Pending mode selection cannot revert the authorized DEV namespace: %s / %s / %s" % [c._encounter_selector_index,c._web_operation,c._last_ui_message])
+	check(c._encounter_selector_index == 0 and c._session.get_reward_mode() == "normal", "Selector wraps from TEST to NORMAL without a legacy entry.")
+	# Seed an explicitly targeted disposable legacy fixture; live access is existing-only.
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
+	c._select_player_character(Fixture.PLAYER_CHARACTER_VAELIS, ArenaRewardLedger.resolve_run_policy("dev_normal", 1)); pump(c)
+	check(c._encounter_selector_index == 0 and c._session._playable_persistence != null and c._session._playable_persistence.profile_id == "dev_vaelis_thorn","Explicit profile selection cannot revert the authorized DEV namespace: %s / %s / %s" % [c._encounter_selector_index,c._web_operation,c._last_ui_message])
 	check(backend.histories["prod_vaelis_thorn"].size() == normal_count and backend.histories.get("dev_vaelis_thorn",[]).size() == 1,"TEST/DEV selection cannot rewrite NORMAL progression.")
 	if c._session._playable_persistence != null:
 		check(c._session.get_run_reward_policy().xp_multiplier == 1 and c._session._playable_persistence._prior.run_reward_policy.legacy_run_count == 0,"First DEV-namespace character selection uses the new-run default without changing namespace.")
@@ -217,21 +223,20 @@ func run() -> Array[String]:
 		var completed_xp: Dictionary = c._session._playable_persistence._prior.xp.duplicate(true)
 		finish(scene)
 		scene = make_scene(); c = scene.get_node("CombatController")
-		c._encounter_selector_index = 8
-		c._character_selector.pressed.emit(); pump(c)
+		c._backup_actions._legacy_open_button.pressed.emit(); pump(c)
 		c._dev_tools_button.pressed.emit()
 		check(c._session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY and not c._xp_multiplier_button.disabled,"A verified completed Web circuit enables the next-run switch even after reload.")
 		c._xp_multiplier_button.pressed.emit()
 		c._on_encounter_button_pressed(); pump(c)
 		check(c._session._current_reward_wave_id() == "wave_1" and c._session._playable_persistence._prior.xp == completed_xp,"Post-completion NEW RUN retains secured character progression.")
-		check(c._session._playable_persistence._prior.run_reward_policy.runs.back().xp_multiplier == 10 and c._xp_multiplier_button.disabled,"Web NEW RUN binds the selected ×10 at the verified Wave 1 entry.")
+		check(c._session._playable_persistence._prior.run_reward_policy.runs.back().xp_multiplier == 10 and c._xp_multiplier_button.disabled and c._session._playable_persistence.profile_id == "dev_vaelis_thorn" and c._encounter_selector_index == 0,"Web NEW RUN binds the selected ×10 to the explicitly admitted legacy namespace without index 8.")
 	var other := make_scene()
 	var other_controller: ArenaCombatController = other.get_node("CombatController")
-	other_controller._encounter_selector_index = 8
+	other_controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	other_controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS); pump(other_controller)
 	check(other_controller._web_operation.get("phase") == "failed" and other_controller._session._player_character_id == Fixture.PLAYER_CHARACTER_GUARD,"Competing host preserves its old nonpersistent session.")
 	other_controller._update_presentation()
-	check(other_controller._encounter_button.text == "RETRY STORAGE" and other_controller._combat_status.max_lines_visible >= other_controller._combat_status.get_line_count() and other_controller._combat_status.text.contains("Character currently open in another tab"),"Unavailable storage remains actionable and its status is not clipped.")
+	check(other_controller._encounter_button.text == "RETRY STORAGE" and other_controller._combat_status.max_lines_visible >= other_controller._combat_status.get_line_count() and other_controller._combat_status.text.contains("Cannot load character: this character is open in another browser tab.") and other_controller._web_operation.service.status().reason == "profile_in_use","Unavailable storage remains actionable and its specific failure status is not clipped.")
 	finish(other)
 	finish(scene)
 	var normal_history: Array = backend.histories["prod_vaelis_thorn"]
@@ -248,7 +253,7 @@ func run() -> Array[String]:
 		return failures
 	backend.histories["dev_vaelis_thorn"][0].document = "corrupt fixture"
 	scene = make_scene(); c = scene.get_node("CombatController")
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS); pump(c)
 	check(c._web_operation.get("phase") == "failed" and c._web_operation.service.status().text == "Recovery required","Corruption is not missing and must never create a new starter.")
 	c._on_character_selector_pressed(); pump(c)

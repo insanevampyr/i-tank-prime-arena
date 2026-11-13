@@ -65,6 +65,7 @@ var _event_history_generation: int = -1
 var _log_lines: Array[String] = []
 var _debug_log_lines: Array[String] = []
 var _dev_tools_enabled := false
+var _build_identity_label: Label
 var _next_run_xp_boost := false
 var _applied_displacement_event_ids: Dictionary = {}
 var _pending_player_displacement_event_ids: Array[String] = []
@@ -96,6 +97,8 @@ var _web_copy_pending := false
 var _encounter_fixture_id: StringName = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
 var _developer_test_mode: bool = false
 var _encounter_selector_index: int = 0
+# Profile identity is independent of encounter fixtures and DEV visibility.
+var _profile_namespace: String = ArenaRewardLedger.MODE_NORMAL
 var _player_character_id: StringName = Fixture.PLAYER_CHARACTER_GUARD
 var _goblin_visuals: Dictionary = {}
 var _world_item_markers: Dictionary = {}
@@ -211,6 +214,18 @@ func _ready() -> void:
 	_backup_actions.name = "CharacterBackupActions"
 	add_child(_backup_actions)
 	_backup_actions.setup(self,_character_selector)
+	_build_identity_label = Label.new()
+	_build_identity_label.name = "BuildIdentity"
+	_character_selector.get_parent().add_child(_build_identity_label)
+	_build_identity_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_build_identity_label.offset_left = 24
+	_build_identity_label.offset_top = -24
+	_build_identity_label.offset_right = 600
+	_build_identity_label.offset_bottom = -4
+	_build_identity_label.add_theme_font_size_override("font_size",11)
+	_build_identity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_build_identity_label.text = ArenaBuildIdentity.label()
+	_build_identity_label.tooltip_text = ArenaBuildIdentity.transcript_header()
 	_process_new_events()
 	_update_combat_movement_lock()
 	_update_presentation()
@@ -860,7 +875,7 @@ func _on_encounter_button_pressed() -> void:
 			_last_ui_message = "Next Wave blocked: %s" % _friendly_reason(_next_wave_failure_reason)
 	elif _session._playable_persistence != null:
 		var completed := _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY
-		var policy := _next_run_reward_policy() if completed else _session.get_run_reward_policy()
+		var policy := _next_run_reward_policy(_session.get_reward_mode()) if completed else _session.get_run_reward_policy()
 		var result := _prepare_encounter_fixture(completed, {}, {}, policy)
 		close_rewards = result.get("success",false)
 		_last_ui_message = "Loading character." if result.get("state") == "pending" else ("New run ready." if result.get("success",false) and completed else ("Wave entry restored." if result.get("success",false) else "Recovery blocked: %s" % result.get("reason","unverified save")))
@@ -875,8 +890,10 @@ func _on_encounter_button_pressed() -> void:
 func _on_encounter_selector_pressed() -> void:
 	var previous_index := _encounter_selector_index
 	var previous_test_mode := _developer_test_mode
-	_encounter_selector_index = posmod(_encounter_selector_index + 1, 9)
-	_developer_test_mode = _encounter_selector_index != 0 and _encounter_selector_index != 8
+	var previous_namespace := _profile_namespace
+	_encounter_selector_index = posmod(_encounter_selector_index + 1, 8)
+	_developer_test_mode = _encounter_selector_index != 0
+	if not _developer_test_mode: _profile_namespace = ArenaRewardLedger.MODE_NORMAL
 	var fixture := (
 		_wave_fixture_for_number(_encounter_selector_index)
 		if _encounter_selector_index >= 1 and _encounter_selector_index <= 5
@@ -888,9 +905,12 @@ func _on_encounter_selector_pressed() -> void:
 	)
 	var policy := _next_run_reward_policy() if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and not PlayableCharacterPersistence.test_nonpersistent else {}
 	var result := _select_encounter_fixture(fixture, policy)
-	if result.get("state") == "pending": return
+	if result.get("state") == "pending":
+		_web_operation["previous_profile_selection"] = {"character":_session._player_character_id,"fixture":_session._encounter_fixture_id,"selector_index":previous_index,"test_mode":previous_test_mode,"namespace":previous_namespace}
+		return
 	if not result.get("success", false):
 		_encounter_selector_index = previous_index
+		_profile_namespace = previous_namespace
 		_developer_test_mode = previous_test_mode
 		_update_presentation()
 
@@ -928,6 +948,9 @@ func _on_character_selector_pressed() -> void:
 		_cancel_browser_creation()
 		return
 	var next_character := Fixture.PLAYER_CHARACTER_VAELIS if _player_character_id == Fixture.PLAYER_CHARACTER_GUARD else Fixture.PLAYER_CHARACTER_GUARD
+	if next_character == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and _profile_namespace == ArenaRewardLedger.MODE_DEV_NORMAL:
+		_admit_existing_profile(_profile_namespace)
+		return
 	var policy := _next_run_reward_policy() if next_character == Fixture.PLAYER_CHARACTER_VAELIS and _can_select_next_run_xp() else {}
 	_select_player_character(next_character, policy)
 
@@ -1052,7 +1075,7 @@ func _on_return_to_wave_one_pressed() -> void:
 	_clear_attack_hold_intent()
 	var authorization := _session.get_return_to_wave_one_authorization()
 	var result: Dictionary = authorization
-	if authorization.get("success",false): result = _prepare_encounter_fixture(true, authorization.checkpoint, {}, _next_run_reward_policy())
+	if authorization.get("success",false): result = _prepare_encounter_fixture(true, authorization.checkpoint, {}, _next_run_reward_policy(_session.get_reward_mode()))
 	if result.get("state") == "pending":
 		_return_wave_one_failure_reason = ""
 		_last_ui_message = "Loading character."
@@ -1067,14 +1090,14 @@ func _on_return_to_wave_one_pressed() -> void:
 
 
 func _selected_reward_policy() -> Dictionary:
-	var mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else (ArenaRewardLedger.MODE_DEV_NORMAL if _encounter_selector_index == 8 else ArenaRewardLedger.MODE_NORMAL)
+	var mode := ArenaRewardLedger.MODE_TEST if _developer_test_mode else _profile_namespace
 	return ArenaRewardLedger.resolve_run_policy(mode)
 
 
-func _next_run_reward_policy() -> Dictionary:
-	var policy := _selected_reward_policy()
-	if policy.mode == ArenaRewardLedger.MODE_TEST: return policy
-	return ArenaRewardLedger.resolve_run_policy(policy.mode, 10 if _next_run_xp_boost else 1)
+func _next_run_reward_policy(mode: String = "") -> Dictionary:
+	if mode.is_empty(): mode = _selected_reward_policy().mode
+	if mode == ArenaRewardLedger.MODE_TEST: return ArenaRewardLedger.resolve_run_policy(mode)
+	return ArenaRewardLedger.resolve_run_policy(mode, 10 if _next_run_xp_boost else 1)
 
 
 func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dictionary = {}, restored_head: Dictionary = {}, reward_policy: Dictionary = {}) -> Dictionary:
@@ -1110,7 +1133,7 @@ func _prepare_encounter_candidate(reward_policy: Dictionary, new_run: bool = fal
 	var requested_seed: int = previous_session._seed_value if new_run and previous_session != null else combat_seed
 	_session = ArenaCombatSession.new(requested_seed, null, _encounter_fixture_id, _player_character_id)
 	var reward_mode: String = reward_policy.mode
-	var persistent_setup := _session.prepare_playable_persistence(reward_mode, new_run, defeated_checkpoint, browser_service, reward_policy.get("requested_xp_multiplier"))
+	var persistent_setup := _session.prepare_playable_persistence(reward_mode, new_run, defeated_checkpoint, browser_service, reward_policy.get("requested_xp_multiplier"), reward_policy.get("existing_profile_only", false))
 	if browser_service != null and not persistent_setup.get("persistent",false):
 		_session = previous_session
 		return {"success":false,"reason":"persistent_browser_candidate_required"}
@@ -1199,6 +1222,7 @@ func _present_loaded_session(select_target: bool = true) -> Dictionary:
 				)
 		)
 	)
+	if _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST: _profile_namespace = _session.get_reward_mode()
 	return {"success":true}
 
 func _use_browser_character_persistence() -> bool:
@@ -1207,14 +1231,39 @@ func _use_browser_character_persistence() -> bool:
 func _browser_transition_blocked() -> bool:
 	return (_backup_actions != null and _backup_actions.restoration_blocked) or not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
 
-func _load_backup_checkpoint(payload: Dictionary, lease: PlayableBrowserPersistence = null) -> Dictionary:
+func _legacy_profile_context_ready() -> bool:
+	return _session != null and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST
+
+
+func _can_open_legacy_profile() -> bool:
+	if not _legacy_profile_context_ready() or _browser_transition_blocked(): return false
+	var service := _session._playable_persistence
+	return service == null or service.mutation_guard().success
+
+
+func _open_legacy_profile() -> Dictionary:
+	if not _can_open_legacy_profile(): return {"success":false,"reason":"legacy_profile_requires_ready"}
+	return _admit_existing_profile(ArenaRewardLedger.MODE_DEV_NORMAL)
+
+
+func _load_backup_checkpoint(payload: Dictionary, lease: PlayableBrowserPersistence = null, legacy_destination: bool = false) -> Dictionary:
 	if _session == null or _session.is_encounter_active() or _browser_transition_blocked(): return {"success":false,"reason":"restoration_admission_not_safe"}
-	if payload.get("profile_namespace") != _session._reward_mode: return {"success":false,"reason":"restoration_namespace_changed"}
+	if legacy_destination and not _can_open_legacy_profile(): return {"success":false,"reason":"legacy_profile_requires_ready"}
+	var target_mode := ArenaRewardLedger.MODE_DEV_NORMAL if legacy_destination else _session.get_reward_mode()
+	if payload.get("profile_namespace") != target_mode: return {"success":false,"reason":"restoration_namespace_changed"}
+	return _admit_existing_profile(target_mode, payload, lease)
+
+
+func _admit_existing_profile(target_mode: String, payload: Dictionary = {}, lease: PlayableBrowserPersistence = null) -> Dictionary:
 	var previous_character := _player_character_id
 	var previous_fixture := _encounter_fixture_id
+	var policy := ArenaRewardLedger.resolve_run_policy(target_mode)
+	policy["existing_profile_only"] = true
 	_player_character_id = Fixture.PLAYER_CHARACTER_VAELIS
 	_encounter_fixture_id = Fixture.ENCOUNTER_WAVE_ONE_GOBLINS
-	var result := _begin_browser_load(false,{},lease,payload) if lease != null else _prepare_encounter_fixture(false,{},payload)
+	var result := _begin_browser_load(false, {}, lease, payload, policy) if lease != null else _prepare_encounter_fixture(false, {}, payload, policy)
+	if _web_operation.get("kind") == "load":
+		_web_operation["previous_profile_selection"] = {"character":previous_character,"fixture":previous_fixture,"selector_index":_encounter_selector_index,"test_mode":_developer_test_mode,"namespace":_profile_namespace}
 	if not result.get("success",false) and result.get("state") != "pending":
 		_player_character_id = previous_character
 		_encounter_fixture_id = previous_fixture
@@ -1225,7 +1274,18 @@ func _load_backup_checkpoint(payload: Dictionary, lease: PlayableBrowserPersiste
 	return result
 
 func _browser_status_text() -> String:
-	if not _web_operation.is_empty(): return _web_operation.service.status().get("text","Progress not saved")
+	if not _web_operation.is_empty():
+		if _web_operation.kind == "load" and _web_operation.phase == "failed":
+			var reason: String = _web_operation.service.status().get("reason","unavailable")
+			var messages := {
+				"unsupported_authored_baseline":"this saved character's original definition is not supported by this build",
+				"profile_source_namespace_mismatch":"the saved character does not match the selected profile or its original definition",
+				"checksum_mismatch":"the saved character failed its integrity check",
+				"profile_in_use":"this character is open in another browser tab",
+				"indexeddb_unavailable":"browser character storage is unavailable",
+			}
+			return "Cannot load character: %s." % messages.get(reason,_friendly_reason(reason))
+		return _web_operation.service.status().get("text","Progress not saved")
 	return _session.get_character_persistence_status().get("text","Progress not saved")
 
 func _can_cancel_browser_load() -> bool:
@@ -1242,7 +1302,7 @@ func _begin_browser_load(new_run: bool, defeated: Dictionary, backup_lease: Play
 	_web_operation["restored_head"] = restored_head.duplicate(true)
 	_web_operation["reward_policy"] = policy
 	if backup_lease != null: _web_operation["backup_lease"] = backup_lease
-	var opened := service.open_browser(policy.mode, previous, new_run, defeated, policy.get("requested_xp_multiplier"))
+	var opened := service.open_browser(policy.mode, previous, new_run, defeated, policy.get("requested_xp_multiplier"), policy.get("existing_profile_only", false))
 	_last_ui_message = "Loading character."
 	return opened
 
@@ -1285,8 +1345,15 @@ func _poll_browser_persistence() -> void:
 		_web_creation_dialog.popup_centered()
 		return
 	if not response.get("success",false):
+		if response.get("reason") == "existing_profile_missing" and service.mode == ArenaRewardLedger.MODE_DEV_NORMAL and _web_operation.restored_head.is_empty():
+			_cancel_browser_creation()
+			_last_ui_message = "No Legacy DEV profile found."
+			_backup_actions.show_legacy_profile_missing()
+			_update_presentation()
+			return
 		_web_operation.phase = "failed"
-		_last_ui_message = service.status().text+". Press RETRY STORAGE."
+		_last_ui_message = _browser_status_text()+" Press RETRY STORAGE."
+		_append_log("Character load/storage failed: %s (%s)" % [_browser_status_text(),response.get("reason","unavailable")])
 		return
 	if _web_operation.phase == "loading":
 		var built := _prepare_encounter_candidate(_web_operation.reward_policy, _web_operation.new_run, _web_operation.defeated, service, _web_operation.get("restored_head",{}))
@@ -1295,6 +1362,8 @@ func _poll_browser_persistence() -> void:
 		if not built.get("success",false) and built.get("state") != "pending":
 			_web_operation.phase = "failed"
 			service._error("recovery_required",built.get("reason","candidate_invalid"))
+			_last_ui_message = _browser_status_text()
+			_append_log("Character load failed: %s (%s)" % [_last_ui_message,built.get("reason","candidate_invalid")])
 		return
 	if _web_operation.phase in ["saving","transfer_needed"]:
 		if _web_operation.kind == "next" and _web_operation.candidate.get_encounter_state() == ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
@@ -1366,17 +1435,29 @@ func _confirm_browser_character() -> void:
 
 func _cancel_browser_creation() -> void:
 	if _web_operation.is_empty(): return
-	_release_browser_service(_web_operation.service)
+	var service: PlayableBrowserPersistence = _web_operation.service
+	_release_browser_service(service)
+	if not service._owns_lease and service.previous_owner.is_empty() and service.browser != null: service.browser.dispose()
 	if _web_operation.has("backup_lease"):
 		var held: PlayableBrowserPersistence = _web_operation.backup_lease
 		if _session == null or held != _session._playable_persistence: _release_browser_service(held)
 	_player_character_id = _session._player_character_id
 	_encounter_fixture_id = _session._encounter_fixture_id
-	_encounter_selector_index = 8 if _session._reward_mode == "dev_normal" else _selector_index_for_fixture(_encounter_fixture_id,_session._reward_mode == "test")
+	_encounter_selector_index = _selector_index_for_fixture(_encounter_fixture_id,_session._reward_mode == "test")
+	if _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST: _profile_namespace = _session.get_reward_mode()
 	_developer_test_mode = _session._reward_mode == "test"
+	if _web_operation.has("previous_profile_selection"):
+		var selection: Dictionary = _web_operation.previous_profile_selection
+		_player_character_id = selection.character
+		_encounter_fixture_id = selection.fixture
+		_encounter_selector_index = selection.selector_index
+		_developer_test_mode = selection.test_mode
+		_profile_namespace = selection.namespace
 	_restore_profile_visual_state(_web_operation.motion,_web_operation.position)
 	_web_operation.clear()
-	_last_ui_message = "Progress not saved. Character creation canceled."
+	_last_ui_message = "Character loading canceled. Your saved progress was not changed."
+	_update_combat_movement_lock()
+	_update_presentation()
 
 func _retry_browser_operation() -> void:
 	if _web_operation.get("phase") != "failed": return
@@ -2329,6 +2410,8 @@ func _resume_browser_motion() -> void:
 
 func _update_presentation() -> void:
 	var storage_locked := _browser_transition_blocked()
+	if _build_identity_label != null:
+		_build_identity_label.visible = _session != null and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY
 	_update_rewards_panel(storage_locked != _browser_controls_locked)
 	_browser_controls_locked = storage_locked
 	if storage_locked:
@@ -2449,7 +2532,7 @@ func _update_presentation() -> void:
 		_return_wave_one_button.tooltip_text = "Return blocked: %s" % _friendly_reason(_return_wave_one_failure_reason) if not _return_wave_one_failure_reason.is_empty() else "Start Wave 1 with the secured character and approved NEW RUN restoration."
 	if _encounter_selector != null:
 		_encounter_selector.text = (
-			("DEV NORMAL" if _encounter_selector_index == 8 else "NORMAL\nWAVE 1")
+			"NORMAL\nWAVE 1"
 			if not _developer_test_mode
 			else (
 				"TEST MODE\nWAVE %d" % _encounter_selector_index
@@ -2460,6 +2543,8 @@ func _update_presentation() -> void:
 		_encounter_selector.disabled = _browser_transition_blocked() or _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 	if _character_selector != null:
 		_character_selector.text = "CHAR: %s" % ("VAELIS" if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS else "GUARD")
+		if _session._playable_persistence != null and _session.get_reward_mode() == ArenaRewardLedger.MODE_DEV_NORMAL:
+			_character_selector.text = "CHAR: LEGACY DEV"
 		_character_selector.disabled = _browser_transition_blocked() or _session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_READY
 		if _can_cancel_browser_load():
 			_character_selector.text = "CANCEL LOAD"
@@ -2712,7 +2797,10 @@ func _update_xp_multiplier_control() -> void:
 		multiplier = 10 if _next_run_xp_boost else 1
 	elif not _web_operation.is_empty() and _web_operation.kind == "load":
 		multiplier = _web_operation.reward_policy.xp_multiplier
-		label = "LOADING"
+		if _web_operation.phase == "failed":
+			label = "RECOVERY REQUIRED" if _web_operation.service._browser_result.get("state") == "recovery_required" else "LOAD FAILED"
+		elif _web_operation.phase == "confirmation": label = "AWAITING CONFIRMATION"
+		else: label = "LOADING"
 	elif multiplier == 0:
 		label = "TEST · NO XP"
 	_xp_multiplier_button.text = "XP ×10: %s\n%s" % ["ON" if multiplier == 10 else "OFF", label]

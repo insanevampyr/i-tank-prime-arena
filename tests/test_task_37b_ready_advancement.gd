@@ -18,7 +18,7 @@ func run() -> Array[String]:
 	var scene := helper._scene()
 	var c: ArenaCombatController = scene.get_node("CombatController")
 	c.set_physics_process(false)
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	check(c.select_player_character_for_testing(&"vaelis_thorn").success,"Disposable character selection must use the ordinary scene.")
 	for wave in range(4):
 		c._session.set_opponent_behavior_enabled(false)
@@ -31,7 +31,7 @@ func run() -> Array[String]:
 	helper._free(scene)
 	scene = helper._scene()
 	c = scene.get_node("CombatController")
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	check(c.select_player_character_for_testing(&"vaelis_thorn").success,"Existing funded character must reload through ordinary playable selection.")
 	var session := c._session
 	check(session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY and session._current_reward_wave_id() == wave_id,"Reloaded unfinished wave must be READY, not downtime or active combat.")
@@ -85,7 +85,7 @@ func run() -> Array[String]:
 		helper._free(scene)
 		scene = helper._scene()
 		c = scene.get_node("CombatController")
-		c._encounter_selector_index = 8
+		c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 		check(c.select_player_character_for_testing(&"vaelis_thorn").success,"Purchased READY profile must reopen through ordinary selection.")
 		session = c._session
 		check(session.simulation.get_actor_definition(&"player").attributes.str == 10 and session.get_reward_state().unspent_xp == balance-3000 and session._current_reward_wave_id() == wave_id,"Reload retains STR, EXPC and the same unfinished wave.")

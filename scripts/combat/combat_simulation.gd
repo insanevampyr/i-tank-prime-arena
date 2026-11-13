@@ -4,6 +4,7 @@ extends RefCounted
 const CriticalConsequenceCatalog = preload("res://scripts/combat/combat_critical_consequence_catalog.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const MAX_SIGNED_INT_64 := 9_223_372_036_854_775_807
+const WALL_COLLISION_DAMAGE_EVENT := &"knockback_collision_damage_resolved"
 
 var clock: CombatClock
 var event_queue: CombatEventQueue
@@ -2976,7 +2977,63 @@ func _resolve_source_knockback(
 				payload["balance_check"] = check
 				if not check.check_success:
 					_add_actor_condition(state, "prone")
-	_record_resolved_event(clock.get_elapsed_us(), StringName(kind + "_resolved"), _get_actor_initiative(String(source_id)), source_id, target_id, payload, parent_event_id)
+	var knockback := _record_resolved_event(clock.get_elapsed_us(), StringName(kind + "_resolved"), _get_actor_initiative(String(source_id)), source_id, target_id, payload, parent_event_id)
+	# Only these Arena sources use the wall-impact rule. Other effects (such as
+	# Inner Strength) must retain their own source-specific collision rules.
+	var rage := kind == "rage_knockback" and StringName(effect_id) in [HadesCombatFollowerFixture.RAGE_EFFECT_ID, RareHumanWarriorFixture.RAGE_EFFECT_ID]
+	if use_balance and (rage or kind in ["force_bolt_knockback", "force_shield_knockback"]):
+		_resolve_static_wall_collision_damage(knockback, state)
+
+
+func _resolve_static_wall_collision_damage(knockback: CombatEvent, target_state: CombatActorState) -> void:
+	var contact: Dictionary = knockback.payload.collision_contact
+	if contact.get("status") != "verified_static_wall" or target_state.current_hpc == null or int(target_state.current_hpc) <= 0:
+		return
+	var prevented: Variant = contact.get("prevented_microfeet")
+	if typeof(prevented) != TYPE_INT or prevented <= 0 or String(contact.get("impact_id", "")).is_empty():
+		return
+	var profile := get_damage_protection_profile(knockback.target_actor_id)
+	var nal: Variant = get_effective_actor_combat_stat(knockback.target_actor_id, "nal")
+	if profile == null or nal == null:
+		return
+	var types := PackedStringArray(["bashing"])
+	var armor := _select_applicable_armor(profile, target_state, &"torso", types)
+	if not armor.success:
+		return
+	var response: Variant = profile.get_exact_type_response(types)
+	var immune: bool = response is Dictionary and response.get("kind") == CombatDamageProtectionProfile.RESPONSE_IMMUNE
+	@warning_ignore("integer_division")
+	var dice_count := maxi(1, int(prevented) / ArenaBattlefield.MICROFEET_PER_FOOT)
+	var rolls: Array[int] = []
+	var draw_indices: Array[int] = []
+	var total := 0
+	for _die in range(dice_count):
+		var roll := roll_int(1, 10)
+		rolls.append(roll)
+		draw_indices.append(random.get_draw_count())
+		total += roll
+	var protected_damage := total - int(armor.tal) - int(nal)
+	var impact_damage := 0 if immune else maxi(1, protected_damage)
+	# Absorption is passive here. A wall is never a retaliatory knockback target.
+	var shield := _absorb_with_persistent_damage_shield(target_state, impact_damage)
+	var final_damage := int(shield.unabsorbed)
+	var hpc_before := int(target_state.current_hpc)
+	if final_damage > 0:
+		target_state.current_hpc = hpc_before - final_damage
+		target_state.revision += 1
+		_state_revision += 1
+	_record_resolved_event(clock.get_elapsed_us(), WALL_COLLISION_DAMAGE_EVENT, knockback.initiative, knockback.source_actor_id, knockback.target_actor_id, {
+		"impact_id": contact.impact_id, "prevented_microfeet": prevented,
+		"attack_instance_id": knockback.payload.attack_instance_id,
+		"damage_type": "bashing", "target_location": "torso",
+		"damage_rolls": rolls, "rng_draw_indices": draw_indices, "raw_damage": total,
+		"armor_equipment_ref": String(armor.equipment_ref), "armor_tal": armor.tal, "natural_armor_level": nal,
+		"immune": immune, "minimum_one_applied": not immune and protected_damage < 1,
+		"shield_id": shield.get("shield_id", ""), "protective_points_absorbed": shield.absorbed,
+		"protective_points_remaining": shield.remaining, "shield_depleted": shield.depleted,
+		"final_damage": final_damage, "hpc_before": hpc_before,
+		"hpc_after": int(target_state.current_hpc), "damage_applied": final_damage > 0,
+	}, knockback.event_id, PackedStringArray(), {"hpc": final_damage})
 
 
 func _uses_normal_footing_rules() -> bool:

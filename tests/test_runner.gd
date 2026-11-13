@@ -85,6 +85,8 @@ const RunRewardSaveContractTests = preload("res://tests/test_run_reward_save_con
 const CharacterPersistenceCoordinatorTests = preload("res://tests/test_character_persistence_coordinator.gd")
 const CharacterPersistenceSessionTests = preload("res://tests/test_character_persistence_session.gd")
 const PlayableCharacterAdmissionTests = preload("res://tests/test_playable_character_admission.gd")
+const HistoricalVaelisAdmissionTests = preload("res://tests/test_historical_vaelis_admission.gd")
+const BuildIdentificationTests = preload("res://tests/test_build_identification.gd")
 const PlayableVaelisPersistenceTests = preload("res://tests/test_playable_vaelis_persistence.gd")
 const PersistenceNextWaveFixTests = preload("res://tests/test_persistence_next_wave_fix.gd")
 const ReturnToWaveOneTests = preload("res://tests/test_return_to_wave_one.gd")
@@ -106,6 +108,8 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 39W Fix6 build identification", "instance":BuildIdentificationTests.new()},
+		{"name":"Task 39W Fix4 historical Vaelis admission", "instance":HistoricalVaelisAdmissionTests.new()},
 		{"name": "Task 39L knockback wall contact", "instance": KnockbackWallContactTests.new()},
 		{"name": "Task 39J knockback Balance", "instance": KnockbackBalanceTests.new()},
 		{"name": "Task 39H Balance skill foundation", "instance": BalanceFoundationTests.new()},

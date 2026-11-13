@@ -18,7 +18,7 @@ func prepare() -> void:
 	root.add_child(scene)
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.set_physics_process(false)
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	var selected := controller.select_player_character_for_testing(&"vaelis_thorn")
 	if not selected.success:
 		push_error(str(selected))

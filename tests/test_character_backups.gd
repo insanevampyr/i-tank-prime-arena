@@ -25,7 +25,7 @@ func run() -> Array[String]:
 	var scene := helper._scene()
 	var c: ArenaCombatController = scene.get_node("CombatController")
 	c.set_physics_process(false)
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	var selected := c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	check(selected.success,"Actual desktop admission must create the disposable profile.")
 	if selected.success:
@@ -111,7 +111,7 @@ func run() -> Array[String]:
 		check(not Reader.new().begin_export(null).success,"Nonpersistent actors cannot export fabricated profiles.")
 		var reopened_scene := helper._scene()
 		var reopened_controller: ArenaCombatController = reopened_scene.get_node("CombatController")
-		reopened_controller._encounter_selector_index = 8
+		reopened_controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 		check(reopened_controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS).success,"Existing disposable profile must reopen through actual character selection.")
 		var reexport := Reader.new().begin_export(reopened_controller._session._playable_persistence)
 		check(reexport.get("success",false) and reexport.history == exported.get("history"),"A verified loaded profile exports without requiring a new write acknowledgement.")
@@ -127,7 +127,7 @@ func _test_ui_messages(actions: CharacterBackupActions) -> void:
 	var expected := {
 		"divergent_history":"does not match your character's history",
 		"backup_older_than_destination":"older than your saved progress",
-		"namespace_mismatch":"NORMAL and DEV NORMAL characters are separate",
+		"namespace_mismatch":"NORMAL and Legacy DEV profiles are separate",
 		"backup_checksum_mismatch":"damaged, incomplete",
 		"unsupported_backup_version":"compatible game version",
 		"backup_output_already_exists":"Choose a new filename",

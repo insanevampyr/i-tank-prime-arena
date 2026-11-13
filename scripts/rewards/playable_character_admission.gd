@@ -9,6 +9,13 @@ const Coordinator = preload("res://scripts/rewards/character_persistence_coordin
 const VAELIS_RECORD := "res://assets/Character Choices/Vaelis_Thorn_Elven_Fighter_Force_Mage_Arena_Character_Data.json"
 const RULES := "prime_v3_arena_starter_v1"
 const STANDARD_STARTERS := {"vaelis_thorn":"standard_pool9_dt6_dp3"}
+# Exact Vaelis source revisions: pre-39H had no authored Balance record.
+# The post-39H 3/6 variant preserves the compatibility path already accepted.
+const HISTORICAL_VAELIS_BASELINES := {
+	"3df0412b72ba5d966b2eb645887fedfbb591782cffc7bff41c192e52583c6d20": {"dt":3,"dp":6,"balance":false},
+	"6b0a4d543e890513fccc2efffb5feb6fab8e8f462651bd0b6903341eb47132d0": {"dt":6,"dp":3,"balance":false},
+	"229feacd9264c8088abc7eb0654fde29715a33cee594ff9e926fc88f8c209ae3": {"dt":3,"dp":6,"balance":true},
+}
 
 static func audit(character: StringName) -> Dictionary:
 	if character == Fixture.PLAYER_CHARACTER_GUARD:
@@ -77,17 +84,25 @@ static func prepare_starter(character: StringName, mode: String, baseline_digest
 	var profile: String = identity.profile_id
 	var source: CombatCharacterDefinitionResource = verified.source
 	var actor: CombatActorDefinition = verified.actor
+	var current_balance: Dictionary = source.proficiencies.balance.duplicate(true)
 	if not baseline_digest.is_empty() and baseline_digest != Profiles.fingerprint(source.to_dictionary()):
-		# Exact pre-37A authored variant only; no arbitrary baseline acceptance,
-		# migration, rewritten history or redistribution of existing characters.
-		source.combat_stats.dt = 3
-		source.combat_stats.dp = 6
-		source.field_sources.combat_stats = "PRIME-V3 p. 53 Mana Attribute Chart applied to supplied attributes; DEX split 3 DT / 6 DP supplied"
+		if not HISTORICAL_VAELIS_BASELINES.has(baseline_digest): return _fail("unsupported_authored_baseline")
+		var historical: Dictionary = HISTORICAL_VAELIS_BASELINES[baseline_digest]
+		source.combat_stats.dt = historical.dt
+		source.combat_stats.dp = historical.dp
+		if historical.dt == 3:
+			source.field_sources.combat_stats = "PRIME-V3 p. 53 Mana Attribute Chart applied to supplied attributes; DEX split 3 DT / 6 DP supplied"
+		if not historical.balance: source.proficiencies = {}
 		if baseline_digest != Profiles.fingerprint(source.to_dictionary()): return _fail("unsupported_authored_baseline")
-		actor.base_combat_stats.dt = 3
-		actor.base_combat_stats.dp = 6
+		actor.base_combat_stats.dt = historical.dt
+		actor.base_combat_stats.dp = historical.dp
 		actor.field_sources = source.field_sources.duplicate(true)
 		actor.apply_equipment_stat_modifiers(actor.equipment_stat_modifiers)
+	# Runtime skill provenance evolves independently of immutable save lineage.
+	# Keep every historical field/allocation; only supply the verified Balance record.
+	var runtime_source: CombatCharacterDefinitionResource = source.duplicate(true)
+	runtime_source.proficiencies["balance"] = current_balance
+	actor.source_character_definition = runtime_source
 	var state := CombatActorState.new(actor)
 	state.inventory_quantities = verified.quantities.duplicate(true)
 	state.hand_occupancy = CombatWeaponHandling.initial_assignments(actor.equipment_refs,CombatDefinitionCatalog.load_default_fixture_catalog(),actor)
@@ -126,7 +141,7 @@ static func prepare_starter(character: StringName, mode: String, baseline_digest
 		return {"authorized":false}
 	var projected := Profiles.project(source,actor,state,ledger.to_dictionary(),defense,authority)
 	if not projected.get("success",false) or projected.payload != payload: return _fail("source_starter_projection_failed",projected)
-	return {"success":true,"profile_id":profile,"profile_namespace":mode,"source":source,"actor":actor,"state":state,"ledger":ledger,"defense":defense,"items":items.duplicate(true),"prepared":prepared.prepared,"authority":authority,"playable_ready":false,"blocked_reason":"interrupted_wave_resource_checkpoint_and_instance_application_unavailable"}
+	return {"success":true,"profile_id":profile,"profile_namespace":mode,"source":source,"runtime_source":runtime_source,"actor":actor,"state":state,"ledger":ledger,"defense":defense,"items":items.duplicate(true),"prepared":prepared.prepared,"authority":authority,"playable_ready":false,"blocked_reason":"interrupted_wave_resource_checkpoint_and_instance_application_unavailable"}
 
 static func _grant(profile: String, definition: String, quantity: int, slots: Array, authored_digest: String) -> Dictionary:
 	return {"instance_id":"%s/starter/%s" % [profile,definition],"definition_id":definition,"quantity":quantity,"provenance":{"origin_id":"%s/starter/%s" % [profile,definition],"source_ref":VAELIS_RECORD+"#"+authored_digest},"equipped_slots":slots.duplicate(),"mutable_state":{}}

@@ -12,7 +12,7 @@ func _process(delta: float) -> void:
 		return
 	JavaScriptBridge.eval("window.arena37Command='';",true)
 	busy = true
-	controller._encounter_selector_index = 8
+	controller._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	controller._character_selector.pressed.emit()
 	await settle(command == "verify")
 	var session := controller._session

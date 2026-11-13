@@ -11,6 +11,7 @@ var _reader: CharacterBackupReader
 var _bridge: JavaScriptObject
 var _selecting := false
 var _namespace := ""
+var _legacy_preview_session: ArenaCombatSession
 var _export_service: PlayableCharacterPersistence
 var _export := {}
 var _download_button: Button
@@ -24,10 +25,12 @@ var _verify_button: Button
 var _preview_source := ""
 var _admitting := false
 var _controls: HBoxContainer
+var _legacy_open_button: Button
+var _legacy_restore_file_button: Button
 
 func setup(controller: Node, character_button: Button) -> void:
 	_controller = controller
-	character_button.tooltip_text = "Select character. Right-click to save or load a character file."
+	character_button.tooltip_text = "Select character. Right-click for character management."
 	character_button.gui_input.connect(_character_input)
 	_dialog = AcceptDialog.new()
 	_dialog.name = "CharacterBackupDialog"
@@ -37,6 +40,7 @@ func setup(controller: Node, character_button: Button) -> void:
 	_dialog.get_ok_button().text = "CANCEL"
 	_dialog.add_button("SAVE CHARACTER",false,"export")
 	_dialog.add_button("SELECT SAVE FILE",false,"preview")
+	_legacy_restore_file_button = _dialog.add_button("SELECT LEGACY DEV SAVE FILE",false,"legacy_preview")
 	_dialog.custom_action.connect(_on_action)
 	_dialog.confirmed.connect(_close)
 	_dialog.canceled.connect(_close)
@@ -74,6 +78,14 @@ func setup(controller: Node, character_button: Button) -> void:
 		controls.add_child(button)
 	_controller._rewards_label.get_parent().add_child(controls)
 	_controller._rewards_label.get_parent().move_child(controls, 1)
+	_legacy_open_button = Button.new()
+	_legacy_open_button.name = "OpenLegacyDevProfile"
+	_legacy_open_button.text = "OPEN LEGACY DEV PROFILE"
+	_legacy_open_button.focus_mode = Control.FOCUS_NONE
+	_legacy_open_button.pressed.connect(_on_action.bind(&"legacy_open"))
+	controls.get_parent().add_child(_legacy_open_button)
+	controls.get_parent().move_child(_legacy_open_button, 2)
+	_update_controls()
 
 func _character_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
@@ -81,7 +93,12 @@ func _character_input(event: InputEvent) -> void:
 		open_actions()
 
 func open_actions() -> void:
-	_show("SAVE CHARACTER — Save a copy of your secured character progress to your computer.\nSELECT SAVE FILE — Browse for a saved character and review a read-only preview. Your character changes only after you confirm loading.\nCANCEL — Exit without changing your character.")
+	var text := "SAVE CHARACTER — Save a copy of your secured character progress to your computer.\nSELECT SAVE FILE — Browse for a saved character and review a read-only preview. Your character changes only after you confirm loading.\nCANCEL — Exit without changing your character."
+	if _controller._can_open_legacy_profile(): text += "\nLegacy DEV has its own saved character. Open it from Inventory or select a compatible legacy save file here."
+	_show(text)
+
+func show_legacy_profile_missing() -> void:
+	_show_result(Backup.fail("existing_profile_missing"))
 
 func _safe(read_only_preview: bool = false) -> Dictionary:
 	if _controller._session == null or _controller._session.is_encounter_active(): return Backup.fail("backups_require_ready_downtime_or_defeat")
@@ -101,20 +118,30 @@ func _on_action(action: StringName) -> void:
 	if _selecting or (_reader != null and _reader._result.get("state") == "pending"):
 		_show("A save or load request is already in progress. Please wait.")
 		return
+	if action in [&"legacy_open", &"legacy_preview"] and not _controller._can_open_legacy_profile():
+		_show_result(Backup.fail("legacy_profile_requires_ready"))
+		return
+	if action == &"legacy_open":
+		var opened: Dictionary = _controller._open_legacy_profile()
+		if opened.get("success", false) or opened.get("state") == "pending":
+			_close()
+			_dialog.hide()
+		else:
+			_show_result(opened)
+		return
 	var permitted := _safe(action == &"preview")
 	if not permitted.success:
 		_show_result(permitted)
 		return
 	if action == &"restore":
-		if _namespace != _controller._session._reward_mode:
+		if not _preview_target_is_current():
 			_show_result(Backup.fail("namespace_changed_reselect_backup"))
 			return
 		if _preview_source.is_empty() or last_result.get("state") != "preview" or last_result.get("classification") not in ["empty_destination","exact_match","destination_exact_prefix"]:
 			_show_result(Backup.fail("eligible_backup_preview_required"))
 			return
 		_restorer = CharacterBackupRestoration.new()
-		var service: PlayableCharacterPersistence = _controller._session._playable_persistence
-		var started := _restorer.begin(_preview_source,_namespace,service)
+		var started := _restorer.begin(_preview_source,_namespace,_destination_service())
 		restoration_blocked = true
 		_handle_restore(started)
 		return
@@ -137,13 +164,16 @@ func _on_action(action: StringName) -> void:
 			_dialog.hide()
 			_picker.popup_centered_ratio(0.65)
 		return
-	_namespace = _controller._session._reward_mode
+	_namespace = ArenaRewardLedger.MODE_DEV_NORMAL if action == &"legacy_preview" else _controller._session.get_reward_mode()
+	_legacy_preview_session = _controller._session if action == &"legacy_preview" else null
 	if action == &"export":
 		_export_service = _controller._session._playable_persistence
 		_reader = Reader.new()
 		_accept(_reader.begin_export(_export_service))
-	elif action == &"preview":
+	elif action in [&"preview", &"legacy_preview"]:
 		_export.clear()
+		_preview_source = ""
+		last_result.clear()
 		if _download_button != null: _download_button.hide()
 		if _restore_button != null: _restore_button.hide()
 		if OS.has_feature("web"):
@@ -155,7 +185,7 @@ func _on_action(action: StringName) -> void:
 			_show("Select a character save file. The preview is read-only; your character will not change until you confirm loading.")
 		else:
 			_picker.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-			_picker.title = "Select Save File"
+			_picker.title = "Select Legacy DEV Save File" if action == &"legacy_preview" else "Select Save File"
 			_dialog.hide()
 			_picker.popup_centered_ratio(0.65)
 
@@ -187,6 +217,12 @@ func _update_controls() -> void:
 	if _controls == null: return
 	for button: Button in _controls.get_children():
 		button.disabled = restoration_blocked or _selecting or not _safe(button.name == "PreviewRestoreBackup").success
+	var ready: bool = _controller._legacy_profile_context_ready()
+	var disabled: bool = _selecting or not _controller._can_open_legacy_profile()
+	_legacy_open_button.visible = ready
+	_legacy_open_button.disabled = disabled
+	_legacy_restore_file_button.visible = ready and last_result.get("state") not in ["preview", "export_ready"]
+	_legacy_restore_file_button.disabled = disabled
 
 func _file_selected(path: String) -> void:
 	if _picker.file_mode == FileDialog.FILE_MODE_SAVE_FILE:
@@ -209,14 +245,23 @@ func preview_text(text: String) -> void:
 		_show_result(safe)
 		return
 	_preview_source = text
-	if _namespace != _controller._session._reward_mode:
+	if not _preview_target_is_current():
 		_show_result(Backup.fail("namespace_changed_reselect_file"))
 		return
 	_reader = Reader.new()
-	var service: PlayableCharacterPersistence = _controller._session._playable_persistence
+	var service := _destination_service()
 	var browser: CharacterBrowserStorage = service.browser if service is PlayableBrowserPersistence else null
 	var storage: CharacterSaveStorage = service.storage if service != null else null
 	_accept(_reader.begin_preview(text,_namespace,storage,browser))
+
+func _preview_target_is_current() -> bool:
+	if _legacy_preview_session != null:
+		return _controller._session == _legacy_preview_session and _controller._legacy_profile_context_ready()
+	return _namespace == _controller._session.get_reward_mode()
+
+func _destination_service() -> PlayableCharacterPersistence:
+	var service: PlayableCharacterPersistence = _controller._session._playable_persistence
+	return service if service != null and service.mode == _namespace else null
 
 func _accept(result: Dictionary) -> void:
 	if result.get("state") == "pending":
@@ -243,7 +288,7 @@ func _accept(result: Dictionary) -> void:
 		_show(_preview_text(result.preview)+"\n"+_comparison_text(result.classification)+"\nREAD ONLY preview — your character has not changed. CONFIRM LOAD opens a separate confirmation; CANCEL leaves your character unchanged.")
 
 func _preview_text(value: Dictionary) -> String:
-	return "%s | %s | Level %s\nXP earned %s / spent %s / available %s | Gold %s\nEquipment: %s\nInventory: %s (%s entries)\nLast saved checkpoint: %s / %s\nSave revision: %s | File created (UTC): %s\nFile integrity checked. This does not prove who created the file." % [value.character,"DEV NORMAL (developer character)" if value.namespace == "dev_normal" else "NORMAL",value.level,value.xp.earned,value.xp.spent,value.xp.unspent,value.gold,", ".join(value.equipment),", ".join(value.inventory.slice(0,4)),value.inventory.size(),String(value.checkpoint.wave_id).replace("_"," ").capitalize(),String(value.checkpoint.phase).replace("_"," "),value.generation,value.created_utc]
+	return "%s | %s | Level %s\nXP earned %s / spent %s / available %s | Gold %s\nEquipment: %s\nInventory: %s (%s entries)\nLast saved checkpoint: %s / %s\nSave revision: %s | File created (UTC): %s\nFile integrity checked. This does not prove who created the file." % [value.character,"LEGACY DEV PROFILE" if value.namespace == "dev_normal" else "NORMAL",value.level,value.xp.earned,value.xp.spent,value.xp.unspent,value.gold,", ".join(value.equipment),", ".join(value.inventory.slice(0,4)),value.inventory.size(),String(value.checkpoint.wave_id).replace("_"," ").capitalize(),String(value.checkpoint.phase).replace("_"," "),value.generation,value.created_utc]
 
 func _filename() -> String:
 	return "%s_g%s_%s_%s%s" % [_export.manifest.profile_id,_export.manifest.head_generation,String(_export.manifest.created_utc).replace(":","-"),String(_export.backup_digest).substr(0,8),Files.EXTENSION]
@@ -271,13 +316,15 @@ func _comparison_text(classification: String) -> String:
 
 func _failure_text(reason: String) -> String:
 	match reason:
+		"existing_profile_missing": return "No Legacy DEV profile is saved here. Choose SELECT LEGACY DEV SAVE FILE to review and restore a compatible backup."
+		"legacy_profile_requires_ready": return "Legacy DEV profiles can be opened or selected for recovery only while the Arena is READY and storage is available."
 		"backups_require_ready_downtime_or_defeat", "restoration_admission_not_safe":
 			return "Cannot save or load during combat. Wait until your character is in a safe state."
-		"test_mode_backups_unavailable": return "Save / Load Character is unavailable in TEST mode. Use NORMAL or DEV NORMAL."
+		"test_mode_backups_unavailable": return "Save / Load Character is unavailable in TEST mode. Use a NORMAL or Legacy DEV character."
 		"admitted_acknowledged_character_required":
 			var service: PlayableCharacterPersistence = _controller._session._playable_persistence if _controller._session != null else null
 			if _controller._web_operation.get("kind") == "load" and _controller._web_operation.get("phase") != "failed": return "Cannot save yet. Your character is still loading."
-			if service == null: return "Cannot save this character. Select a character with verified saving in NORMAL or DEV NORMAL."
+			if service == null: return "Cannot save this character. Select a character with verified saving in NORMAL or the Legacy DEV profile."
 			if service._reset: return "Cannot save this reset session. Reload your saved character first."
 			return "Cannot save yet. Your character's saved progress has not been verified. See FULL LOG for details."
 		"character_storage_pending_or_uncertain", "checkpoint_pending_or_uncertain", "browser_storage_pending_or_unavailable":
@@ -286,7 +333,7 @@ func _failure_text(reason: String) -> String:
 		"desktop_storage_unavailable": return "Character storage on this computer is unavailable. Check access and free disk space; no save file was prepared."
 		"browser_file_transfer_unavailable": return "Your browser cannot open or download character files right now. No character data was changed."
 		"namespace_mismatch", "namespace_changed_reselect_backup", "namespace_changed_reselect_file", "restoration_namespace_changed":
-			return "Cannot load this file in the selected mode. NORMAL and DEV NORMAL characters are separate. Select a file for the current mode."
+			return "Cannot load this file in the selected mode. NORMAL and Legacy DEV profiles are separate. Use OPEN LEGACY DEV PROFILE or SELECT LEGACY DEV SAVE FILE for a legacy character."
 		"profile_source_or_namespace_mismatch", "destination_admission_pending_or_mismatched":
 			return "This file or saved profile does not match the selected character, rules, or mode. Wait for character loading to finish and select a compatible file."
 		"unsupported_backup_version", "unsupported_character_version", "unsupported_format_or_version":
@@ -314,6 +361,7 @@ func _failure_text(reason: String) -> String:
 	return "The save or load request could not be completed safely. Check the save-status message and FULL LOG for details before trying again."
 
 func _show(text: String) -> void:
+	_update_controls()
 	_dialog.dialog_text = text
 	if not _dialog.visible: _dialog.popup_centered_clamped(Vector2i(720,380),0.9)
 
@@ -333,11 +381,12 @@ func _close() -> void:
 	if _download_button != null: _download_button.hide()
 	if _restore_button != null: _restore_button.hide()
 	_preview_source = ""
+	_legacy_preview_session = null
 
 func _confirm_restore() -> void:
 	if _restorer == null: return
 	_confirmation.hide()
-	if _controller._session.is_encounter_active() or _controller._session._reward_mode != _namespace or not _controller._web_operation.is_empty():
+	if _controller._session.is_encounter_active() or not _preview_target_is_current() or not _controller._web_operation.is_empty():
 		_show("Cannot load now: gameplay or character mode changed. Cancel and select the save file again.")
 		return
 	_handle_restore(_restorer.confirm())
@@ -369,7 +418,8 @@ func _handle_restore(result: Dictionary) -> void:
 			_handle_restore(handed)
 			return
 		restoration_blocked = false
-		var loaded: Dictionary = _controller._load_backup_checkpoint(payload,lease)
+		var loaded: Dictionary = _controller._load_backup_checkpoint(payload,lease,_legacy_preview_session != null)
+		_legacy_preview_session = null
 		if loaded.get("state") == "pending":
 			_admitting = true
 			_show("Save verified. Opening your character at the saved checkpoint.")

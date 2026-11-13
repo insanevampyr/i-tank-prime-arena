@@ -118,7 +118,7 @@ func playable() -> void:
 	var scene := helper._scene()
 	var c: ArenaCombatController = scene.get_node("CombatController")
 	c.set_physics_process(false)
-	c._encounter_selector_index = 8
+	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	check(c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS).success,"Disposable DEV profile must enter through actual character selection.")
 	var session := c._session
 	for wave in range(4):
@@ -162,7 +162,7 @@ func playable() -> void:
 		helper._free(scene)
 		scene = helper._scene()
 		c = scene.get_node("CombatController")
-		c._encounter_selector_index = 8
+		c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 		check(c.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS).success and c._session.simulation.get_actor_definition(&"player").attributes.str == 10,"Actual character selection must apply purchased STR from durable storage.")
 		check(c._session.request_character_advancement(&"attribute",&"str",original_request).get("reason") == "duplicate_advancement_request" and c._session.simulation.get_actor_definition(&"player").attributes.str == 10,"Replaying the original STR request after reload must not become another purchase.")
 		check(c._session.request_next_wave().success and c._session.simulation.get_actor_definition(&"player").attributes.str == 10,"NEXT WAVE must preserve purchased STR.")

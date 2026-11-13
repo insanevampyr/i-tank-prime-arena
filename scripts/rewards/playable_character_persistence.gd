@@ -45,7 +45,7 @@ var _failure := ""
 var _reset := false
 var _status := {"persistent":false,"reason":"not_initialized","text":"Progress not saved"}
 
-func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, xp_multiplier: Variant = null) -> Dictionary:
+func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
 	mode = p_mode
 	if not defeated_checkpoint.is_empty() and not new_run: return _fail("defeat_restart_requires_new_run")
 	if mode not in ["normal","dev_normal"]: return _fail("test_mode_nonpersistent")
@@ -57,11 +57,11 @@ func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary
 	source = starter.source
 	profile_id = starter.profile_id
 	var history := storage.inspect_profile(profile_id)
-	return open_verified_history(starter, history, new_run, defeated_checkpoint, xp_multiplier)
+	return open_verified_history(starter, history, new_run, defeated_checkpoint, xp_multiplier, existing_only)
 
 # Shared source/lineage/hydration path. Browser callers supply fully decoded,
 # verified history only after asynchronous lock acquisition and inspection.
-func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary, xp_multiplier: Variant = null) -> Dictionary:
+func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
 	var requested := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
 	if not requested.success: return requested
 	if history.get("success",false) and not history.get("generations",[]).is_empty():
@@ -79,6 +79,7 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 	if history.generations.is_empty():
 		if new_run or not defeated_checkpoint.is_empty(): return _fail("new_run_profile_checkpoint_missing")
 		if history.get("profile_directory_exists",false): return _fail("empty_profile_history_requires_review")
+		if existing_only: return _fail("existing_profile_missing")
 		_prior = starter.prepared.payload.duplicate(true)
 		items = _prior.items.duplicate(true)
 		receipts = _prior.settlements.duplicate(true)
@@ -125,6 +126,9 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 			_run_policy_history.runs.append({"run_id": run_id, "xp_multiplier": requested.xp_multiplier})
 			_runs.append(run_id)
 			recovery = {}
+	# Hydration validates against the exact saved source. The admitted actor uses
+	# separately verified runtime skill provenance without rewriting that source.
+	candidate.actor_definition.source_character_definition = starter.runtime_source
 	for receipt: Dictionary in receipts:
 		if receipt.kind in ["item","currency"]: _world_claims[receipt.content.instance_id] = true
 	for award: Dictionary in _prior.permanent.award_receipts: _awards[award.award_id] = award.duplicate(true)

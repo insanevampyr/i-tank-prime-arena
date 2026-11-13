@@ -28,7 +28,7 @@ func _scene(mode: String) -> Node:
 	var scene := PlayableTests.new()._scene()
 	var controller: ArenaCombatController = scene.get_node("CombatController")
 	controller.combat_seed = 7
-	controller._encounter_selector_index = 8 if mode == "dev_normal" else 0
+	controller._profile_namespace = mode
 	var selected := controller.select_player_character_for_testing(Fixture.PLAYER_CHARACTER_VAELIS)
 	_expect(selected.get("success",false),"Vaelis must load through playable %s selection: %s" % [mode,selected])
 	return scene
@@ -95,14 +95,11 @@ func _exercise(storage: CharacterSaveStorage, mode: String, runs: int, root: Str
 			_defeat_player(controller)
 			session = controller.get_combat_session_for_testing()
 		if mode == "dev_normal" and index == 0:
-			controller._developer_test_mode = true
-			controller._return_wave_one_button.pressed.emit()
-			_expect(controller.get_combat_session_for_testing() == session,"A persistent defeat cannot silently fall through into a nonpersistent TEST initializer.")
-			controller._developer_test_mode = false
-			controller._encounter_selector_index = 0
-			controller._return_wave_one_button.pressed.emit()
-			_expect(controller.get_combat_session_for_testing() == session and not storage.read_profile("prod_vaelis_thorn").get("success",false),"A DEV defeat authorization cannot initialize or replace a production profile.")
-			controller._encounter_selector_index = 8
+			var checkpoint: Dictionary = session.get_return_to_wave_one_authorization().checkpoint
+			var rejected_test := controller._prepare_encounter_fixture(true, checkpoint, {}, ArenaRewardLedger.resolve_run_policy("test"))
+			_expect(rejected_test.get("reason") == "defeated_profile_mode_mismatch" and controller.get_combat_session_for_testing() == session,"A persistent defeat cannot silently fall through into a nonpersistent TEST initializer.")
+			var rejected_normal := controller._prepare_encounter_fixture(true, checkpoint, {}, ArenaRewardLedger.resolve_run_policy("normal"))
+			_expect(rejected_normal.get("reason") == "defeated_profile_mode_mismatch" and controller.get_combat_session_for_testing() == session and not storage.read_profile("prod_vaelis_thorn").get("success",false),"A DEV defeat authorization cannot initialize or replace a production profile.")
 			storage.reject_writes = true
 			PlayableCharacterPersistence.test_run_id = "run_failed_return"
 			var failed_state := session.get_state_snapshot()
