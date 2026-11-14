@@ -39,7 +39,7 @@ func _test_printed_costs_and_blocked_categories() -> void:
 	_expect_equal(sr.get("cost"), 2_000, "Vaelis SR 1 to 2 must cost 2,000 EXPC.")
 	var tb := _find_option(options, "talent_bonus", "tb")
 	_expect_equal(tb.get("blocked_reason"), "purchase_cost_unresolved", "Vaelis TB 0 must fail closed because p. 102 begins at current value 1.")
-	var dex := _find_option(options, "attribute", "dex")
+	var dex := Advancement.make_purchase_preview(&"attribute", &"dex", 9, 10)
 	_expect_equal(dex.get("blocked_reason"), "dex_increase_requires_authoritative_dt_dp_allocation_choice", "DEX must remain blocked without a DT/DP allocation choice.")
 	var skill := _find_option(options, "skill", "verified_skill")
 	_expect_equal(skill.get("blocked_reason"), "skills_use_s_number_investments_no_verified_expc_purchase_rule", "Skills must not fabricate an EXPC price from S-number rules.")

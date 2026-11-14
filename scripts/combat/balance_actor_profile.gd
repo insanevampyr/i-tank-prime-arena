@@ -3,7 +3,7 @@ extends RefCounted
 
 # Explicit resource + live actor query. No inferred training, charts or persistent fields.
 static func capture(definition: CombatCharacterDefinitionResource, actor: CombatActorDefinition,
-		state: CombatActorState, now_us: int) -> Dictionary:
+		state: CombatActorState, now_us: int, purchases: Array = []) -> Dictionary:
 	if definition == null or actor == null or state == null or now_us < 0:
 		return _fail("balance_actor_unavailable")
 	if state.actor_id != actor.actor_id or definition.actor_kind != actor.actor_kind \
@@ -11,8 +11,10 @@ static func capture(definition: CombatCharacterDefinitionResource, actor: Combat
 		return _fail("balance_definition_binding_mismatch")
 	if state.conditions.has("prone"): return _fail("balance_not_required_already_prone")
 	var dex: Variant = actor.attributes.get("dex")
-	if typeof(dex) != TYPE_INT or dex < 0 or dex > 35 or dex != definition.attributes.get("dex"):
+	if typeof(dex) != TYPE_INT or dex < 0 or dex > 35 :
 		return _fail("balance_permanent_dex_reference_unavailable")
+	if dex != definition.attributes.get("dex"):
+		if not state.progression.has("development") or not CharacterDevelopment.validate_source(state.progression.development,definition,purchases) or DexAllocation.validate(CharacterDevelopment.inspect(state.progression.development).allocation).totals.dex != dex: return _fail("balance_permanent_dex_reference_unavailable")
 	var record: Variant = definition.proficiencies.get("balance")
 	if typeof(record) != TYPE_DICTIONARY: return _fail("balance_training_unknown")
 	var profile: Dictionary = record.duplicate(true)

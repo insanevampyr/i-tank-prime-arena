@@ -31,6 +31,15 @@ static func inspect(record: Dictionary) -> Dictionary:
 		if command.get("kind") == "preferences":
 			if command.payload.size() != 1 or not command.payload.get("order") is Array or not DefensivePreferences.valid(command.payload.order): return fail("invalid_defense_preferences")
 			preferences = command.payload.order.duplicate()
+		elif command.get("kind") == "dex_purchase":
+			var p: Dictionary = command.payload
+			var totals: Dictionary = DexAllocation.validate(allocation).totals
+			if p.size() != 3 or typeof(p.get("before")) != TYPE_INT or typeof(p.get("after")) != TYPE_INT or p.get("allocation") not in ["dt","dp"] or p.before != totals.dex or p.after != p.before+1 or p.before < 1 or p.after > 20 or command.id != "dex_purchase_%s" % p.after: return fail("invalid_dex_purchase_allocation")
+			var grant := DexAllocation.request(allocation,{"op":"grant","id":command.id+"_grant","dex":p.after})
+			if not grant.success: return grant
+			var assigned := DexAllocation.request(grant.state,{"op":"allocate","id":command.id+"_allocate","dt":1 if p.allocation == "dt" else 0,"dp":1 if p.allocation == "dp" else 0,"confirmed":true})
+			if not assigned.success: return assigned
+			allocation = assigned.state
 		elif command.get("kind") == "allocation":
 			var result := DexAllocation.request(allocation,command.payload)
 			if not result.success: return result
@@ -54,13 +63,23 @@ static func continuity(previous: Dictionary, candidate: Dictionary) -> bool:
 	if previous.is_empty(): return true
 	return inspect(previous).success and previous.baseline == candidate.baseline and candidate.commands.slice(0,previous.commands.size()) == previous.commands
 
-static func validate_source(record: Dictionary, source: CombatCharacterDefinitionResource) -> bool:
+static func validate_source(record: Dictionary, source: CombatCharacterDefinitionResource, purchases: Array = []) -> bool:
 	var checked := inspect(record)
 	if not checked.success: return false
 	var expected := {"dex":source.attributes.get("dex"),"dt":source.combat_stats.get("dt"),"dp":source.combat_stats.get("dp")}
 	if record.baseline != expected: return false
-	# DEX purchases remain blocked. No new permanent attribute history is invented.
-	return DexAllocation.contributions(checked.allocation).permanent_dex == source.attributes.get("dex")
+	var expected_dex: int = source.attributes.get("dex",-1)
+	var expected_commands: Array = []
+	for purchase: Dictionary in purchases:
+		if not purchase.get("purchase_kind") is String or not purchase.get("target_id") is String or purchase.purchase_kind != "attribute" or purchase.target_id != "dex": continue
+		for field: String in ["value_before","value_after","cost"]:
+			if typeof(purchase.get(field)) != TYPE_INT: return false
+		if not purchase.get("allocation") is String: return false
+		if purchase.get("value_before") != expected_dex or purchase.get("value_after") != expected_dex+1 or purchase.get("allocation") not in ["dt","dp"] or purchase.get("cost") != PrimeV3AdvancementCatalog.attribute_cost(expected_dex): return false
+		expected_dex += 1
+		expected_commands.append({"id":"dex_purchase_%s" % expected_dex,"kind":"dex_purchase","payload":{"before":expected_dex-1,"after":expected_dex,"allocation":purchase.allocation}})
+	var actual: Array = record.commands.filter(func(c): return c.kind == "dex_purchase")
+	return actual == expected_commands and DexAllocation.contributions(checked.allocation).permanent_dex == expected_dex
 
 static func fail(reason: String) -> Dictionary:
 	return {"success":false,"reason":reason}

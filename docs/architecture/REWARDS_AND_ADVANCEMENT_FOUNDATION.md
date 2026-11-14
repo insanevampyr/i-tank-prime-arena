@@ -237,3 +237,29 @@ that unresolved strike and never refunds an Act or cancels committed siblings.
 Actor-targeted automatic reactions exclude released projectiles. See the Rules
 Ledger for the approved but deferred object-targeted projectile interception and
 default -2 ACC rule. No unfinished UI or new projectile simulation is included.
+
+
+### Task 41B - permanent DEX purchase and explicit allocation
+
+Permanent DEX purchases from 1 through a resulting score of 20 reuse the existing
+p.102 EXPC bracket, reward ledger, purchase receipt and acknowledged checkpoint.
+Each request must specify DT or DP, the expected permanent DEX and expected cost.
+The existing advancement selector offers two explicit choices; neither redistributes
+confirmed points. DEX 9->10 costs 3,000 EXPC with ACC remaining 9; 10->11 costs
+3,000 with ACC increasing to 10 in both verified chart modes.
+
+DEX receipts alone add an `allocation` field. Optional development history records
+one paired `dex_purchase` command per receipt; validation requires exact ordered
+agreement, an immutable authored baseline, and matching permanent pool. Generic
+development commands cannot create paid records. No V2/V4 envelope version, schema
+12 version, historical document, reward multiplier or namespace is rewritten.
+Old receipts retain their exact field sets. Purchased DEX is reconstructed before
+combat registration; Balance accepts the purchase-verified permanent reference
+while preserving authored skill provenance. Temporary modifiers and armor remain
+separate. Purchases draw no RNG, refill no resources and grant no equipment.
+
+Owner-approved future intent: only DEX and MAN are intended eventually to reach
+38, permitting 19 DT/19 DP and 19 AP/19 KP respectively. Progression above 20,
+cap-breaking eligibility above 20/25, MAN purchasing and scores beyond the verified
+lookup range remain deferred. This pass adds no chart extrapolation or new
+cap-breaking requirements.

@@ -12,6 +12,7 @@ const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.g
 const VaelisForce = preload("res://scripts/combat/vaelis_force_fixture.gd")
 const RareHumanWarriorFixture = preload("res://scripts/creatures/rare_human_warrior_fixture.gd")
 const ArenaRewardLedger = preload("res://scripts/rewards/arena_reward_ledger.gd")
+const SheetWindow = preload("res://scripts/ui/character_sheet_window.gd")
 
 const MAX_PLAYER_LOG_LINES := 8
 const MAX_DEBUG_LOG_LINES := 48
@@ -65,6 +66,7 @@ var _event_history_generation: int = -1
 var _log_lines: Array[String] = []
 var _debug_log_lines: Array[String] = []
 var _dev_tools_enabled := false
+var _character_sheet: CharacterSheetWindow
 var _build_identity_label: Label
 var _next_run_xp_boost := false
 var _applied_displacement_event_ids: Dictionary = {}
@@ -276,6 +278,14 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if is_character_sheet_visible():
+		if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_ESCAPE:
+			_character_sheet.handle_escape()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventKey and event.pressed and event.physical_keycode in [KEY_TAB,KEY_UP,KEY_DOWN,KEY_LEFT,KEY_RIGHT]:
+			_character_sheet.move_focus(event.shift_pressed if event.physical_keycode == KEY_TAB else event.physical_keycode in [KEY_UP,KEY_LEFT])
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and _is_attack_key(event.physical_keycode) and not event.pressed:
 		_keyboard_attack_keys_held.erase(event.physical_keycode)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -294,6 +304,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if is_character_sheet_visible(): return
 	if _browser_transition_blocked(): return
 	if _session == null:
 		return
@@ -822,7 +833,7 @@ func _active_attack_hold_source() -> String:
 
 
 func _attack_input_is_blocked_by_ui() -> bool:
-	if not _application_has_focus or is_transcript_visible():
+	if not _application_has_focus or is_transcript_visible() or is_character_sheet_visible():
 		return true
 	var viewport := get_viewport()
 	return viewport != null and viewport.gui_get_focus_owner() != null
@@ -1943,6 +1954,11 @@ func _create_rewards_panel() -> void:
 	_rewards_label.add_theme_font_size_override("normal_font_size", 13)
 	_rewards_label.add_theme_color_override("default_color", Color("#E6ECF2"))
 	box.add_child(_rewards_label)
+	var view_sheet := Button.new()
+	view_sheet.name = "ViewCharacterSheet"
+	view_sheet.text = "VIEW CHARACTER SHEET"
+	view_sheet.pressed.connect(open_character_sheet)
+	box.add_child(view_sheet)
 	_collect_loot_button = Button.new()
 	_collect_loot_button.name = "CollectNearestLoot"
 	_collect_loot_button.text = "COLLECT ALL LOOT"
@@ -2026,13 +2042,24 @@ func _create_rewards_panel() -> void:
 	ui.add_child(_rewards_panel)
 	var combat_inventory := Button.new()
 	combat_inventory.name = "CombatInventory"
-	combat_inventory.text = "INVENTORY"
+	combat_inventory.text = "CHARACTER MENU"
 	combat_inventory.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	combat_inventory.position = Vector2(-180, 110)
 	combat_inventory.focus_mode = Control.FOCUS_NONE
 	combat_inventory.pressed.connect(_on_inventory_toggle_pressed)
 	ui.add_child(combat_inventory)
 	_rewards_panel.visible = false
+	_character_sheet = SheetWindow.new()
+	ui.add_child(_character_sheet)
+	_character_sheet.setup(self)
+
+
+func open_character_sheet() -> void:
+	if _character_sheet != null: _character_sheet.open_sheet()
+
+
+func is_character_sheet_visible() -> bool:
+	return _character_sheet != null and _character_sheet.visible
 
 
 func _on_inventory_toggle_pressed() -> void:
@@ -2128,7 +2155,8 @@ func _on_purchase_advancement_pressed() -> void:
 	var option: Dictionary = _advancement_options[_advancement_option.selected]
 	var result := _session.request_character_advancement(
 		StringName(String(option.get("purchase_kind", ""))),
-		StringName(String(option.get("target_id", "")))
+		StringName(String(option.get("target_id", ""))), "",
+		{"allocation":option.get("allocation",""),"expected_current_value":option.get("current_value"),"expected_cost":option.get("cost")}
 	)
 	if result.get("success", false):
 		var purchase: Dictionary = result.get("purchase", {})
@@ -2226,7 +2254,7 @@ func _rebuild_advancement_options() -> void:
 	var selected_key := ""
 	if _advancement_option.selected >= 0 and _advancement_option.selected < _advancement_options.size():
 		var selected: Dictionary = _advancement_options[_advancement_option.selected]
-		selected_key = "%s:%s" % [selected.get("purchase_kind", ""), selected.get("target_id", "")]
+		selected_key = "%s:%s:%s" % [selected.get("purchase_kind", ""), selected.get("target_id", ""),selected.get("allocation","")]
 	_advancement_options = _session.get_character_advancement_options()
 	_advancement_options = _advancement_options.filter(func(option: Dictionary) -> bool:
 		return option.get("available", false) or option.get("blocked_reason") == "insufficient_xp"
@@ -2240,9 +2268,9 @@ func _rebuild_advancement_options() -> void:
 		var target_text := "?" if option.get("target_value") == null else str(option.get("target_value"))
 		_advancement_option.add_item("%s %s: %s -> %s (%s)" % [
 			String(option.get("purchase_kind", "")).replace("_", " ").to_upper(),
-			String(option.get("target_id", "")).to_upper(), current_text, target_text, cost_text,
+			String(option.get("target_id", "")).to_upper()+ (" (+1 %s)" % String(option.allocation).to_upper() if option.has("allocation") else ""), current_text, target_text, cost_text,
 		])
-		var key := "%s:%s" % [option.get("purchase_kind", ""), option.get("target_id", "")]
+		var key := "%s:%s:%s" % [option.get("purchase_kind", ""), option.get("target_id", ""),option.get("allocation","")]
 		if key == selected_key:
 			restore_index = index
 	if not _advancement_options.is_empty():
@@ -2276,6 +2304,9 @@ func _update_rewards_panel_text(
 	var item := _selected_inventory_entry()
 	var inventory_text := "No collected or equipped items"
 	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "dex":
+		var mode := "mana" if player_actor.progression_policy.get("resource_mode") == "mana" else "regular"
+		availability += "\nDEX %s -> %s | ACC %s -> %s | +1 %s. Existing allocations stay locked; no resource refill." % [option.current_value,option.target_value,PrimeV3DexChart.accuracy(int(option.current_value),mode),PrimeV3DexChart.accuracy(int(option.target_value),mode),String(option.allocation).to_upper()]
 	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "str":
 		var before := PrimeV3StrengthChart.derived(int(option.current_value))
 		var after := PrimeV3StrengthChart.derived(int(option.target_value))

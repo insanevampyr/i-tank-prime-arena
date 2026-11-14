@@ -159,6 +159,20 @@ func apply_verified_strength_advancement(expected_current_value: int, target_val
 	return {"success":true,"value_before":expected_current_value,"value_after":target_value,"derived_before":before,"derived_after":after}
 
 
+func apply_verified_dexterity_advancement(expected: int, target: int, allocation: String) -> Dictionary:
+	if typeof(attributes.get("dex")) != TYPE_INT or attributes.dex != expected: return {"success":false,"reason":"stale_advancement_value"}
+	if expected < 1 or target != expected+1 or target > 20 or allocation not in ["dt","dp"]: return {"success":false,"reason":"invalid_dex_advancement"}
+	var mode := "mana" if progression_policy.get("resource_mode") == "mana" else "regular"
+	if base_combat_stats.get("acc") != PrimeV3DexChart.accuracy(expected,mode): return {"success":false,"reason":"dex_derived_source_mismatch"}
+	for key: String in ["dt","dp"]:
+		if typeof(base_combat_stats.get(key)) != TYPE_INT: return {"success":false,"reason":"dex_allocation_unavailable"}
+	attributes.dex = target
+	base_combat_stats.acc = PrimeV3DexChart.accuracy(target,mode)
+	base_combat_stats[allocation] += 1
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return {"success":true,"derived_after":{"acc":base_combat_stats.acc,"dt":base_combat_stats.dt,"dp":base_combat_stats.dp}}
+
+
 func to_dictionary() -> Dictionary:
 	var snapshot := {
 		"actor_id": String(actor_id),

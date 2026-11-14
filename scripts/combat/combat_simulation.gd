@@ -58,6 +58,8 @@ func has_unresolved_combat_work() -> bool:
 	return false
 
 func request_character_development(actor_id: StringName, request_id: String, kind: String, command: Dictionary) -> Dictionary:
+	# Paid allocation records can only be produced by the purchase transaction.
+	if kind not in ["allocation","preferences"]: return _failure("unsupported_development_command")
 	var state := get_actor_state(actor_id)
 	var actor := get_actor_definition(actor_id)
 	if state == null or actor == null: return _failure("unknown_actor")
@@ -3416,7 +3418,8 @@ func apply_verified_character_advancement(
 	purchase_kind: StringName,
 	target_id: StringName,
 	expected_current_value: int,
-	target_value: int
+	target_value: int,
+	allocation: String = ""
 ) -> Dictionary:
 	var actor_key := String(actor_id)
 	var definition := get_actor_definition(actor_id)
@@ -3426,7 +3429,7 @@ func apply_verified_character_advancement(
 	if state.current_hpc == null or int(state.current_hpc) <= 0:
 		return _failure("actor_incapacitated")
 	var expected_target := &"sr" if purchase_kind == &"special_resistance" else (
-		&"tb" if purchase_kind == &"talent_bonus" else (&"str" if purchase_kind == &"attribute" else &"" )
+		&"tb" if purchase_kind == &"talent_bonus" else (target_id if purchase_kind == &"attribute" and target_id in [&"str",&"dex"] else &"" )
 	)
 	if expected_target == &"" or target_id != expected_target:
 		return _failure("unsupported_advancement_purchase")
@@ -3444,9 +3447,20 @@ func apply_verified_character_advancement(
 		"equipment_refs": Array(state.equipment_refs),
 		"inventory_quantities": state.inventory_quantities.duplicate(true),
 	}
-	var applied := definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
+	var proposed := {}
+	if target_id == &"dex":
+		if not state.current_action_instance_id.is_empty(): return _failure("advancement_requires_idle_actor")
+		var record: Dictionary = state.progression.get("development",{})
+		if record.is_empty():
+			var initial := CharacterDevelopment.create(expected_current_value,int(definition.base_combat_stats.get("dt",-1)),int(definition.base_combat_stats.get("dp",-1)))
+			if not initial.success: return initial
+			record = initial.record
+		proposed = CharacterDevelopment.append(record,"dex_purchase_%s" % target_value,"dex_purchase",{"before":expected_current_value,"after":target_value,"allocation":allocation})
+		if not proposed.success: return proposed
+	var applied := definition.apply_verified_dexterity_advancement(expected_current_value,target_value,allocation) if target_id == &"dex" else definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
 	if not applied.get("success", false):
 		return applied
+	if target_id == &"dex": state.progression["development"] = proposed.record
 	state.revision += 1
 	_state_revision += 1
 	return _success({
@@ -5777,7 +5791,7 @@ func _resolve_critical_knockdown(
 func _roll_footing_balance(actor_id: StringName, opportunity_id: String) -> Dictionary:
 	var actor := get_actor_definition(actor_id)
 	var source: CombatCharacterDefinitionResource = actor.source_character_definition if actor != null else null
-	var captured := BalanceActorProfile.capture(source, actor, get_actor_state(actor_id), clock.get_elapsed_us())
+	var captured := BalanceActorProfile.capture(source, actor, get_actor_state(actor_id), clock.get_elapsed_us(), _reward_state.get("purchase_records",[]))
 	if not captured.success:
 		return captured
 	return BalanceSkillCheck.roll(captured.profile, random, opportunity_id)

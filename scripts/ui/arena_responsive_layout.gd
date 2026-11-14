@@ -102,6 +102,16 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 	# rectangles which Godot can silently expand into their neighbours.
 	var toolbar_keys := ["encounter_selector_rect", "dev_tools_button_rect", "encounter_button_rect"]
 	var preferred_widths := [104.0 if compact else 132.0, 76.0, 104.0 if compact else 120.0]
+	# Use the free right side of the seed/character row on landscape screens.
+	# Adding this action to the DEV toolbar would wrap scarce-height layouts.
+	var menu_minimum: Vector2 = toolbar_minimums.get("character_menu_rect", Vector2.ZERO)
+	var menu_width := maxf(152.0 / canvas_scale, menu_minimum.x)
+	var menu_height := maxf(seed_height, menu_minimum.y)
+	var menu_in_toolbar := character_selector_rect.end.x + seed_gap + menu_width > safe_size.x - margin
+	var character_menu_rect := Rect2(safe_size.x-margin-menu_width, seed_y, menu_width, menu_height)
+	if menu_in_toolbar:
+		toolbar_keys.insert(2,"character_menu_rect")
+		preferred_widths.insert(2,152.0)
 	if show_dev_tools:
 		toolbar_keys.insert(2, "log_button_rect")
 		toolbar_keys.insert(3, "debug_button_rect")
@@ -141,7 +151,8 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		row_x += widths[index] + toolbar_gap
 	var encounter_button_rect: Rect2 = toolbar_rects.encounter_button_rect
 	var selector_button_rect: Rect2 = toolbar_rects.encounter_selector_rect
-	var debug_y := maxf(seed_label_rect.end.y, toolbar_y + toolbar_height) + ((6.0 if compact else 14.0) / canvas_scale)
+	if menu_in_toolbar: character_menu_rect = toolbar_rects.character_menu_rect
+	var debug_y := maxf(maxf(seed_label_rect.end.y, character_menu_rect.end.y), toolbar_y + toolbar_height) + ((6.0 if compact else 14.0) / canvas_scale)
 	var touch_layout := MobileTouchControlsClass.calculate_layout(safe_size, safe_display_size)
 	var debug_bottom_limit: float = touch_layout["control_top"] - (10.0 / canvas_scale)
 	var debug_width := minf(safe_size.x * 0.5, (520.0 / canvas_scale))
@@ -216,6 +227,7 @@ static func calculate_layout(viewport_size: Vector2, display_size: Vector2 = Vec
 		"encounter_button_rect": encounter_button_rect,
 		"return_wave_one_rect": toolbar_rects.get("return_wave_one_rect",Rect2()),
 		"encounter_selector_rect": selector_button_rect,
+		"character_menu_rect": character_menu_rect,
 		"dev_tools_button_rect": toolbar_rects.dev_tools_button_rect,
 		"xp_multiplier_rect": toolbar_rects.get("xp_multiplier_rect", Rect2()),
 		"debug_button_rect": toolbar_rects.get("debug_button_rect", Rect2()),
@@ -259,11 +271,9 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	var scale: float = scale_metrics.canvas_scale
 	var minimums := {}
 	var inventory_button := get_node_or_null("HUD/UI/CombatInventory") as Button
-	if inventory_button != null:
-		minimums["inventory_bottom"] = inventory_button.get_rect().end.y
-	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button, _dev_tools_button]
-	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect", "dev_tools_button_rect"]
-	var font_sizes := [13.0, 13.0, 14.0, 16.0, 13.0]
+	var buttons := [_encounter_selector, _log_button, _debug_button, _encounter_button, _dev_tools_button, inventory_button]
+	var keys := ["encounter_selector_rect", "log_button_rect", "debug_button_rect", "encounter_button_rect", "dev_tools_button_rect", "character_menu_rect"]
+	var font_sizes := [13.0, 13.0, 14.0, 16.0, 13.0, 13.0]
 	if _xp_multiplier_button != null and _xp_multiplier_button.visible:
 		buttons.append(_xp_multiplier_button)
 		keys.append("xp_multiplier_rect")
@@ -312,6 +322,7 @@ func _apply_layout(viewport_size: Vector2, display_size: Vector2 = Vector2.ZERO)
 	_apply_control_rect(_encounter_button, metrics["encounter_button_rect"])
 	if return_button != null and return_button.visible: _apply_control_rect(return_button,metrics["return_wave_one_rect"])
 	_apply_control_rect(_encounter_selector, metrics["encounter_selector_rect"])
+	_apply_control_rect(inventory_button, metrics["character_menu_rect"])
 	_apply_control_rect(_debug_button, metrics["debug_button_rect"])
 	_apply_control_rect(_dev_tools_button, metrics["dev_tools_button_rect"])
 	if _xp_multiplier_button != null and _xp_multiplier_button.visible:

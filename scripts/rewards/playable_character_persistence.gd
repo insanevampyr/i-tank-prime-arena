@@ -461,10 +461,10 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 		var key := String(purchase.request_id)
 		if _purchases.has(key): continue
 		var proof: Dictionary = _proved_purchases.get(String(purchase.get("event_id","")),{})
-		for field: String in Profiles.PURCHASE_FIELDS:
+		for field: String in Profiles.purchase_fields(purchase):
 			if proof.get(field) != purchase.get(field): return _fail("purchase_authoritative_proof_missing")
 		var id := "%s/starter_admission/%s/%s/purchase/%s/%s" % [profile_id,run_id,session._current_reward_wave_id(),purchase.target_id,purchase.value_after]
-		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") == "str": id += "/request_"+key.sha256_text()
+		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") in ["str","dex"]: id += "/request_"+key.sha256_text()
 		_purchases[key] = id
 		_add_receipt("purchase","purchase_"+id.sha256_text().substr(0,48),{"purchase_id":id,"cost":purchase.cost},session._current_reward_wave_id())
 	for record: Dictionary in state.progression.get("history",[]):

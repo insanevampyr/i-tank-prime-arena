@@ -219,7 +219,8 @@ func purchase_advancement(
 	simulation: CombatSimulation,
 	request_id: String,
 	purchase_kind: StringName,
-	target_id: StringName
+	target_id: StringName,
+	selection: Dictionary = {}
 ) -> Dictionary:
 	if request_id.is_empty():
 		return {"success": false, "reason": "advancement_request_id_required"}
@@ -227,10 +228,12 @@ func purchase_advancement(
 		return {"success": false, "reason": "duplicate_advancement_request"}
 	if mode == MODE_TEST:
 		return {"success": false, "reason": "test_mode_advancement_prohibited"}
+	if target_id == &"dex":
+		if selection.size() != 3 or not selection.get("allocation") is String or selection.allocation not in ["dt","dp"] or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT: return {"success":false,"reason":"explicit_dex_allocation_required"}
 	var matching_option := {}
 	for option: Dictionary in get_purchase_options(simulation):
 		if String(option.get("purchase_kind", "")) == String(purchase_kind) \
-		and String(option.get("target_id", "")) == String(target_id):
+		and String(option.get("target_id", "")) == String(target_id) and (target_id != &"dex" or option.get("allocation") == selection.get("allocation")):
 			matching_option = option
 			break
 	if matching_option.is_empty():
@@ -246,8 +249,9 @@ func purchase_advancement(
 		return {"success": false, "reason": "insufficient_xp"}
 	var current_value := int(matching_option.get("current_value", -1))
 	var target_value := int(matching_option.get("target_value", -1))
+	if target_id == &"dex" and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
 	var application := simulation.apply_verified_character_advancement(
-		player_actor_id, purchase_kind, target_id, current_value, target_value
+		player_actor_id, purchase_kind, target_id, current_value, target_value, String(selection.get("allocation",""))
 	)
 	if not application.get("success", false):
 		return application
@@ -272,6 +276,7 @@ func purchase_advancement(
 		"source_ref": matching_option.get("source_ref", ""),
 		"preserved_state": application.get("preserved_state", {}).duplicate(true),
 	}
+	if target_id == &"dex": record["allocation"] = selection.allocation
 	var purchase_event := simulation.record_reward_event(
 		&"reward_advancement_purchased", player_actor_id, player_actor_id,
 		record.duplicate(true)

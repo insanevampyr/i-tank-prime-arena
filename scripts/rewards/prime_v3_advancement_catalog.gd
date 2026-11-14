@@ -40,7 +40,8 @@ static func make_purchase_preview(
 	purchase_kind: StringName,
 	target_id: StringName,
 	current_value: int,
-	target_value: int
+	target_value: int,
+	allocation: String = ""
 ) -> Dictionary:
 	var cost: Variant = null
 	var blocked_reason := ""
@@ -62,6 +63,9 @@ static func make_purchase_preview(
 				if target_id == &"str":
 					available = cost != null and PrimeV3StrengthChart.derived(current_value).success and PrimeV3StrengthChart.derived(target_value).success
 					if not available: blocked_reason = "strength_chart_or_mortal_limit_unverified"
+				elif target_id == &"dex":
+					available = current_value >= 1 and target_value <= 20 and allocation in ["dt","dp"]
+					if not available: blocked_reason = "dex_increase_requires_authoritative_dt_dp_allocation_choice" if allocation not in ["dt","dp"] else "dex_mortal_purchase_limit"
 				else: blocked_reason = _attribute_blocked_reason(target_id)
 			else:
 				available = cost != null
@@ -108,7 +112,12 @@ static func build_actor_purchase_options(actor: CombatActorDefinition) -> Array[
 				if (field == "sb" or actor.base_combat_stats.has(field)) and actor.base_combat_stats.get(field) != derived[field]:
 					option.available = false
 					option.blocked_reason = "strength_derived_source_mismatch"
-		options.append(option)
+		if attribute_id == &"dex":
+			for allocation: String in ["dt","dp"]:
+				var choice := make_purchase_preview(&"attribute", &"dex", int(current), int(current)+1, allocation)
+				choice["allocation"] = allocation
+				options.append(choice)
+		else: options.append(option)
 	for resistance: Dictionary in [
 		{"purchase_kind": &"special_resistance", "target_id": &"sr"},
 		{"purchase_kind": &"talent_bonus", "target_id": &"tb"},

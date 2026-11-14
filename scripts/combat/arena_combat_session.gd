@@ -1101,20 +1101,21 @@ func get_character_advancement_eligibility() -> Dictionary:
 func request_character_advancement(
 	purchase_kind: StringName,
 	target_id: StringName,
-	request_id: String = ""
+	request_id: String = "",
+	selection: Dictionary = {}
 ) -> Dictionary:
 	var eligible := get_character_advancement_eligibility()
 	if not eligible.success: return _failure(eligible.reason)
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
-	if _playable_persistence != null and purchase_kind == &"attribute" and target_id == &"str":
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex"]:
 		var prefix := "%s/starter_admission/%s/" % [_playable_persistence.profile_id,_playable_persistence.run_id]
 		var suffix := "/request_"+stable_request_id.sha256_text()
 		for prior: Dictionary in _playable_persistence._prior.get("purchases",[]):
-			if prior.get("purchase_kind") == "attribute" and prior.get("target_id") == "str" and String(prior.purchase_id).begins_with(prefix) and String(prior.purchase_id).ends_with(suffix): return _failure("duplicate_advancement_request")
+			if prior.get("purchase_kind") == "attribute" and prior.get("target_id") == String(target_id) and String(prior.purchase_id).begins_with(prefix) and String(prior.purchase_id).ends_with(suffix): return _failure("duplicate_advancement_request")
 	var result := _reward_ledger.purchase_advancement(
-		simulation, stable_request_id, purchase_kind, target_id
+		simulation, stable_request_id, purchase_kind, target_id, selection
 	)
 	if result.get("success", false):
 		if _encounter_state == ENCOUNTER_READY and _playable_persistence != null:

@@ -38,7 +38,7 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 		var key := String(record.get("request_id",""))
 		if not evidence.get("purchase_ids",{}).has(key): return _fail("durable_purchase_identity_unavailable")
 		var normalized := {"purchase_id":evidence.purchase_ids[key]}
-		for field: String in PURCHASE_FIELDS:
+		for field: String in purchase_fields(record):
 			if not record.has(field): return _fail("purchase_history_incomplete")
 			normalized[field] = record[field]
 		purchases.append(normalized)
@@ -80,7 +80,7 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 		if evidence.equipment_state != {"hands":state.hand_occupancy,"handling":state.weapon_handling}: return _fail("equipment_state_source_mismatch")
 		payload["equipment_state"] = evidence.equipment_state.duplicate(true)
 	if state.progression.has("development"):
-		if not state.progression.development is Dictionary or not CharacterDevelopment.validate_source(state.progression.development,source): return _fail("development_source_mismatch")
+		if not state.progression.development is Dictionary or not CharacterDevelopment.validate_source(state.progression.development,source,purchases): return _fail("development_source_mismatch")
 		payload.permanent["development"] = state.progression.development.duplicate(true)
 	var candidate := hydrate(payload, source, String(payload.character_id), String(payload.rules_revision), verifier)
 	if not candidate.get("success",false): return candidate
@@ -117,7 +117,7 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		if mode != save_namespace: return _fail("nonproduction_lineage")
 	var p: Dictionary = payload.permanent
 	if not _keys(p,PERMANENT_FIELDS+(["development"] if p.has("development") else [])) or not p.growth is Array or not p.resource_maxima is Dictionary or not p.inventory_quantities is Dictionary or not p.equipment_refs is Array or not p.xp_baseline is Dictionary or not p.award_receipts is Array: return _fail("invalid_permanent_fields")
-	if p.has("development") and not CharacterDevelopment.validate_source(p.development,source): return _fail("development_source_mismatch")
+	if p.has("development") and not CharacterDevelopment.validate_source(p.development,source,payload.purchases): return _fail("development_source_mismatch")
 	for ref: Variant in p.equipment_refs:
 		if not ref is String or ref.is_empty(): return _fail("invalid_equipment_reference")
 	if payload.base_attributes != source.attributes: return _fail("attribute_history_unverified")
@@ -139,18 +139,19 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	if award_total != b.earned: return _fail("award_total_mismatch")
 	var purchase_cost := 0
 	for purchase: Dictionary in payload.purchases:
-		if not _keys(purchase,PURCHASE_FIELDS+["purchase_id"]) or not _namespaced(purchase.purchase_id,profile_id,lineage.run_id): return _fail("invalid_purchase_record")
+		if not _keys(purchase,purchase_fields(purchase)+["purchase_id"]) or not _namespaced(purchase.purchase_id,profile_id,lineage.run_id): return _fail("invalid_purchase_record")
 		for field: String in ["purchase_kind","target_id","source_ref"]:
 			if not purchase[field] is String: return _fail("invalid_purchase_record")
 		for field: String in ["value_before","value_after","cost"]:
 			if not Contract._integer(purchase[field],0): return _fail("invalid_purchase_record")
-		var preview := Advancement.make_purchase_preview(StringName(purchase.purchase_kind),StringName(purchase.target_id),purchase.value_before,purchase.value_after)
+		var preview := Advancement.make_purchase_preview(StringName(purchase.purchase_kind),StringName(purchase.target_id),purchase.value_before,purchase.value_after,String(purchase.get("allocation","")))
 		if not preview.available or preview.cost != purchase.cost or preview.source_ref != purchase.source_ref: return _fail("unsupported_or_inconsistent_purchase")
 		# Isolated history replay: equipment is validated after ALL purchases, so
 		# later acquired equipment need not have been legal at an earlier STR.
-		var applied := actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
+		var applied := actor.apply_verified_dexterity_advancement(purchase.value_before,purchase.value_after,String(purchase.get("allocation",""))) if purchase.purchase_kind == "attribute" and purchase.target_id == "dex" else actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
 		if not applied.success: return _fail("purchase_application_failed")
 		purchase_cost += int(purchase.cost)
+	if actor.attributes.get("dex") != source.attributes.get("dex") and not p.has("development"): return _fail("dex_purchase_allocation_history_missing")
 	if purchase_cost != b.spent: return _fail("purchase_spending_mismatch")
 	var expected_level := actor.level
 	var seen_growth := {}
@@ -319,3 +320,6 @@ static func _keys(value: Dictionary, keys: Array) -> bool:
 
 static func _fail(reason: String, details: Dictionary = {}) -> Dictionary:
 	return {"success":false,"reason":reason,"details":details}
+
+static func purchase_fields(purchase: Dictionary) -> Array:
+	return PURCHASE_FIELDS + (["allocation"] if purchase.get("purchase_kind") is String and purchase.get("target_id") is String and purchase.purchase_kind == "attribute" and purchase.target_id == "dex" else [])
