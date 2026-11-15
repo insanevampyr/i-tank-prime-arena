@@ -15,6 +15,7 @@ var player_level: int = -1
 var earned_xp: int = 0
 var spent_xp: int = 0
 var initial_expc: int = 0 # Authored spendable baseline, not a reward or XP award.
+var expc_credit_total: int = 0 # Validated profile credits; never earned XP or EXPM.
 var current_wave_earned_xp: int = 0
 var current_wave_id: String = ""
 var awards: Array[Dictionary] = []
@@ -121,7 +122,7 @@ func process_defeat(
 			award.merged({
 				"cumulative_earned_xp": earned_xp,
 				"spent_xp": spent_xp,
-				"unspent_xp": initial_expc + earned_xp - spent_xp,
+				"unspent_xp": initial_expc + earned_xp + expc_credit_total - spent_xp,
 				"distribution": "full_award_to_each_eligible_participant",
 			}, true), defeat_event_id
 		)
@@ -209,7 +210,7 @@ func get_purchase_options(simulation: CombatSimulation) -> Array[Dictionary]:
 			option["available"] = false
 			option["blocked_reason"] = "test_mode_advancement_prohibited"
 			continue
-		if option.get("available", false) and int(option.get("cost", 0)) > initial_expc + earned_xp - spent_xp:
+		if option.get("available", false) and int(option.get("cost", 0)) > initial_expc + earned_xp + expc_credit_total - spent_xp:
 			option["available"] = false
 			option["blocked_reason"] = "insufficient_xp"
 	return options
@@ -230,6 +231,9 @@ func purchase_advancement(
 		return {"success": false, "reason": "test_mode_advancement_prohibited"}
 	if target_id == &"dex":
 		if selection.size() != 3 or not selection.get("allocation") is String or selection.allocation not in ["dt","dp"] or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT: return {"success":false,"reason":"explicit_dex_allocation_required"}
+	if target_id == &"spd":
+		if selection.size() != 2 or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT:
+			return {"success":false,"reason":"speed_purchase_preview_required"}
 	var matching_option := {}
 	for option: Dictionary in get_purchase_options(simulation):
 		if String(option.get("purchase_kind", "")) == String(purchase_kind) \
@@ -245,11 +249,11 @@ func purchase_advancement(
 			"preview": matching_option.duplicate(true),
 		}
 	var cost := int(matching_option.get("cost", 0))
-	if cost <= 0 or initial_expc + earned_xp - spent_xp < cost:
+	if cost <= 0 or initial_expc + earned_xp + expc_credit_total - spent_xp < cost:
 		return {"success": false, "reason": "insufficient_xp"}
 	var current_value := int(matching_option.get("current_value", -1))
 	var target_value := int(matching_option.get("target_value", -1))
-	if target_id == &"dex" and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
+	if target_id in [&"dex", &"spd"] and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
 	var application := simulation.apply_verified_character_advancement(
 		player_actor_id, purchase_kind, target_id, current_value, target_value, String(selection.get("allocation",""))
 	)
@@ -259,7 +263,7 @@ func purchase_advancement(
 	var player_state := simulation.get_actor_state(player_actor_id)
 	if not player_state.progression.is_empty():
 		player_state.progression["run_spent_xp"] = spent_xp
-		player_state.progression["expc"] = int(simulation.get_actor_definition(player_actor_id).progression_policy.initial_expc) + earned_xp - spent_xp
+		player_state.progression["expc"] = int(simulation.get_actor_definition(player_actor_id).progression_policy.initial_expc) + earned_xp + expc_credit_total - spent_xp
 		player_state.revision += 1
 	processed_purchase_request_ids[request_id] = true
 	var record := {
@@ -272,7 +276,7 @@ func purchase_advancement(
 		"cost": cost,
 		"earned_xp": earned_xp,
 		"spent_xp": spent_xp,
-		"unspent_xp": initial_expc + earned_xp - spent_xp,
+		"unspent_xp": initial_expc + earned_xp + expc_credit_total - spent_xp,
 		"source_ref": matching_option.get("source_ref", ""),
 		"preserved_state": application.get("preserved_state", {}).duplicate(true),
 	}
@@ -308,7 +312,7 @@ func to_dictionary() -> Dictionary:
 		"current_wave_earned_xp": current_wave_earned_xp,
 		"earned_xp": earned_xp,
 		"spent_xp": spent_xp,
-		"unspent_xp": initial_expc + earned_xp - spent_xp,
+		"unspent_xp": initial_expc + earned_xp + expc_credit_total - spent_xp,
 		"awards": awards.duplicate(true),
 		"drop_resolutions": drop_resolutions.duplicate(true),
 		"purchase_records": purchase_records.duplicate(true),
@@ -323,6 +327,7 @@ func to_dictionary() -> Dictionary:
 	# Legacy profiles derive the policy from their namespace and retain the
 	# existing checkpoint representation. Only disposable overrides need a field.
 	if _xp_multiplier != legacy_xp_multiplier(mode): snapshot["xp_multiplier"] = _xp_multiplier
+	if expc_credit_total > 0: snapshot["expc_credit_total"] = expc_credit_total
 	if not profile_ownership.is_empty(): snapshot["profile_ownership"] = profile_ownership.duplicate(true)
 	return snapshot
 

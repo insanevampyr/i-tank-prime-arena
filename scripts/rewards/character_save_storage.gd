@@ -251,16 +251,24 @@ static func history_records(history: Dictionary) -> Array:
 func _read_restoration(path: String, profile: String) -> Dictionary:
 	var file := FileAccess.open(path,FileAccess.READ)
 	if file == null: return _failure("restoration_unreadable")
-	if file.get_length() > 16*1024*1024: return _failure("restoration_size_limit")
-	var wrapper: Variant = JSON.parse_string(file.get_as_text())
+	if not CharacterBackupContract.check_size(file.get_length(),CharacterBackupContract.MAX_FILE_BYTES).success:
+		file.close()
+		return _failure("restoration_size_limit")
+	var text := file.get_as_text()
 	file.close()
+	if not CharacterBackupContract.scan_json(text,CharacterBackupContract.MAX_FILE_BYTES).success: return _failure("invalid_restoration_bundle")
+	var wrapper: Variant = JSON.parse_string(text)
 	if not wrapper is Dictionary or wrapper.size() != 3 or wrapper.get("restoration_version") != 1 or not wrapper.get("body_json") is String or wrapper.body_json.sha256_text() != wrapper.get("sha256"): return _failure("invalid_restoration_bundle")
 	if path.ends_with(".bundle") and path.get_file() != "restoration_%s.bundle" % wrapper.sha256: return _failure("restoration_filename_mismatch")
+	if not CharacterBackupContract.scan_json(wrapper.body_json,CharacterBackupContract.MAX_BODY_BYTES).success: return _failure("invalid_restoration_bundle")
 	var rows: Variant = JSON.parse_string(wrapper.body_json)
 	if not rows is Array or rows.is_empty(): return _failure("invalid_restoration_records")
 	var records: Array = []
+	var total := 0
 	for row: Variant in rows:
 		if not row is Dictionary or not row.get("document") is String or not row.get("transaction_id") is String or not _valid_id(row.transaction_id): return _failure("invalid_restoration_record")
+		total += row.document.to_utf8_buffer().size()
+		if not CharacterBackupContract.check_size(total,CharacterBackupContract.MAX_HISTORY_BYTES).success or not CharacterBackupContract.scan_json(row.document).success: return _failure("restoration_size_limit")
 		var decoded := Contract.decode(row.document)
 		if not decoded.success or decoded.payload.character_id != profile or decoded.payload.generation != records.size()+1 or row.get("generation") != decoded.payload.generation: return _failure("invalid_restoration_generation")
 		records.append({"success":true,"payload":decoded.payload,"transaction_id":row.transaction_id,"document":row.document})

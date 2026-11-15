@@ -6,13 +6,21 @@ const FORMAT := "itank_arena_character"
 const VERSION := 1
 const PROFILE_VERSION := 2
 const RUN_REWARD_PROFILE_VERSION := 4
+const EXPC_CREDIT_PROFILE_VERSION := 5
+const Credit = preload("res://scripts/rewards/character_expc_credit.gd")
 const MAX_SAFE_INTEGER := 9_007_199_254_740_991
 const PAYLOAD_KEYS := ["character_id", "definition_id", "rules_revision", "generation", "base_attributes", "xp", "purchases", "items", "secured_checkpoints"]
 
 
 static func validate(payload: Dictionary) -> Dictionary:
 	if payload.has("permanent") or payload.has("lineage"):
+		var credit := Credit.inspect(payload)
+		if not credit.success: return {"success":false,"errors":[credit.reason]}
 		var legacy := payload.duplicate(true)
+		legacy.erase("expc_credits")
+		# Check wallet arithmetic in an isolated validation copy only. EXPM and
+		# ordinary earned XP in the real document are never increased by credits.
+		if legacy.get("xp") is Dictionary and legacy.xp.get("earned") is int: legacy.xp.earned += credit.total
 		legacy.erase("permanent")
 		legacy.erase("lineage")
 		legacy.erase("settlements")
@@ -124,7 +132,7 @@ static func decode(text: String) -> Dictionary:
 	var version: Variant = envelope.get("version")
 	if typeof(envelope.get("format")) != TYPE_STRING or envelope.format != FORMAT or not _integer(version, VERSION):
 		return {"success": false, "reason": "unsupported_format_or_version"}
-	if version != VERSION and version != PROFILE_VERSION and version != RUN_REWARD_PROFILE_VERSION:
+	if version != VERSION and version != PROFILE_VERSION and version != RUN_REWARD_PROFILE_VERSION and version != EXPC_CREDIT_PROFILE_VERSION:
 		return {"success": false, "reason": "unsupported_format_or_version"}
 	if envelope.size() != 4 or typeof(envelope.get("payload_json")) != TYPE_STRING or typeof(envelope.get("sha256")) != TYPE_STRING:
 		return {"success": false, "reason": "invalid_envelope"}
@@ -137,14 +145,15 @@ static func decode(text: String) -> Dictionary:
 	var is_profile := payload.has("permanent") and payload.has("lineage")
 	if (version != VERSION) != is_profile or version != _payload_version(payload):
 		return {"success": false, "reason": "unsupported_format_or_version"}
-	if version == RUN_REWARD_PROFILE_VERSION:
+	if version == RUN_REWARD_PROFILE_VERSION or version == EXPC_CREDIT_PROFILE_VERSION:
 		payload = _normalize_json_numbers(payload)
 	var validation := validate(payload)
 	if not validation.success: return validation
-	return {"success": true, "payload": payload if version == RUN_REWARD_PROFILE_VERSION else _normalize_json_numbers(payload), "version": int(version)}
+	return {"success": true, "payload": _normalize_json_numbers(payload), "version": int(version)}
 
 
 static func _payload_version(payload: Dictionary) -> int:
+	if payload.has("expc_credits"): return EXPC_CREDIT_PROFILE_VERSION
 	if payload.has("run_reward_policy"): return RUN_REWARD_PROFILE_VERSION
 	return PROFILE_VERSION if payload.has("permanent") else VERSION
 
@@ -186,6 +195,8 @@ static func _normalize_json_numbers(value: Variant) -> Variant:
 
 
 static func validate_replacement(current: Dictionary, candidate: Dictionary) -> Dictionary:
+	var credit_continuity := Credit.continuity(current,candidate)
+	if not credit_continuity.success: return credit_continuity
 	for payload: Dictionary in [current, candidate]:
 		var result := validate(payload)
 		if not result.success: return result
@@ -232,7 +243,7 @@ static func _validate_run_reward_replacement(current: Dictionary, candidate: Dic
 		return {"success": false, "reason": "run_reward_policy_history_changed"}
 	if next.runs.size() == previous.runs.size() and new_entry.run_id == old_entry.run_id:
 		return {"success": true}
-	if next.runs.size() != previous.runs.size() + 1 or new_entry.phase != "entry" or new_entry.wave_id != "wave_1" or old_entry.phase not in ["entry", "complete"]:
+	if next.runs.size() != previous.runs.size() + 1 or new_entry.phase != "entry" or new_entry.wave_id != "wave_1" or old_entry.phase not in ["entry", "downtime", "complete"]:
 		return {"success": false, "reason": "run_reward_policy_requires_new_wave_one_entry"}
 	if candidate.xp != current.xp or candidate.permanent.get("award_receipts") != current.permanent.get("award_receipts"):
 		return {"success": false, "reason": "new_run_entry_awards_changed"}

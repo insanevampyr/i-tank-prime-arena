@@ -41,6 +41,7 @@ func run() -> Array[String]:
 	check(c._session._playable_persistence != null and c._session._playable_persistence.profile_id == "dev_vaelis_thorn" and c._encounter_selector_index == 0,"Open a real V2 Legacy DEV profile without selecting index 8.")
 	check(c._session.get_run_reward_policy().xp_multiplier == 10 and source.read_profile("dev_vaelis_thorn").document == initial.document,"V2 open preserves the historical multiplier and exact committed document.")
 	check(c._profile_namespace == "dev_normal" and c._selected_reward_policy().mode == "dev_normal", "Legacy admission retains its explicit namespace independently of index zero.")
+	c._run_choice_dialog.get_ok_button().pressed.emit()
 	c._on_encounter_button_pressed()
 	c._session.set_opponent_behavior_enabled(false)
 	helper._defeat_wave(c._session)
@@ -83,6 +84,7 @@ func test_native(exported: Dictionary) -> void:
 	check(actions._namespace == "dev_normal" and actions._picker.title == "Select Legacy DEV Save File","Legacy restore captures its explicit destination before file selection.")
 	actions._picker.hide()
 	actions.preview_text(exported.text)
+	pump(c)
 	check(actions.last_result.get("classification") == "empty_destination" and c._session.get_state_snapshot() == original,"Actual empty-destination UI preview is read-only.")
 	actions._dialog.custom_action.emit(&"restore")
 	check(actions._confirmation.visible and actions.restoration_blocked and actions._restore_button.text == "CONFIRM LOAD" and actions._confirmation.get_ok_button().text == "CONFIRM LOAD","CONFIRM LOAD acquires ownership then requires separate explicit confirmation.")
@@ -107,11 +109,15 @@ func test_native(exported: Dictionary) -> void:
 	check(sync.compare_clients().success and c._session.simulation.get_resolved_event_count() == batch.next_cursor,"Restored playable session converges without draining its authoritative history.")
 	var before := c._session.get_state_snapshot()
 	actions.preview_text(exported.text)
+	pump(c)
 	actions._dialog.custom_action.emit(&"restore")
 	actions._confirmation.get_ok_button().pressed.emit()
 	check(CharacterSaveStorage.history_records(destination.inspect_profile(exported.manifest.profile_id)) == exported.history,"Repeated restore is an exact no-op; no duplicate rewards/items or starter grants.")
 	check(c._session.get_state_snapshot() == before,"Replaying the same verified checkpoint reproduces the complete authoritative snapshot/event ordering.")
 	check(c._session.get_state_snapshot().schema_version == 12 and before.schema_version == 12,"Restoration leaves schema 12 unchanged.")
+	actions._dialog.get_ok_button().pressed.emit()
+	check(c._run_choice_dialog.visible,"Closing the successful Load dialog offers the unfinished-run choice without overlapping dialogs.")
+	c._run_choice_dialog.get_ok_button().pressed.emit()
 	check(c._session.request_developer_character_refresh().success,"A restored Legacy DEV profile still authorizes Refresh at downtime.")
 	check(c._session.request_next_wave().success,"Normal publication/NEXT WAVE works after bundled restoration.")
 	check(destination.inspect_profile(exported.manifest.profile_id).success,"Subsequent native generation remains a contiguous coherent history.")
@@ -231,9 +237,12 @@ func test_web(exported: Dictionary) -> void:
 	PlayableBrowserPersistence.test_factory = Callable()
 
 func pump(c: ArenaCombatController) -> void:
-	for index in range(90):
+	for index in range(10000):
 		c._backup_actions._process(0.0)
 		c._physics_process(0.0)
+		if c._web_operation.get("phase") == "failed": return
+		if c._web_operation.is_empty() and not c._backup_actions._admitting and (c._backup_actions._reader == null or c._backup_actions._reader._result.get("state") != "pending") and (c._backup_actions._restorer == null or c._backup_actions._restorer.status.state != "pending"): return
+	check(false,"Incremental read/admission must settle.")
 
 func pump_restorer(restorer: CharacterBackupRestoration) -> void:
 	for index in range(20):

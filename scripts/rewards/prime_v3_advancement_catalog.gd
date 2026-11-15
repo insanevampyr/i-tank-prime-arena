@@ -66,6 +66,9 @@ static func make_purchase_preview(
 				elif target_id == &"dex":
 					available = current_value >= 1 and target_value <= 20 and allocation in ["dt","dp"]
 					if not available: blocked_reason = "dex_increase_requires_authoritative_dt_dp_allocation_choice" if allocation not in ["dt","dp"] else "dex_mortal_purchase_limit"
+				elif target_id == &"spd":
+					available = current_value >= 1 and target_value <= 20
+					if not available: blocked_reason = "speed_mortal_purchase_limit"
 				else: blocked_reason = _attribute_blocked_reason(target_id)
 			else:
 				available = cost != null
@@ -112,6 +115,11 @@ static func build_actor_purchase_options(actor: CombatActorDefinition) -> Array[
 				if (field == "sb" or actor.base_combat_stats.has(field)) and actor.base_combat_stats.get(field) != derived[field]:
 					option.available = false
 					option.blocked_reason = "strength_derived_source_mismatch"
+		if attribute_id == &"spd" and option.available:
+			var speed := actor.preview_verified_speed_advancement(int(current), int(current) + 1)
+			if not speed.success:
+				option.available = false
+				option.blocked_reason = speed.reason
 		if attribute_id == &"dex":
 			for allocation: String in ["dt","dp"]:
 				var choice := make_purchase_preview(&"attribute", &"dex", int(current), int(current)+1, allocation)

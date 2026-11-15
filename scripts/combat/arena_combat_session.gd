@@ -100,6 +100,7 @@ var _is_wave_five_boss_encounter: bool = false
 var _rare_human_warrior_actor_ids := PackedStringArray()
 var _rare_human_warrior_ai: RareHumanWarriorBossAI
 var _goblin_paths: Dictionary = {}
+var _goblin_staging: Dictionary = {} # Navigation intent only; never extra melee reach.
 var _goblin_path_targets: Dictionary = {}
 var _goblin_path_target_actor_ids: Dictionary = {}
 var _goblin_path_reaches: Dictionary = {}
@@ -130,6 +131,7 @@ var _playable_persistence: PlayableCharacterPersistence
 var _entry_bootstrap: Dictionary = {}
 var _entry_dice: Array = []
 var player_movement_boundary_provider: Callable
+var player_speed_profile_refresher: Callable
 var _authorized_entry_write := false
 
 
@@ -289,6 +291,7 @@ func initialize_wave_one_goblins(
 	_encounter_state = ENCOUNTER_RUNNING if start_active else ENCOUNTER_READY
 	_opponent_behavior_status = "goblin_wave_idle" if _opponent_behavior_enabled else "disabled"
 	_goblin_paths.clear()
+	_goblin_staging.clear()
 	_goblin_path_targets.clear()
 	_goblin_path_target_actor_ids.clear()
 	_goblin_path_reaches.clear()
@@ -855,6 +858,16 @@ func get_return_to_wave_one_authorization() -> Dictionary:
 	return {"success":true,"checkpoint":{"profile_id":service.profile_id,"mode":service.mode,"run_id":service.run_id,"wave_id":entry.wave_id,"generation":service.generation}}
 
 
+func get_abandon_run_authorization() -> Dictionary:
+	var service := _playable_persistence
+	if service == null or _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS or _reward_mode != service.mode:
+		return {"success":false,"reason":"persistent_vaelis_required"}
+	if _encounter_active or _encounter_state not in [ENCOUNTER_READY,ENCOUNTER_BETWEEN_WAVE_DOWNTIME]: return {"success":false,"reason":"abandon_requires_safe_loaded_run"}
+	if not service.mutation_guard().success or service.generation < 1 or service.recovery.get("phase") not in ["entry","downtime"]: return {"success":false,"reason":"verified_checkpoint_required"}
+	if service is PlayableBrowserPersistence and service.pending_or_unsecured(): return {"success":false,"reason":"persistent_checkpoint_pending"}
+	return {"success":true,"checkpoint":{"profile_id":service.profile_id,"mode":service.mode,"run_id":service.run_id,"wave_id":service.recovery.wave_id,"generation":service.generation,"intent":"abandon_unfinished_run","head_digest":CharacterProfileProjection.fingerprint(service._prior)}}
+
+
 func finalize_playable_persistence() -> Dictionary:
 	if not _run_reward_policy.is_empty() and not _run_rewards_configured: return _failure("run_reward_policy_not_configured")
 	if _playable_persistence == null: return {"success":true,"persistent":false}
@@ -965,6 +978,7 @@ func reset_encounter(start_active: bool = false) -> Dictionary:
 	_rare_human_warrior_actor_ids = PackedStringArray()
 	_rare_human_warrior_ai = null
 	_goblin_paths.clear()
+	_goblin_staging.clear()
 	_goblin_path_targets.clear()
 	_goblin_path_target_actor_ids.clear()
 	_goblin_path_reaches.clear()
@@ -1109,7 +1123,7 @@ func request_character_advancement(
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
-	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex"]:
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd"]:
 		var prefix := "%s/starter_admission/%s/" % [_playable_persistence.profile_id,_playable_persistence.run_id]
 		var suffix := "/request_"+stable_request_id.sha256_text()
 		for prior: Dictionary in _playable_persistence._prior.get("purchases",[]):
@@ -1118,6 +1132,8 @@ func request_character_advancement(
 		simulation, stable_request_id, purchase_kind, target_id, selection
 	)
 	if result.get("success", false):
+		if purchase_kind == &"attribute" and target_id == &"spd" and player_speed_profile_refresher.is_valid():
+			player_speed_profile_refresher.call(simulation.get_actor_definition(Fixture.PLAYER_ID))
 		if _encounter_state == ENCOUNTER_READY and _playable_persistence != null:
 			# A READY purchase updates the same unfinished entry, never a wave settlement.
 			var authorized := _authorized_entry_write
@@ -1503,6 +1519,7 @@ func configure_battlefield(battlefield: ArenaBattlefield) -> void:
 	_opponent_path.clear()
 	_opponent_path_target_microfeet = null
 	_goblin_paths.clear()
+	_goblin_staging.clear()
 	_goblin_path_targets.clear()
 	_goblin_path_target_actor_ids.clear()
 	_goblin_path_reaches.clear()
@@ -2830,8 +2847,10 @@ func _run_goblin_wave_behavior() -> void:
 				statuses.append("%s:approaching_in_flight" % actor_id)
 				continue
 			var path_result := _ensure_current_goblin_path(goblin_id)
-			statuses.append("%s:%s" % [actor_id, "approaching" if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))])
+			var approach_status := String(path_result.get("reason")) if path_result.get("reason") in ["staging","waiting_for_attack_slot"] else "approaching"
+			statuses.append("%s:%s" % [actor_id, approach_status if path_result.get("success", false) else "approach_blocked_%s" % String(path_result.get("reason", "no_legal_path"))])
 			continue
+		if _goblin_staging.has(actor_id): _invalidate_goblin_path(goblin_id)
 		var attack_result := _request_actor_attack(
 			goblin_id,
 			Fixture.PLAYER_ID,
@@ -3042,6 +3061,8 @@ func _get_wave_enemy_navigation_goal(actor_id: StringName) -> Dictionary:
 
 
 func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
+	var key := String(goblin_id)
+	_goblin_staging.erase(key)
 	var goblin_state := simulation.get_actor_state(goblin_id)
 	var goal := _get_wave_enemy_navigation_goal(goblin_id)
 	var target_id := StringName(goal.get("target_actor_id", ""))
@@ -3056,7 +3077,8 @@ func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
 		reach_microfeet,
 		_actor_occupancy_with_goblin_reservations(goblin_id, target_state.position_microfeet)
 	)
-	var key := String(goblin_id)
+	if path_result.get("reason") == "no_legal_attack_position" and _melee_slots_crowded(goblin_id,target_state.position_microfeet,reach_microfeet):
+		return _build_goblin_staging_path(goblin_id,target_state.position_microfeet,reach_microfeet)
 	var navigation_signature := _goblin_navigation_state_signature(goblin_id, target_state.position_microfeet, reach_microfeet)
 	_goblin_paths[key] = []
 	_goblin_path_targets[key] = target_state.position_microfeet
@@ -3075,6 +3097,7 @@ func _build_goblin_approach_path(goblin_id: StringName) -> Dictionary:
 		_goblin_failed_path_cache[key] = {
 			"signature": navigation_signature,
 			"reason": String(path_result.get("reason", "no_legal_path")),
+			"target":target_state.position_microfeet,"origin":goblin_state.position_microfeet,"retry_round":simulation.clock.get_round_index(),
 		}
 	return path_result
 
@@ -3093,10 +3116,14 @@ func _ensure_current_goblin_path(goblin_id: StringName) -> Dictionary:
 	or int(_goblin_path_reaches.get(key, -1)) != reach_microfeet:
 		_invalidate_goblin_path(goblin_id)
 		return _build_goblin_approach_path(goblin_id)
+	if _goblin_staging.has(key): return _ensure_goblin_staging(goblin_id,target_state.position_microfeet,reach_microfeet)
 	if path.is_empty() or remembered_target == null:
 		var signature := _goblin_navigation_state_signature(goblin_id, target_state.position_microfeet, reach_microfeet)
 		var cached_failure: Dictionary = _goblin_failed_path_cache.get(key, {})
-		if not signature.is_empty() and String(cached_failure.get("signature", "")) == signature:
+		var failure_target: Vector2i = cached_failure.get("target",target_state.position_microfeet)
+		var target_change := target_state.position_microfeet-failure_target
+		var deferred: bool = cached_failure.get("retry_round",-1) == simulation.clock.get_round_index() and cached_failure.get("origin") == simulation.get_actor_state(goblin_id).position_microfeet and target_change.length_squared() < OPPONENT_REPATH_DISTANCE_MICROFEET*OPPONENT_REPATH_DISTANCE_MICROFEET
+		if not signature.is_empty() and (String(cached_failure.get("signature", "")) == signature or deferred):
 			_goblin_failed_path_cache_hits[key] = int(_goblin_failed_path_cache_hits.get(key, 0)) + 1
 			return {
 				"success": false,
@@ -3109,6 +3136,66 @@ func _ensure_current_goblin_path(goblin_id: StringName) -> Dictionary:
 	if target_offset.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET * OPPONENT_REPATH_DISTANCE_MICROFEET:
 		return _build_goblin_approach_path(goblin_id)
 	return {"success": true, "reason": "stable_existing_path"}
+
+
+func _melee_slots_crowded(actor_id: StringName, target: Vector2i, reach: int) -> bool:
+	var state := simulation.get_actor_state(actor_id)
+	if _is_wave_four_gargoyle_encounter or _is_wave_five_boss_encounter or _is_hades_follower(actor_id) or state == null or not state.current_action_instance_id.is_empty(): return false
+	if _get_wave_enemy_navigation_goal(actor_id).get("target_actor_id") != Fixture.PLAYER_ID: return false
+	var static_occupancy := {String(actor_id):state.position_microfeet,"player":target}
+	if _battlefield._legal_attack_position_candidates(actor_id,state.position_microfeet,target,reach,static_occupancy).is_empty(): return false
+	return _battlefield._legal_attack_position_candidates(actor_id,state.position_microfeet,target,reach,_actor_occupancy_with_goblin_reservations(actor_id,target)).is_empty()
+
+
+func _build_goblin_staging_path(actor_id: StringName, target: Vector2i, reach: int) -> Dictionary:
+	var key := String(actor_id)
+	var state := simulation.get_actor_state(actor_id)
+	var stage_reach := reach + 2*_battlefield.actor_radius_microfeet
+	var result := _battlefield.find_path_to_reach_position(actor_id,state.position_microfeet,target,stage_reach,_actor_occupancy_with_goblin_reservations(actor_id,target))
+	var path: Array[Vector2i] = []
+	for point: Vector2i in result.get("waypoints",[]): path.append(point)
+	_goblin_paths[key] = path
+	_goblin_path_targets[key] = target
+	_goblin_path_target_actor_ids[key] = String(Fixture.PLAYER_ID)
+	_goblin_path_reaches[key] = reach
+	_goblin_attack_destinations.erase(key)
+	_goblin_failed_path_cache.erase(key)
+	_goblin_path_rebuild_counts[key] = int(_goblin_path_rebuild_counts.get(key,0))+1
+	_goblin_staging[key] = {"target":target,"reach":stage_reach,"failed":not result.get("success",false),"reason":result.get("reason","no_legal_path"),"retry_round":simulation.clock.get_round_index(),"destination":(state.position_microfeet if path.is_empty() else path[-1]) if result.get("success",false) else null}
+	if not result.get("success",false): return {"success":false,"reason":"staging_"+String(result.get("reason","no_legal_path"))}
+	return {"success":true,"reason":"staging" if not path.is_empty() else "waiting_for_attack_slot"}
+
+
+func _ensure_goblin_staging(actor_id: StringName, target: Vector2i, reach: int) -> Dictionary:
+	var key := String(actor_id)
+	if not _melee_slots_crowded(actor_id,target,reach):
+		_invalidate_goblin_path(actor_id)
+		return _build_goblin_approach_path(actor_id)
+	var stage: Dictionary = _goblin_staging[key]
+	var path: Array = _goblin_paths.get(key,[])
+	var remembered: Vector2i = _goblin_path_targets[key]
+	var offset := target-remembered
+	if not path.is_empty():
+		if offset != Vector2i.ZERO and _retarget_current_goblin_path(actor_id,target,offset,stage.reach).get("success",false): return {"success":true,"reason":"staging"}
+		if offset.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET*OPPONENT_REPATH_DISTANCE_MICROFEET: return _build_goblin_staging_path(actor_id,target,reach)
+		return {"success":true,"reason":"staging"}
+	var changed: Vector2i = target-stage.target
+	# A failed staging search retries at most once per existing combat round;
+	# attack-slot release is checked above on every opportunity, without delay.
+	if changed.length_squared() >= OPPONENT_REPATH_DISTANCE_MICROFEET*OPPONENT_REPATH_DISTANCE_MICROFEET or (stage.failed and simulation.clock.get_round_index() > stage.retry_round):
+		return _build_goblin_staging_path(actor_id,target,reach)
+	_goblin_failed_path_cache_hits[key] = int(_goblin_failed_path_cache_hits.get(key,0))+1
+	if stage.failed: return {"success":false,"reason":"staging_"+String(stage.reason)}
+	return {"success":true,"reason":"waiting_for_attack_slot"}
+
+
+func _wait_goblin_staging(actor_id: StringName) -> void:
+	var key := String(actor_id)
+	_goblin_paths[key] = []
+	_goblin_staging[key].failed = true
+	_goblin_staging[key].reason = "route_obstructed"
+	_goblin_staging[key].retry_round = simulation.clock.get_round_index()
+	_goblin_staging[key].destination = null
 
 
 func _goblin_navigation_state_signature(goblin_id: StringName, target_position: Vector2i, reach_microfeet: int = -1) -> String:
@@ -3142,6 +3229,7 @@ func _goblin_navigation_state_signature(goblin_id: StringName, target_position: 
 
 func _invalidate_goblin_path(goblin_id: StringName) -> void:
 	var key := String(goblin_id)
+	_goblin_staging.erase(key)
 	_goblin_paths[key] = []
 	_goblin_path_targets.erase(key)
 	_goblin_path_target_actor_ids.erase(key)
@@ -3152,6 +3240,7 @@ func _invalidate_goblin_path(goblin_id: StringName) -> void:
 
 func _release_goblin_navigation_state(goblin_id: StringName) -> void:
 	var key := String(goblin_id)
+	_goblin_staging.erase(key)
 	_goblin_paths.erase(key)
 	_goblin_path_targets.erase(key)
 	_goblin_path_target_actor_ids.erase(key)
@@ -3185,13 +3274,21 @@ func _retarget_current_goblin_path(goblin_id: StringName, target_position: Vecto
 	path[-1] = destination
 	_goblin_paths[key] = path
 	_goblin_path_targets[key] = target_position
-	_goblin_path_reaches[key] = effective_reach
-	_goblin_attack_destinations[key] = destination
+	if _goblin_staging.has(key): _goblin_staging[key].destination = destination
+	else:
+		_goblin_path_reaches[key] = effective_reach
+		_goblin_attack_destinations[key] = destination
 	return {"success": true, "reason": "retargeted"}
 
 
 func _actor_occupancy_with_goblin_reservations(mover_id: StringName, target_position: Vector2i) -> Dictionary:
 	var occupancy := _actor_occupancy()
+	for key: String in _goblin_staging:
+		if key == String(mover_id) or not _goblin_staging[key].get("destination") is Vector2i: continue
+		var state := simulation.get_actor_state(StringName(key))
+		if state == null or int(state.current_hpc) <= 0: continue
+		var remembered: Vector2i = _goblin_path_targets.get(key,target_position)
+		occupancy["staging_reservation:"+key] = _goblin_staging[key].destination+target_position-remembered
 	for actor_key: Variant in _goblin_attack_destinations.keys():
 		var other_key := String(actor_key)
 		if String(mover_id) == other_key:
@@ -3258,7 +3355,8 @@ func _advance_goblin_movement(delta_us: int) -> void:
 		var movement_start: Vector2i = goblin_state.position_microfeet
 		var resolved := _battlefield.resolve_motion(goblin_id, movement_start, destination, _actor_occupancy())
 		if not resolved.get("success", false) or int(resolved.get("movement_cost_microfeet", 0)) <= 0:
-			_invalidate_goblin_path(goblin_id)
+			if _goblin_staging.has(actor_id): _wait_goblin_staging(goblin_id)
+			else: _invalidate_goblin_path(goblin_id)
 			continue
 		var collision_limited: bool = bool(resolved.get("blocked", false)) or resolved["position_microfeet"] != destination
 		var static_path_clear := _battlefield.is_direct_path_clear(
@@ -3280,7 +3378,8 @@ func _advance_goblin_movement(delta_us: int) -> void:
 			movement_model.position_feet = Vector2(resolved["position_microfeet"]) / float(MICROFEET_PER_FOOT)
 			if blocked_by_static_geometry:
 				_goblin_static_collision_counts[actor_id] = int(_goblin_static_collision_counts.get(actor_id, 0)) + 1
-				_invalidate_goblin_path(goblin_id)
+				if _goblin_staging.has(actor_id): _wait_goblin_staging(goblin_id)
+				else: _invalidate_goblin_path(goblin_id)
 			elif resolved["position_microfeet"] == waypoint:
 				path.pop_front()
 				_goblin_paths[actor_id] = path
@@ -3966,6 +4065,7 @@ func _record_hades_tactical_decision(
 
 func _initialize_wave_enemy_navigation_state() -> void:
 	_goblin_paths.clear()
+	_goblin_staging.clear()
 	_goblin_path_targets.clear()
 	_goblin_path_target_actor_ids.clear()
 	_goblin_path_reaches.clear()

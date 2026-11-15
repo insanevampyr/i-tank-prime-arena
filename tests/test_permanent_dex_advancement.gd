@@ -85,6 +85,13 @@ func persistent() -> void:
 	helper._free(scene)
 	scene = helper._scene(); c = scene.get_node("CombatController")
 	check(c._open_legacy_profile().success and c._session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY,"Existing fixture loads READY.")
+	check(not c._loaded_run_choice.is_empty() and c._run_choice_dialog.visible,"An unfinished DEX fixture requires the approved Resume/New Run decision.")
+	var before_resume := c._session.get_state_snapshot()
+	var saved_before_resume: String = storage.read_profile("dev_vaelis_thorn").document
+	c._on_purchase_advancement_pressed()
+	check(c._session.get_state_snapshot() == before_resume and storage.read_profile("dev_vaelis_thorn").document == saved_before_resume,"Pending run selection blocks purchase without mutation or publication.")
+	c._run_choice_dialog.get_ok_button().pressed.emit()
+	check(c._loaded_run_choice.is_empty() and storage.read_profile("dev_vaelis_thorn").document == saved_before_resume,"Explicit RESUME permits management without changing saved history.")
 	c._on_inventory_toggle_pressed()
 	c._update_rewards_panel(true)
 	var chosen := -1
@@ -107,6 +114,7 @@ func persistent() -> void:
 		helper._free(scene); scene = helper._scene(); c = scene.get_node("CombatController")
 		check(c._open_legacy_profile().success,"Paid DEX reloads through existing-only admission.")
 		check(c._session._playable_persistence._prior == expected and c._session.simulation.get_actor_definition(&"player").attributes.dex == 10,"Reload preserves exact progression and allocations.")
+		c._run_choice_dialog.get_ok_button().pressed.emit()
 		check(c._session.request_character_advancement(&"attribute",&"dex",request,selection(10,"dt")).get("reason") == "duplicate_advancement_request","Original request cannot spend again after reload.")
 		var changed := expected.duplicate(true)
 		changed.purchases.back().allocation = "dt"

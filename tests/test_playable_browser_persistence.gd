@@ -206,6 +206,8 @@ func run() -> Array[String]:
 	for index in range(7): c._encounter_selector.pressed.emit()
 	pump(c)
 	check(c._encounter_selector_index == 0 and c._session.get_reward_mode() == "normal", "Selector wraps from TEST to NORMAL without a legacy entry.")
+	check(not c._loaded_run_choice.is_empty(),"Returning to an existing unfinished NORMAL run requires a Resume/New Run decision.")
+	c._run_choice_dialog.get_ok_button().pressed.emit()
 	# Seed an explicitly targeted disposable legacy fixture; live access is existing-only.
 	c._profile_namespace = ArenaRewardLedger.MODE_DEV_NORMAL
 	c._select_player_character(Fixture.PLAYER_CHARACTER_VAELIS, ArenaRewardLedger.resolve_run_policy("dev_normal", 1)); pump(c)
@@ -303,6 +305,7 @@ func pump(c: ArenaCombatController, confirm: bool = true) -> void:
 			c._web_creation_dialog.get_ok_button().pressed.emit()
 		if c._web_operation.get("phase") == "failed": return
 		if c._session._playable_persistence is PlayableBrowserPersistence and c._session._playable_persistence._browser_result.get("state") in ["failed","unavailable","recovery_required"]: return
+		if not c._loaded_run_choice.is_empty() and c._web_operation.is_empty() and not c._session._playable_persistence.pending_or_unsecured(): return # I/O settled; an explicit UI decision is pending.
 		if not c._browser_transition_blocked(): return
 	check(false,"Asynchronous test boundary did not settle: %s" % c._web_operation)
 

@@ -167,9 +167,10 @@ func _on_action(action: StringName) -> void:
 	_namespace = ArenaRewardLedger.MODE_DEV_NORMAL if action == &"legacy_preview" else _controller._session.get_reward_mode()
 	_legacy_preview_session = _controller._session if action == &"legacy_preview" else null
 	if action == &"export":
+		_show("Preparing your character save. No character data is being changed.")
 		_export_service = _controller._session._playable_persistence
 		_reader = Reader.new()
-		_accept(_reader.begin_export(_export_service))
+		_accept(_reader.begin_export(_export_service,true))
 	elif action in [&"preview", &"legacy_preview"]:
 		_export.clear()
 		_preview_source = ""
@@ -181,7 +182,7 @@ func _on_action(action: StringName) -> void:
 			if _bridge == null:
 				_show_result(Backup.fail("browser_file_transfer_unavailable"))
 				return
-			_selecting = bool(_bridge.choose(Backup.MAX_BYTES))
+			_selecting = bool(_bridge.choose(Backup.MAX_FILE_BYTES))
 			_show("Select a character save file. The preview is read-only; your character will not change until you confirm loading.")
 		else:
 			_picker.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -252,7 +253,8 @@ func preview_text(text: String) -> void:
 	var service := _destination_service()
 	var browser: CharacterBrowserStorage = service.browser if service is PlayableBrowserPersistence else null
 	var storage: CharacterSaveStorage = service.storage if service != null else null
-	_accept(_reader.begin_preview(text,_namespace,storage,browser))
+	_show("Checking your character file. This preview is read-only.")
+	_accept(_reader.begin_preview(text,_namespace,storage,browser,true))
 
 func _preview_target_is_current() -> bool:
 	if _legacy_preview_session != null:
@@ -265,7 +267,8 @@ func _destination_service() -> PlayableCharacterPersistence:
 
 func _accept(result: Dictionary) -> void:
 	if result.get("state") == "pending":
-		_show("Checking your saved character. No character data is being changed.")
+		var progress := " · %s / %s" % [result.progress,result.total] if result.get("total",0) > 0 else ""
+		_show("%s%s\nPlease wait. No character data is being changed. CANCEL stops this read-only operation." % [result.get("stage","Checking your saved character"),progress])
 		return
 	last_result = result.duplicate(true)
 	if not result.get("success",false):
@@ -365,7 +368,7 @@ func _show(text: String) -> void:
 	_dialog.dialog_text = text
 	if not _dialog.visible: _dialog.popup_centered_clamped(Vector2i(720,380),0.9)
 
-func _close() -> void:
+func _close(offer_run_choice: bool = true) -> void:
 	if restoration_blocked:
 		if _restorer != null and _restorer.status.state != "pending" and not _restorer.uncertain: _cancel_restore()
 		else: _show("The load result must be checked before closing. Use CHECK SAVE RESULT.")
@@ -373,6 +376,7 @@ func _close() -> void:
 	if _bridge != null: _bridge.cancel()
 	_selecting = false
 	if _reader != null:
+		_reader.cancel_read_only()
 		if _reader._result.get("state") == "pending": _draining.append(_reader)
 		else: _reader.dispose()
 	_reader = null
@@ -382,6 +386,8 @@ func _close() -> void:
 	if _restore_button != null: _restore_button.hide()
 	_preview_source = ""
 	_legacy_preview_session = null
+	_dialog.hide()
+	if offer_run_choice: _controller._offer_loaded_run_choice()
 
 func _confirm_restore() -> void:
 	if _restorer == null: return
@@ -444,6 +450,6 @@ func _exit_tree() -> void:
 	if _restorer != null: _restorer.dispose()
 	_restorer = null
 	restoration_blocked = false
-	_close()
+	_close(false)
 	for reader: CharacterBackupReader in _draining: reader.dispose()
 	_draining.clear()

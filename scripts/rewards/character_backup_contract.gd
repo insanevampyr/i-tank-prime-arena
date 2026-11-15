@@ -3,7 +3,17 @@ extends RefCounted
 
 const FORMAT := "itank_arena_character_backup"
 const VERSION := 1
-const MAX_BYTES := 16 * 1024 * 1024
+const MAX_GENERATION_BYTES := 16 * 1024 * 1024
+# Complete history gets 2x the former budget (the audited g168 was 16,315,722
+# bytes). A valid JSON document can at most double when quoted as a JSON string:
+# quotes, backslashes and legal whitespace controls each become two bytes.
+const MAX_HISTORY_BYTES := 32 * 1024 * 1024
+# 4096 rows, each with a <=64-character ASCII transaction ID, plus the fixed
+# source-verified manifest fit below 1 MiB, independently of document contents.
+const MAX_MANIFEST_BYTES := 1024 * 1024
+const MAX_BODY_BYTES := 2 * MAX_HISTORY_BYTES + MAX_MANIFEST_BYTES
+# The canonical body is quoted once more; fixed outer fields need <1 KiB.
+const MAX_FILE_BYTES := 2 * MAX_BODY_BYTES + 1024
 const MAX_DEPTH := 64
 const MAX_TOKENS := 500000
 const MAX_GENERATIONS := 4096
@@ -29,14 +39,23 @@ static func create(history: Dictionary, save_namespace: String, created_utc: Str
 
 static func decode(text: String, expected_namespace: String) -> Dictionary:
 	if expected_namespace not in ["normal","dev_normal"]: return fail("unsupported_namespace")
-	var scan := scan_json(text)
+	var scan := scan_json(text,MAX_FILE_BYTES)
 	if not scan.success: return scan
 	var outer: Variant = JSON.parse_string(text)
+	if not outer is Dictionary or not outer.get("body_json") is String: return fail("invalid_backup_container")
+	scan = scan_json(outer.body_json,MAX_BODY_BYTES)
+	if not scan.success: return scan
+	var parsed := _parse_scanned_manifest(outer,expected_namespace)
+	if not parsed.success: return parsed
+	var checked := validate_history({"success":true,"generations":parsed.manifest.generations},expected_namespace)
+	if not checked.success: return checked
+	return _finish_manifest(parsed.manifest,checked,outer.sha256)
+
+# Internal phase boundary: callers have already lexically checked both strings.
+static func _parse_scanned_manifest(outer: Dictionary, expected_namespace: String) -> Dictionary:
 	if not outer is Dictionary or not keys(outer,["format","backup_version","body_json","sha256"]): return fail("invalid_backup_container")
 	if outer.format != FORMAT or outer.backup_version != VERSION: return fail("unsupported_backup_version")
 	if not outer.body_json is String or not outer.sha256 is String or outer.body_json.sha256_text() != outer.sha256: return fail("backup_checksum_mismatch")
-	scan = scan_json(outer.body_json)
-	if not scan.success: return scan
 	var body: Variant = Contract._normalize_json_numbers(JSON.parse_string(outer.body_json))
 	var fields := ["profile_id","namespace","definition_id","rules_revision","created_utc","head_generation","head_transaction_id","generations"]
 	if not body is Dictionary or not keys(body,fields): return fail("invalid_backup_manifest")
@@ -46,71 +65,99 @@ static func decode(text: String, expected_namespace: String) -> Dictionary:
 	if not body.generations is Array: return fail("invalid_generation_record")
 	for row: Variant in body.generations:
 		if not row is Dictionary or not keys(row,["generation","transaction_id","document"]): return fail("invalid_generation_record")
-	var checked := validate_history({"success":true,"generations":body.generations,"writer_locked":false,"pending_write":false},expected_namespace)
-	if not checked.success: return checked
+	return {"success":true,"manifest":body}
+
+static func _finish_manifest(body: Dictionary, checked: Dictionary, digest: String) -> Dictionary:
 	var payload: Dictionary = checked.payload
 	var head: Dictionary = checked.records.back()
 	if body.profile_id != payload.character_id or body.definition_id != payload.definition_id or body.rules_revision != payload.rules_revision or body.head_generation != head.generation or body.head_transaction_id != head.transaction_id: return fail("backup_manifest_head_mismatch")
-	return {"success":true,"manifest":body,"history":checked.records,"payload":payload,"preview":preview(payload,body.created_utc),"backup_digest":outer.sha256}
+	return {"success":true,"manifest":body,"history":checked.records,"payload":payload,"preview":preview(payload,body.created_utc),"backup_digest":digest}
 
-static func validate_history(history: Dictionary, save_namespace: String) -> Dictionary:
+static func begin_history_validation(history: Dictionary, save_namespace: String) -> Dictionary:
 	if save_namespace not in ["normal","dev_normal"]: return fail("unsupported_namespace")
 	if not history.get("success",false) or history.get("writer_locked",false) or history.get("pending_write",false): return fail("destination_corrupt_or_uncertain")
 	var rows: Variant = history.get("generations")
 	if not rows is Array or rows.is_empty() or rows.size() > MAX_GENERATIONS: return fail("invalid_or_oversized_generation_history")
 	var starter := Admission.prepare_starter(&"vaelis_thorn",save_namespace)
 	if not starter.success: return fail(starter.get("reason","source_unavailable"))
-	var transactions := {}
-	var records: Array = []
-	var previous := {}
-	var total := 0
-	for index in range(rows.size()):
-		var row: Variant = rows[index]
-		if not row is Dictionary or not row.get("document") is String or not row.get("transaction_id") is String or not CharacterSaveStorage._valid_id(row.transaction_id): return fail("invalid_generation_record")
-		total += row.document.to_utf8_buffer().size()
-		if total > MAX_BYTES: return fail("backup_size_limit")
-		var scan := scan_json(row.document)
-		if not scan.success: return scan
-		var envelope: Variant = JSON.parse_string(row.document)
-		if not envelope is Dictionary or not envelope.get("payload_json") is String: return fail("invalid_character_document")
-		scan = scan_json(envelope.payload_json)
-		if not scan.success: return scan
-		var decoded := Contract.decode(row.document)
-		if not decoded.success: return fail(decoded.get("reason","invalid_character_document"))
-		if decoded.get("version") not in [Contract.PROFILE_VERSION, Contract.RUN_REWARD_PROFILE_VERSION]: return fail("unsupported_character_version")
-		var payload: Dictionary = decoded.payload
-		if index == 0:
-			var baseline := String(payload.get("lineage",{}).get("baseline_digest",""))
-			if baseline.is_empty(): return fail("profile_baseline_missing")
-			starter = Admission.prepare_starter(&"vaelis_thorn",save_namespace,baseline)
-			if not starter.success: return fail(starter.get("reason","unsupported_authored_baseline"))
-		if payload.generation != index+1 or row.get("generation",payload.generation) != payload.generation: return fail("generation_gap")
-		if transactions.has(row.transaction_id): return fail("duplicate_transaction")
-		transactions[row.transaction_id] = true
-		if payload.character_id != starter.profile_id or payload.get("profile_namespace") != save_namespace or payload.definition_id != String(starter.source.definition_id) or payload.rules_revision != Admission.RULES or payload.get("lineage") != starter.prepared.payload.lineage: return fail("profile_source_or_namespace_mismatch")
-		if not payload.has_all(["recovery","equipment_state","run_history"]): return fail("playable_checkpoint_required")
-		var prepared := Coordinator.prepare(payload,payload.get("settlements",[]),row.transaction_id,index,previous.get("secured_checkpoints",[]))
-		if not prepared.success: return fail(prepared.get("reason","invalid_receipts"))
-		# Approved unsigned local-file policy: bind ONLY this isolated candidate
-		# to the independently verified authored lineage. This is not a signature.
-		var binding := Profiles.fingerprint(payload)
-		var lineage: Dictionary = starter.prepared.payload.lineage.duplicate(true)
-		var verifier := func(operation: String, requested: String) -> Dictionary:
-			return {"authorized":operation == "hydrate" and requested == binding,"binding":requested,"lineage":lineage}
-		var hydrated := Profiles.hydrate(payload,starter.source,starter.profile_id,Admission.RULES,verifier)
-		if not hydrated.success: return fail(hydrated.get("reason","invalid_character"))
-		if not previous.is_empty():
-			for result: Dictionary in [Contract.validate_replacement(previous,payload),Coordinator._validate_continuity(previous,payload)]:
-				if not result.success: return fail(result.get("reason","history_conflict"))
-		var items := Coordinator._validate_new_items(previous,payload)
-		if not items.success: return fail(items.get("reason","invalid_item_ownership"))
-		var battlefield := ArenaBattlefield.create_task16_test_arena()
-		if payload.recovery.battlefield_digest != Profiles.fingerprint(battlefield.to_dictionary()): return fail("checkpoint_battlefield_mismatch")
-		var position: Array = payload.recovery.player_position
-		if not battlefield.is_position_legal(&"player",Vector2i(position[0],position[1]),{}).legal: return fail("checkpoint_position_illegal")
-		records.append({"generation":int(payload.generation),"transaction_id":row.transaction_id,"document":row.document})
-		previous = payload
-	return {"success":true,"records":records,"payload":previous}
+	var frozen: Array = []
+	for row: Variant in rows:
+		if not row is Dictionary: return fail("invalid_generation_record")
+		var copy := {"document":row.get("document"),"transaction_id":row.get("transaction_id")}
+		if row.has("generation"): copy["generation"] = row.generation
+		frozen.append(copy)
+	return {"success":true,"state":"pending","rows":frozen,"namespace":save_namespace,"starter":starter,"transactions":{},"records":[],"previous":{},"total":0,"cursor":0}
+
+static func _validate_history_row(job: Dictionary, row: Variant, index: int) -> Dictionary:
+	var save_namespace: String = job.namespace
+	var starter: Dictionary = job.starter
+	var transactions: Dictionary = job.transactions
+	var records: Array = job.records
+	var previous: Dictionary = job.previous
+	var total: int = job.total
+	if not row is Dictionary or not row.get("document") is String or not row.get("transaction_id") is String or not CharacterSaveStorage._valid_id(row.transaction_id): return fail("invalid_generation_record")
+	total += row.document.to_utf8_buffer().size()
+	if not check_size(total,MAX_HISTORY_BYTES).success: return fail("backup_size_limit")
+	var scan := scan_json(row.document)
+	if not scan.success: return scan
+	var envelope: Variant = JSON.parse_string(row.document)
+	if not envelope is Dictionary or not envelope.get("payload_json") is String: return fail("invalid_character_document")
+	scan = scan_json(envelope.payload_json)
+	if not scan.success: return scan
+	var decoded := Contract.decode(row.document)
+	if not decoded.success: return fail(decoded.get("reason","invalid_character_document"))
+	if decoded.get("version") not in [Contract.PROFILE_VERSION, Contract.RUN_REWARD_PROFILE_VERSION, Contract.EXPC_CREDIT_PROFILE_VERSION]: return fail("unsupported_character_version")
+	var payload: Dictionary = decoded.payload
+	if index == 0:
+		var baseline := String(payload.get("lineage",{}).get("baseline_digest",""))
+		if baseline.is_empty(): return fail("profile_baseline_missing")
+		starter = Admission.prepare_starter(&"vaelis_thorn",save_namespace,baseline)
+		if not starter.success: return fail(starter.get("reason","unsupported_authored_baseline"))
+	if payload.generation != index+1 or row.get("generation",payload.generation) != payload.generation: return fail("generation_gap")
+	if transactions.has(row.transaction_id): return fail("duplicate_transaction")
+	transactions[row.transaction_id] = true
+	if payload.character_id != starter.profile_id or payload.get("profile_namespace") != save_namespace or payload.definition_id != String(starter.source.definition_id) or payload.rules_revision != Admission.RULES or payload.get("lineage") != starter.prepared.payload.lineage: return fail("profile_source_or_namespace_mismatch")
+	if not payload.has_all(["recovery","equipment_state","run_history"]): return fail("playable_checkpoint_required")
+	var prepared := Coordinator.prepare(payload,payload.get("settlements",[]),row.transaction_id,index,previous.get("secured_checkpoints",[]))
+	if not prepared.success: return fail(prepared.get("reason","invalid_receipts"))
+	# Approved unsigned local-file policy: bind ONLY this isolated candidate
+	# to the independently verified authored lineage. This is not a signature.
+	var binding := Profiles.fingerprint(payload)
+	var lineage: Dictionary = starter.prepared.payload.lineage.duplicate(true)
+	var verifier := func(operation: String, requested: String) -> Dictionary:
+		return {"authorized":operation == "hydrate" and requested == binding,"binding":requested,"lineage":lineage}
+	var hydrated := Profiles.hydrate(payload,starter.source,starter.profile_id,Admission.RULES,verifier)
+	if not hydrated.success: return fail(hydrated.get("reason","invalid_character"))
+	if not previous.is_empty():
+		for result: Dictionary in [Contract.validate_replacement(previous,payload),Coordinator._validate_continuity(previous,payload)]:
+			if not result.success: return fail(result.get("reason","history_conflict"))
+	var items := Coordinator._validate_new_items(previous,payload)
+	if not items.success: return fail(items.get("reason","invalid_item_ownership"))
+	var battlefield := ArenaBattlefield.create_task16_test_arena()
+	if payload.recovery.battlefield_digest != Profiles.fingerprint(battlefield.to_dictionary()): return fail("checkpoint_battlefield_mismatch")
+	var position: Array = payload.recovery.player_position
+	if not battlefield.is_position_legal(&"player",Vector2i(position[0],position[1]),{}).legal: return fail("checkpoint_position_illegal")
+	records.append({"generation":int(payload.generation),"transaction_id":row.transaction_id,"document":row.document})
+	job.previous = payload
+	job.starter = starter
+	job.total = total
+	return {"success":true}
+
+static func step_history_validation(job: Dictionary) -> Dictionary:
+	if not job.get("success",false): return job
+	var result := _validate_history_row(job,job.rows[job.cursor],job.cursor)
+	if not result.success: return result
+	job.cursor += 1
+	if job.cursor == job.rows.size(): return {"success":true,"records":job.records,"payload":job.previous}
+	return {"success":false,"state":"pending","stage":"Validating history","progress":job.cursor,"total":job.rows.size()}
+
+static func validate_history(history: Dictionary, save_namespace: String) -> Dictionary:
+	var job := begin_history_validation(history,save_namespace)
+	if not job.success: return job
+	while true:
+		var result := step_history_validation(job)
+		if result.get("state") != "pending": return result
+	return fail("invalid_generation_history")
 
 static func compare(backup: Dictionary, destination: Dictionary, save_namespace: String) -> String:
 	if not backup.get("success",false) or backup.manifest.namespace != save_namespace: return "unsupported_namespace_or_version"
@@ -168,39 +215,66 @@ static func valid_date(value: Variant) -> bool:
 
 # Bounded lexical precheck also rejects duplicate keys (including escaped aliases)
 # before Godot's JSON parser could silently keep only their final value.
-static func scan_json(text: String) -> Dictionary:
-	if text.to_utf8_buffer().size() > MAX_BYTES: return fail("backup_size_limit")
+static func check_size(byte_count: int, limit: int) -> Dictionary:
+	return {"success":true} if byte_count >= 0 and byte_count <= limit else fail("backup_size_limit")
+
+class JsonScan extends RefCounted:
+	var text: String
+	var cursor := 0
 	var stack: Array = []
 	var tokens := 0
-	var index := 0
-	while index < text.length():
-		var ch := text[index]
-		if ch == '"':
-			var begin := index
-			index += 1
-			while index < text.length() and text[index] != '"':
-				if text[index] == "\\": index += 1
-				index += 1
-			if index >= text.length(): return fail("truncated_json")
-			if not stack.is_empty() and stack.back().object and stack.back().key:
-				var key: Variant = JSON.parse_string(text.substr(begin,index-begin+1))
-				if not key is String: return fail("invalid_json_key")
-				if stack.back().seen.has(key): return fail("duplicate_json_key")
-				stack.back().seen[key] = true
-				stack.back().key = false
-		elif ch in ["{","["]:
-			stack.append({"object":ch == "{","key":true,"seen":{}})
-			if stack.size() > MAX_DEPTH: return fail("backup_depth_limit")
-		elif ch in ["}","]"]:
-			if stack.is_empty(): return fail("invalid_json_nesting")
-			stack.pop_back()
-		elif ch == "," and not stack.is_empty(): stack.back().key = true
-		if ch in ["{","[","}","]",",",":"]:
-			tokens += 1
-			if tokens > MAX_TOKENS: return fail("backup_structure_limit")
-		index += 1
-	if not stack.is_empty(): return fail("truncated_json")
-	return {"success":true}
+	var in_string := false
+	var escaped := false
+	var key_string := false
+	var string_start := 0
+	var result := {"success":false,"state":"pending"}
+	func _init(value: String, limit: int) -> void:
+		text = value
+		if not CharacterBackupContract.check_size(text.to_utf8_buffer().size(),limit).success: result = CharacterBackupContract.fail("backup_size_limit")
+	func step(budget: int = 32768) -> Dictionary:
+		if result.get("state") != "pending": return result
+		var stop := mini(text.length(),cursor+maxi(1,budget))
+		while cursor < stop:
+			var ch := text[cursor]
+			if in_string:
+				if escaped: escaped = false
+				elif ch == "\\": escaped = true
+				elif ch == '"':
+					in_string = false
+					if key_string:
+						var key: Variant = JSON.parse_string(text.substr(string_start,cursor-string_start+1))
+						if not key is String: return finish("invalid_json_key")
+						if stack.back().seen.has(key): return finish("duplicate_json_key")
+						stack.back().seen[key] = true
+						stack.back().key = false
+			elif ch == '"':
+				in_string = true
+				string_start = cursor
+				key_string = not stack.is_empty() and stack.back().object and stack.back().key
+			else:
+				if ch in ["{","["]:
+					stack.append({"object":ch == "{","key":true,"seen":{}})
+					if stack.size() > CharacterBackupContract.MAX_DEPTH: return finish("backup_depth_limit")
+				elif ch in ["}","]"]:
+					if stack.is_empty(): return finish("invalid_json_nesting")
+					stack.pop_back()
+				elif ch == "," and not stack.is_empty(): stack.back().key = true
+				if ch in ["{","[","}","]",",",":"]:
+					tokens += 1
+					if tokens > CharacterBackupContract.MAX_TOKENS: return finish("backup_structure_limit")
+			cursor += 1
+		if cursor == text.length():
+			if in_string or not stack.is_empty(): return finish("truncated_json")
+			result = {"success":true}
+		return result
+	func finish(reason: String) -> Dictionary:
+		result = CharacterBackupContract.fail(reason)
+		return result
+
+static func scan_json(text: String, max_bytes: int = MAX_GENERATION_BYTES) -> Dictionary:
+	var scan := JsonScan.new(text,max_bytes)
+	while scan.result.get("state") == "pending": scan.step()
+	return scan.result
 
 static func keys(value: Dictionary, expected: Array) -> bool:
 	return value.size() == expected.size() and value.has_all(expected)

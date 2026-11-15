@@ -7,6 +7,7 @@ const PlayableTests = preload("res://tests/test_playable_vaelis_persistence.gd")
 const BrowserTests = preload("res://tests/test_playable_browser_persistence.gd")
 const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 var failures: Array[String] = []
+var assertions := 0
 
 class SpyStorage extends CharacterSaveStorage:
 	var writes := 0
@@ -64,6 +65,8 @@ func run() -> Array[String]:
 		var controls := c._rewards_label.get_parent().get_node("CharacterBackupControls")
 		check(controls.is_visible_in_tree() and controls.get_node("ExportBackup").is_visible_in_tree() and controls.get_node("PreviewRestoreBackup").is_visible_in_tree(),"Actual downtime panel must expose both backup buttons outside collapsed sections.")
 		controls.get_node("ExportBackup").pressed.emit()
+		check(c._backup_actions._reader._result.get("state") == "pending" and c._backup_actions._dialog.visible,"SAVE immediately exposes a visible busy state before processing history.")
+		settle(c)
 		check(c._backup_actions.last_result.get("state") == "export_ready" and c._backup_actions._dialog.visible,"Visible SAVE CHARACTER button must open the existing verified export path.")
 		check(c._backup_actions._download_button.text == "SAVE FILE" and c._backup_actions._dialog.dialog_text.contains("to your computer"),"Prepared file must clearly explain the final disk/download action.")
 		c._backup_actions._dialog.hide()
@@ -87,6 +90,8 @@ func run() -> Array[String]:
 			var readback := Files.read_file(output)
 			check(readback.success and readback.text == exported.text,"Desktop file selection/readback is exact.")
 			_test_contract(exported,history)
+			_test_size_limits(root)
+			_test_large_history(exported,root)
 			var preview := Reader.new().begin_preview(readback.text,"dev_normal",storage)
 			check(preview.get("success",false) and preview.classification == "exact_match" and preview.read_only,"Desktop preview compares without restoration.")
 			c._backup_actions._picker.use_native_dialog = false # Headless file dialog; real file_selected signal still routes through production code.
@@ -95,6 +100,7 @@ func run() -> Array[String]:
 			check(c._backup_actions._picker.file_mode == FileDialog.FILE_MODE_OPEN_FILE and c._backup_actions._picker.title == "Select Save File" and c._backup_actions._picker.visible,"LOAD CHARACTER must invoke the existing file picker.")
 			c._backup_actions._picker.hide()
 			c._backup_actions._picker.file_selected.emit(output)
+			settle(c)
 			check(c._backup_actions.last_result.get("classification") == "exact_match" and c._backup_actions._dialog.dialog_text.contains("READ ONLY") and c._backup_actions._dialog.dialog_text.contains("separate confirmation"),"Selected file must produce a clear read-only preview through the existing file handler.")
 			check(c._backup_actions._restore_button.text == "CONFIRM LOAD","Compatible preview must retain a separately confirmed load action.")
 			c._backup_actions._picker.canceled.emit()
@@ -150,7 +156,7 @@ func _test_contract(exported: Dictionary, history: Dictionary) -> void:
 		check(not Backup.decode(bad,"dev_normal").success,"Truncated, malformed, future and tampered containers must be rejected.")
 	check(not Backup.decode('{"format":"x","format":"y"}',"dev_normal").success,"Duplicate JSON keys must not be silently accepted.")
 	check(not Backup.scan_json("[".repeat(65)+"]".repeat(65)).success,"Depth limit must precede parsing.")
-	check(not Backup.scan_json(" ".repeat(Backup.MAX_BYTES+1)).success,"Size limit must fail explicitly.")
+	check(not Backup.scan_json(" ".repeat(Backup.MAX_GENERATION_BYTES+1)).success,"Size limit must fail explicitly.")
 	check(not Backup.valid_date("2026-02-31T00:00:00Z"),"Invalid informational dates are rejected.")
 	var duplicate: Dictionary = exported.manifest.duplicate(true)
 	duplicate.generations[1].transaction_id = duplicate.generations[0].transaction_id
@@ -234,4 +240,112 @@ func pack(body: Dictionary) -> String:
 	return JSON.stringify({"format":Backup.FORMAT,"backup_version":1,"body_json":json,"sha256":json.sha256_text()},"",true,true)
 
 func check(ok: bool, message: String) -> void:
+	assertions += 1
 	if not ok: failures.append(message)
+
+func settle(c: ArenaCombatController) -> void:
+	for _i in range(10000):
+		c._backup_actions._process(0.0)
+		c._physics_process(0.0)
+		if c._backup_actions._reader == null or c._backup_actions._reader._result.get("state") != "pending": return
+	check(false,"Bounded backup processing must settle.")
+
+func _test_size_limits(root: String) -> void:
+	var before := assertions
+	check(Backup.MAX_GENERATION_BYTES == 16*1024*1024 and Backup.MAX_HISTORY_BYTES == 32*1024*1024,"Per-generation protection stays 16 MiB; complete history has an explicit 32 MiB budget.")
+	check(Backup.MAX_BODY_BYTES == 2*Backup.MAX_HISTORY_BYTES+1024*1024 and Backup.MAX_FILE_BYTES == 2*Backup.MAX_BODY_BYTES+1024,"Encoded budgets include both escaping layers and bounded manifest/container overhead.")
+	for limit: int in [Backup.MAX_GENERATION_BYTES,Backup.MAX_HISTORY_BYTES,Backup.MAX_BODY_BYTES,Backup.MAX_FILE_BYTES]:
+		check(Backup.check_size(limit-1,limit).success and Backup.check_size(limit,limit).success,"Exact byte limit is inclusive: %s" % limit)
+		check(Backup.check_size(limit+1,limit).get("reason") == "backup_size_limit","One byte over each distinct budget is rejected: %s" % limit)
+	check(not Backup.check_size(-1,Backup.MAX_FILE_BYTES).success,"Invalid byte counts fail closed.")
+	check(Backup.validate_history({"success":true,"generations":[{"transaction_id":"oversized","document":" ".repeat(Backup.MAX_GENERATION_BYTES+1)}]},"dev_normal").get("reason") == "backup_size_limit","An oversized individual generation is rejected even under the larger combined-history budget.")
+	var utf8 := JSON.stringify("é🙂")
+	var utf8_bytes := utf8.to_utf8_buffer().size()
+	check(Backup.scan_json(utf8,utf8_bytes).success and not Backup.scan_json(utf8,utf8_bytes-1).success,"Limits count UTF-8 bytes, not Unicode character count.")
+	var escaped := JSON.stringify("\\\"\n\t".repeat(2048))
+	var quoted := JSON.stringify(escaped)
+	check(quoted.to_utf8_buffer().size() <= 2*escaped.to_utf8_buffer().size()+2 and Backup.scan_json(quoted,Backup.MAX_BODY_BYTES).success,"Heavy quoting/backslash/control escaping obeys the derived valid-JSON string bound.")
+	check(not Backup.scan_json('{"a":1,"\\u0061":2}',Backup.MAX_FILE_BYTES).success,"Larger file budget preserves escaped duplicate-key rejection.")
+	check(not Backup.scan_json("[".repeat(65)+"]".repeat(65),Backup.MAX_FILE_BYTES).success,"Depth protection remains independent of file size.")
+	check(Backup.scan_json("["+"0,".repeat(Backup.MAX_TOKENS)+"0]",Backup.MAX_FILE_BYTES).get("reason") == "backup_structure_limit","Token protection remains independent of file size.")
+	# Sparse disposable input proves the Desktop file gate runs before allocation.
+	var oversized := root.path_join("oversized.itankbackup.json")
+	var file := FileAccess.open(oversized,FileAccess.WRITE)
+	check(file != null,"Disposable oversized-file fixture opens.")
+	if file != null:
+		file.seek(Backup.MAX_FILE_BYTES)
+		file.store_8(32)
+		file.close()
+		check(Files.read_file(oversized).get("reason") == "backup_size_limit","Desktop rejects an oversized file before reading its content.")
+		DirAccess.remove_absolute(oversized)
+	var actions_source := FileAccess.get_file_as_string("res://scripts/ui/character_backup_actions.gd")
+	check(actions_source.contains("_bridge.choose(Backup.MAX_FILE_BYTES)"),"Web file selection receives the same encoded-file cap as Desktop.")
+	print("43C size boundaries: %d assertions." % (assertions-before))
+
+func _test_large_history(exported: Dictionary, root: String) -> void:
+	var before := assertions
+	var history := {"success":true,"generations":exported.history.duplicate(true)}
+	# Independent disposable regression: real source-verified progression/receipts
+	# from this suite, followed by unchanged safe snapshots with new generations.
+	# Legal JSON whitespace recreates the measured g168 raw-history byte count
+	# without accessing or fabricating a copy of the owner's character data.
+	var payload: Dictionary = exported.payload.duplicate(true)
+	while history.generations.size() < 168:
+		payload.generation = history.generations.size()+1
+		history.generations.append({"generation":payload.generation,"transaction_id":"size_fixture_%s" % payload.generation,"document":CharacterSaveContract.encode(payload).text})
+	var raw_bytes := 0
+	for row: Dictionary in history.generations: raw_bytes += row.document.to_utf8_buffer().size()
+	const AUDITED_RAW_BYTES := 16_315_722
+	check(raw_bytes < AUDITED_RAW_BYTES,"Independent fixture fits below the measured historical raw size before whitespace stress.")
+	if raw_bytes >= AUDITED_RAW_BYTES: return
+	for index in range(history.generations.size()):
+		var padding: int = (AUDITED_RAW_BYTES-raw_bytes) / (history.generations.size()-index)
+		var tabs := mini(256,padding)
+		history.generations[index].document += "\t".repeat(tabs)+" ".repeat(padding-tabs)
+		raw_bytes += padding
+	var fixture_before := history.duplicate(true)
+	var legacy_body: Dictionary = exported.manifest.duplicate(true)
+	legacy_body.generations = history.generations
+	legacy_body.head_generation = 168
+	legacy_body.head_transaction_id = history.generations.back().transaction_id
+	legacy_body.created_utc = "2026-11-14T00:00:00Z"
+	var legacy_text := pack(legacy_body)
+	check(raw_bytes == AUDITED_RAW_BYTES and raw_bytes < Backup.MAX_GENERATION_BYTES,"Reproduce g168's aggregate document size below the former shared 16 MiB budget.")
+	check(legacy_text.to_utf8_buffer().size() > Backup.MAX_GENERATION_BYTES and Backup.scan_json(legacy_text,16*1024*1024).get("reason") == "backup_size_limit","Original shared-cap self-validation rejects this complete 168-generation container.")
+	var result := Backup.create(history,"dev_normal","2026-11-14T00:00:00Z")
+	check(result.get("success",false),"The same complete history now exports through production create/self-validation: %s" % result.get("reason",""))
+	if not result.get("success",false): return
+	check(result.text == legacy_text and result.history == history.generations and history == fixture_before,"Only limits change: deterministic output and all 168 original documents/transactions remain byte-preserving.")
+	check(result.preview.generation == 168 and result.payload.xp == exported.payload.xp and result.payload.items == exported.payload.items and result.payload.purchases == exported.payload.purchases,"Large export preserves original XP, inventory, purchases and preview head.")
+	var output := root.path_join("large.itankbackup.json")
+	check(Files.save_new_file(output,result.text).success,"Desktop saves/verifies the complete >16 MiB output without overwriting another file.")
+	var readback := Files.read_file(output)
+	check(readback.success and readback.text == result.text,"Desktop selection reads exactly the same large UTF-8 file.")
+	var empty := SpyStorage.new(root.path_join("large_destination"))
+	var preview := Reader.new().begin_preview(result.text,"dev_normal",empty)
+	check(preview.get("read_only",false) and preview.classification == "empty_destination" and empty.writes == 0 and not DirAccess.dir_exists_absolute(empty._root),"Large Desktop preview performs no profile/directory writes.")
+	var backend := BrowserTests.Backend.new()
+	backend.histories[result.manifest.profile_id] = result.history.duplicate(true)
+	var operations: Array[String] = []
+	var browser := CharacterBrowserStorage.new(func(method: String, args: Dictionary) -> Dictionary:
+		if method == "begin": operations.append(args.operation)
+		return backend.transport(method,args)
+	)
+	var reader := Reader.new()
+	check(reader.begin_preview(readback.text,"dev_normal",null,browser).get("state") == "pending","Large simulated Web preview uses the existing asynchronous path.")
+	var web := reader.poll()
+	check(web.get("read_only",false) and web.classification == "exact_match" and operations == ["inspect"] and backend.histories[result.manifest.profile_id] == result.history,"Web agrees with Desktop and only inspects disposable history.")
+	browser.dispose()
+	var corrupt: Dictionary = JSON.parse_string(result.text)
+	corrupt.sha256 = "0".repeat(64)
+	check(Backup.decode(JSON.stringify(corrupt,"",true,true),"dev_normal").get("reason") == "backup_checksum_mismatch","Large-file allowance never bypasses the checksum.")
+	# A confirmed restore in disposable storage also exercises its transport cap.
+	var restorer := CharacterBackupRestoration.new()
+	check(restorer.begin(result.text,"dev_normal",null,empty).success and restorer.confirm().success,"Large Desktop restoration retains the existing explicit confirmation and verified publication.")
+	restorer.dispose()
+	var stored := empty.inspect_profile(result.manifest.profile_id)
+	check(stored.get("success",false) and CharacterSaveStorage.history_records(stored) == result.history,"Restoration bundle readback retains every original byte after publication.")
+	var older := CharacterBackupRestoration.new()
+	check(not older.begin(exported.text,"dev_normal",null,empty).success,"An earlier or divergent backup cannot overwrite the larger verified history.")
+	older.dispose()
+	print("43C g168 disposable fixture: raw=%d body=%d file=%d; %d assertions." % [raw_bytes,String(JSON.parse_string(result.text).body_json).to_utf8_buffer().size(),result.text.to_utf8_buffer().size(),assertions-before])

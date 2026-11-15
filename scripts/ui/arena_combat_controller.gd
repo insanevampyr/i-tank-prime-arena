@@ -69,6 +69,11 @@ var _dev_tools_enabled := false
 var _character_sheet: CharacterSheetWindow
 var _build_identity_label: Label
 var _next_run_xp_boost := false
+var _offer_run_choice_on_load := false
+var _loaded_run_choice := {}
+var _run_choice_dialog: AcceptDialog
+var _abandon_run_dialog: ConfirmationDialog
+var _abandon_run_boost: Button
 var _applied_displacement_event_ids: Dictionary = {}
 var _pending_player_displacement_event_ids: Array[String] = []
 var _cached_transcript_text := ""
@@ -852,6 +857,7 @@ static func _is_attack_key(keycode: Key) -> bool:
 
 
 func _on_encounter_button_pressed() -> void:
+	if not _loaded_run_choice.is_empty(): return
 	if not _web_operation.is_empty():
 		_retry_browser_operation()
 		return
@@ -899,6 +905,7 @@ func _on_encounter_button_pressed() -> void:
 
 
 func _on_encounter_selector_pressed() -> void:
+	if not _loaded_run_choice.is_empty(): return
 	var previous_index := _encounter_selector_index
 	var previous_test_mode := _developer_test_mode
 	var previous_namespace := _profile_namespace
@@ -915,6 +922,7 @@ func _on_encounter_selector_pressed() -> void:
 		)
 	)
 	var policy := _next_run_reward_policy() if _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and not PlayableCharacterPersistence.test_nonpersistent else {}
+	_offer_run_choice_on_load = _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode
 	var result := _select_encounter_fixture(fixture, policy)
 	if result.get("state") == "pending":
 		_web_operation["previous_profile_selection"] = {"character":_session._player_character_id,"fixture":_session._encounter_fixture_id,"selector_index":previous_index,"test_mode":previous_test_mode,"namespace":previous_namespace}
@@ -955,6 +963,7 @@ static func _selector_index_for_fixture(encounter_fixture_id: StringName, test_m
 
 
 func _on_character_selector_pressed() -> void:
+	if not _loaded_run_choice.is_empty(): return
 	if _can_cancel_browser_load():
 		_cancel_browser_creation()
 		return
@@ -963,6 +972,7 @@ func _on_character_selector_pressed() -> void:
 		_admit_existing_profile(_profile_namespace)
 		return
 	var policy := _next_run_reward_policy() if next_character == Fixture.PLAYER_CHARACTER_VAELIS and _can_select_next_run_xp() else {}
+	_offer_run_choice_on_load = next_character == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode
 	_select_player_character(next_character, policy)
 
 
@@ -1129,6 +1139,8 @@ func _prepare_encounter_fixture(new_run: bool = false, defeated_checkpoint: Dict
 		_restore_profile_visual_state(previous_motion,previous_position)
 	elif _session._playable_persistence != null:
 		_next_run_xp_boost = false
+	if result.get("success",false): _offer_loaded_run_choice()
+	else: _offer_run_choice_on_load = false
 	return result
 
 
@@ -1187,6 +1199,7 @@ func _prepare_encounter_candidate(reward_policy: Dictionary, new_run: bool = fal
 		_session = previous_session
 		return running_validation
 	_session.player_movement_boundary_provider = _player.capture_wave_entry_motion
+	_session.player_speed_profile_refresher = _player.refresh_permanent_speed_profile
 	if browser_service != null and not browser_service.recovery.is_empty() and not _player.restore_wave_entry_motion(browser_service.recovery.movement):
 		_session = previous_session
 		return {"success":false,"reason":"running_entry_application_failed"}
@@ -1240,7 +1253,8 @@ func _use_browser_character_persistence() -> bool:
 	return (OS.has_feature("web") or PlayableBrowserPersistence.test_factory.is_valid()) and not PlayableCharacterPersistence.test_nonpersistent and _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and _encounter_fixture_id not in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
 
 func _browser_transition_blocked() -> bool:
-	return (_backup_actions != null and _backup_actions.restoration_blocked) or not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
+	if _backup_actions != null and (_backup_actions._selecting or (_backup_actions._reader != null and _backup_actions._reader._result.get("state") == "pending")): return true
+	return not _loaded_run_choice.is_empty() or (_backup_actions != null and _backup_actions.restoration_blocked) or not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
 
 func _legacy_profile_context_ready() -> bool:
 	return _session != null and _session.get_encounter_state() == ArenaCombatSession.ENCOUNTER_READY and _session.get_reward_mode() != ArenaRewardLedger.MODE_TEST
@@ -1262,10 +1276,14 @@ func _load_backup_checkpoint(payload: Dictionary, lease: PlayableBrowserPersiste
 	if legacy_destination and not _can_open_legacy_profile(): return {"success":false,"reason":"legacy_profile_requires_ready"}
 	var target_mode := ArenaRewardLedger.MODE_DEV_NORMAL if legacy_destination else _session.get_reward_mode()
 	if payload.get("profile_namespace") != target_mode: return {"success":false,"reason":"restoration_namespace_changed"}
-	return _admit_existing_profile(target_mode, payload, lease)
+	var result := _admit_existing_profile(target_mode,payload,lease,false)
+	if result.get("success",false) or result.get("state") == "pending": _offer_run_choice_on_load = true # After the Load result dialog closes.
+	return result
 
 
-func _admit_existing_profile(target_mode: String, payload: Dictionary = {}, lease: PlayableBrowserPersistence = null) -> Dictionary:
+func _admit_existing_profile(target_mode: String, payload: Dictionary = {}, lease: PlayableBrowserPersistence = null, offer_choice: bool = true) -> Dictionary:
+	if not _loaded_run_choice.is_empty(): return {"success":false,"reason":"run_selection_pending"}
+	_offer_run_choice_on_load = offer_choice
 	var previous_character := _player_character_id
 	var previous_fixture := _encounter_fixture_id
 	var policy := ArenaRewardLedger.resolve_run_policy(target_mode)
@@ -1283,6 +1301,110 @@ func _admit_existing_profile(target_mode: String, payload: Dictionary = {}, leas
 		_update_combat_movement_lock()
 		_update_presentation()
 	return result
+
+func _offer_loaded_run_choice() -> void:
+	if not _offer_run_choice_on_load: return
+	if _backup_actions != null and (_backup_actions.restoration_blocked or _backup_actions._dialog.visible): return
+	_offer_run_choice_on_load = false
+	var service := _session._playable_persistence
+	if service == null or not service._prepared.is_empty(): return # Creation/new-run publication is already explicit.
+	var authorization := _session.get_abandon_run_authorization()
+	if not authorization.success: return
+	_loaded_run_choice = {"session":_session,"checkpoint":authorization.checkpoint}
+	if _run_choice_dialog == null:
+		_run_choice_dialog = AcceptDialog.new()
+		_run_choice_dialog.title = "Unfinished saved run"
+		_run_choice_dialog.get_label().autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_run_choice_dialog.get_ok_button().text = "RESUME RUN"
+		_run_choice_dialog.add_button("NEW RUN",false,"new_run")
+		_run_choice_dialog.confirmed.connect(_resume_loaded_run)
+		_run_choice_dialog.canceled.connect(_resume_loaded_run)
+		_run_choice_dialog.custom_action.connect(func(action: StringName) -> void:
+			if action == &"new_run": _ask_abandon_loaded_run()
+		)
+		add_child(_run_choice_dialog)
+	_run_choice_dialog.dialog_text = "Saved %s · XP ×%d\nRESUME RUN continues this checkpoint with its locked XP policy.\nNEW RUN abandons this attempt and starts Wave 1.\nCommitted progression, purchases, equipment and inventory are retained." % [service.recovery.wave_id.replace("_"," ").capitalize(),_session.get_run_reward_policy().xp_multiplier]
+	_run_choice_dialog.popup_centered_clamped(Vector2i(640,260),0.9)
+	_update_combat_movement_lock()
+
+
+func _loaded_run_choice_is_current() -> bool:
+	if _loaded_run_choice.is_empty() or _session != _loaded_run_choice.session: return false
+	var checked := _session.get_abandon_run_authorization()
+	return checked.success and checked.checkpoint == _loaded_run_choice.checkpoint
+
+
+func _resume_loaded_run() -> void:
+	if not _loaded_run_choice_is_current(): return
+	var service := _session._playable_persistence
+	if not service is PlayableBrowserPersistence:
+		var head := service.storage.read_profile(service.profile_id)
+		if not head.get("success",false):
+			_run_choice_dialog.dialog_text = "Saved character could not be rechecked. No character data was changed. Reopen the character after storage is available."
+			return
+		if CharacterProfileProjection.fingerprint(head.payload) != _loaded_run_choice.checkpoint.head_digest:
+			_loaded_run_choice.clear()
+			_run_choice_dialog.hide()
+			_admit_existing_profile(service.mode) # Re-offer the freshly verified head, never the stale one.
+			return
+	_loaded_run_choice.clear()
+	_run_choice_dialog.hide()
+	if _abandon_run_dialog != null: _abandon_run_dialog.hide()
+	_last_ui_message = "Saved run resumed. Its XP policy and checkpoint are unchanged."
+	_update_combat_movement_lock()
+	_update_presentation()
+
+
+func _ask_abandon_loaded_run() -> void:
+	if not _loaded_run_choice_is_current(): return
+	_loaded_run_choice["confirmation_open"] = true
+	if _abandon_run_dialog == null:
+		_abandon_run_dialog = ConfirmationDialog.new()
+		_abandon_run_dialog.title = "Abandon unfinished run?"
+		_abandon_run_dialog.get_label().autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_abandon_run_dialog.confirmed.connect(_confirm_abandon_loaded_run)
+		_abandon_run_dialog.canceled.connect(func() -> void:
+			_abandon_run_dialog.hide()
+			if not _loaded_run_choice_is_current(): return
+			_loaded_run_choice["confirmation_open"] = false
+			_run_choice_dialog.popup_centered_clamped(Vector2i(640,260),0.9)
+		)
+		_abandon_run_boost = _abandon_run_dialog.add_button("CONFIRM NEW RUN · XP ×10",false,"boost")
+		_abandon_run_dialog.custom_action.connect(func(action: StringName) -> void:
+			if action == &"boost": _confirm_abandon_loaded_run(10)
+		)
+		add_child(_abandon_run_dialog)
+	var legacy := _session.get_reward_mode() == ArenaRewardLedger.MODE_DEV_NORMAL
+	var multiplier: int = 1 if legacy else _session.get_run_reward_policy().xp_multiplier
+	_abandon_run_boost.visible = legacy
+	_abandon_run_dialog.get_ok_button().text = "CONFIRM NEW RUN · XP ×%d" % multiplier
+	_abandon_run_dialog.dialog_text = "Abandon the saved unfinished attempt and its checkpoint?\nStart Wave 1 with a unique run ID and a locked XP policy.\nCommitted rewards, EXPC, purchases, permanent attributes, equipment, inventory and historical records remain intact.\nExisting new-run resource and condition rules apply.\nCANCEL returns to the saved-run choice without spending or saving."
+	_run_choice_dialog.hide()
+	_abandon_run_dialog.popup_centered_clamped(Vector2i(740,340),0.9)
+
+
+func _confirm_abandon_loaded_run(multiplier: Variant = null) -> void:
+	if not _loaded_run_choice.get("confirmation_open",false) or not _loaded_run_choice_is_current(): return
+	var mode := _session.get_reward_mode()
+	var selected: Variant = multiplier if multiplier != null else (1 if mode == ArenaRewardLedger.MODE_DEV_NORMAL else _session.get_run_reward_policy().xp_multiplier)
+	var policy := ArenaRewardLedger.resolve_run_policy(mode,selected)
+	if not policy.success or (mode == ArenaRewardLedger.MODE_NORMAL and selected != _session.get_run_reward_policy().xp_multiplier): return
+	var checkpoint: Dictionary = _loaded_run_choice.checkpoint.duplicate(true)
+	var decision := _loaded_run_choice.duplicate()
+	_loaded_run_choice.clear() # Consume the decision before any synchronous or asynchronous publication.
+	_abandon_run_dialog.hide()
+	_run_choice_dialog.hide()
+	_offer_run_choice_on_load = false
+	var result := _prepare_encounter_fixture(true,checkpoint,{},policy)
+	if not result.get("success",false) and result.get("state") != "pending":
+		decision["confirmation_open"] = false
+		_loaded_run_choice = decision
+		_run_choice_dialog.dialog_text = "New run was not started: %s.\nRESUME RUN rechecks the saved character. No history was discarded." % _friendly_reason(result.get("reason","unverified checkpoint"))
+		_run_choice_dialog.popup_centered_clamped(Vector2i(640,260),0.9)
+	_last_ui_message = "Saving the new Wave 1 run." if result.get("state") == "pending" else ("New Wave 1 run ready. XP ×%d is locked." % selected if result.success else "New run blocked: %s" % result.get("reason","unverified checkpoint"))
+	_update_combat_movement_lock()
+	_update_presentation()
+
 
 func _browser_status_text() -> String:
 	if not _web_operation.is_empty():
@@ -1414,6 +1536,7 @@ func _adopt_browser_candidate() -> void:
 		candidate._encounter_state = ArenaCombatSession.ENCOUNTER_PLAYER_VICTORY if candidate._arena_wave_state_machine.get_state() == ArenaWaveStateMachine.STATE_COMPLETE else ArenaCombatSession.ENCOUNTER_RUNNING
 		candidate._encounter_active = candidate._encounter_state == ArenaCombatSession.ENCOUNTER_RUNNING
 	candidate.player_movement_boundary_provider = _player.capture_wave_entry_motion
+	candidate.player_speed_profile_refresher = _player.refresh_permanent_speed_profile
 	var presented := _present_loaded_session(_web_operation.kind != "next")
 	if not presented.success:
 		# Pre-adoption validation below ensures this is never a speculative apply.
@@ -1436,6 +1559,7 @@ func _adopt_browser_candidate() -> void:
 	_next_run_xp_boost = false
 	_web_operation.clear()
 	_delta_us_remainder = 0.0
+	_offer_loaded_run_choice()
 	_update_combat_movement_lock()
 	_update_presentation()
 
@@ -1446,6 +1570,9 @@ func _confirm_browser_character() -> void:
 
 func _cancel_browser_creation() -> void:
 	if _web_operation.is_empty(): return
+	_offer_run_choice_on_load = false
+	var abandoned: bool = _web_operation.get("defeated",{}).get("intent") == "abandon_unfinished_run"
+	var target_mode: String = _web_operation.get("reward_policy",{}).get("mode",_profile_namespace)
 	var service: PlayableBrowserPersistence = _web_operation.service
 	_release_browser_service(service)
 	if not service._owns_lease and service.previous_owner.is_empty() and service.browser != null: service.browser.dispose()
@@ -1469,6 +1596,7 @@ func _cancel_browser_creation() -> void:
 	_last_ui_message = "Character loading canceled. Your saved progress was not changed."
 	_update_combat_movement_lock()
 	_update_presentation()
+	if abandoned: _admit_existing_profile(target_mode) # Re-read before offering the canceled attempt again.
 
 func _retry_browser_operation() -> void:
 	if _web_operation.get("phase") != "failed": return
@@ -2153,10 +2281,12 @@ func _on_purchase_advancement_pressed() -> void:
 		_last_ui_message = "Advancement blocked: no purchase selected."
 		return
 	var option: Dictionary = _advancement_options[_advancement_option.selected]
+	var selection := {"allocation":option.get("allocation",""),"expected_current_value":option.get("current_value"),"expected_cost":option.get("cost")}
+	if option.get("target_id") == "spd": selection.erase("allocation")
 	var result := _session.request_character_advancement(
 		StringName(String(option.get("purchase_kind", ""))),
 		StringName(String(option.get("target_id", ""))), "",
-		{"allocation":option.get("allocation",""),"expected_current_value":option.get("current_value"),"expected_cost":option.get("cost")}
+		selection
 	)
 	if result.get("success", false):
 		var purchase: Dictionary = result.get("purchase", {})
@@ -2304,6 +2434,10 @@ func _update_rewards_panel_text(
 	var item := _selected_inventory_entry()
 	var inventory_text := "No collected or equipped items"
 	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "spd":
+		var speed := player_actor.preview_verified_speed_advancement(int(option.current_value), int(option.target_value))
+		if speed.success:
+			availability += "\nSPD %s -> %s | Base MR %s -> %s | AT %s -> %s | %s EXPC. No allocation or resource refill." % [option.current_value,option.target_value,speed.derived_before.mr,speed.derived_after.mr,speed.derived_before.at,speed.derived_after.at,option.cost]
 	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "dex":
 		var mode := "mana" if player_actor.progression_policy.get("resource_mode") == "mana" else "regular"
 		availability += "\nDEX %s -> %s | ACC %s -> %s | +1 %s. Existing allocations stay locked; no resource refill." % [option.current_value,option.target_value,PrimeV3DexChart.accuracy(int(option.current_value),mode),PrimeV3DexChart.accuracy(int(option.target_value),mode),String(option.allocation).to_upper()]

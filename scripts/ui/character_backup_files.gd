@@ -36,7 +36,7 @@ static func web_bridge() -> JavaScriptObject:
 static func read_file(path: String) -> Dictionary:
 	var file := FileAccess.open(path,FileAccess.READ)
 	if file == null: return Backup.fail("backup_file_read_failed")
-	if file.get_length() > Backup.MAX_BYTES:
+	if not Backup.check_size(file.get_length(),Backup.MAX_FILE_BYTES).success:
 		file.close()
 		return Backup.fail("backup_size_limit")
 	var bytes := file.get_buffer(file.get_length())
@@ -47,7 +47,7 @@ static func read_file(path: String) -> Dictionary:
 	return {"success":true,"text":text}
 
 static func save_new_file(path: String, text: String) -> Dictionary:
-	if not path.ends_with(EXTENSION) or text.to_utf8_buffer().size() > Backup.MAX_BYTES: return Backup.fail("invalid_backup_output")
+	if not path.ends_with(EXTENSION) or not Backup.check_size(text.to_utf8_buffer().size(),Backup.MAX_FILE_BYTES).success: return Backup.fail("invalid_backup_output")
 	var actual := ProjectSettings.globalize_path(path).replace("\\","/").simplify_path()
 	var profiles := ProjectSettings.globalize_path(CharacterSaveStorage.DEFAULT_ROOT).replace("\\","/").simplify_path()
 	if actual.to_lower().begins_with(profiles.to_lower()+"/"): return Backup.fail("backup_cannot_target_profile_storage")

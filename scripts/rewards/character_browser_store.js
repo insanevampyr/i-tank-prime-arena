@@ -26,11 +26,11 @@
       if (typeof text !== "string") throw problem("invalid_document");
       let outer, payload;
       try { outer = JSON.parse(text); payload = JSON.parse(outer.payload_json); } catch (_) { throw problem("corrupt_document"); }
-      if (Object.keys(outer).sort().join(",") !== "format,payload_json,sha256,version" || outer.format !== "itank_arena_character" || ![2, 4].includes(outer.version)) throw problem("unsupported_format_or_version");
+      if (Object.keys(outer).sort().join(",") !== "format,payload_json,sha256,version" || outer.format !== "itank_arena_character" || ![2, 4, 5].includes(outer.version)) throw problem("unsupported_format_or_version");
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(outer.payload_json))), n => n.toString(16).padStart(2, "0")).join("");
       if (digest !== outer.sha256) throw problem("checksum_mismatch");
       if (payload.character_id !== profile || !Number.isSafeInteger(payload.generation) || payload.generation < 1) throw problem("document_identity_mismatch");
-      if ((outer.version === 4) !== Object.prototype.hasOwnProperty.call(payload, "run_reward_policy")) throw problem("unsupported_format_or_version");
+      if ((outer.version === 5) !== Object.prototype.hasOwnProperty.call(payload, "expc_credits") || (outer.version !== 5 && (outer.version === 4) !== Object.prototype.hasOwnProperty.call(payload, "run_reward_policy"))) throw problem("unsupported_format_or_version");
       const ns = payload.profile_namespace;
       if (!["normal", "dev_normal"].includes(ns) || !profile.startsWith(ns === "normal" ? "prod_" : "dev_")) throw problem("namespace_mismatch");
       return payload;

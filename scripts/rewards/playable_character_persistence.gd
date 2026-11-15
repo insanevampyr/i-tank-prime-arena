@@ -115,7 +115,12 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 		if new_run:
 			if not defeated_checkpoint.is_empty():
 				var expected := {"profile_id":profile_id,"mode":mode,"run_id":run_id,"wave_id":recovery.wave_id,"generation":generation}
-				if recovery.phase != "entry" or defeated_checkpoint != expected: return _fail("defeated_checkpoint_changed_or_unverified")
+				if defeated_checkpoint.get("intent") == "abandon_unfinished_run":
+					expected["intent"] = "abandon_unfinished_run"
+					expected["head_digest"] = Profiles.fingerprint(_prior)
+					if recovery.phase not in ["entry","downtime"] or defeated_checkpoint != expected: return _fail("abandoned_checkpoint_changed_or_unverified")
+					if mode == ArenaRewardLedger.MODE_NORMAL and requested.xp_multiplier != get_run_reward_policy().xp_multiplier: return _fail("normal_run_policy_changed")
+				elif recovery.phase != "entry" or defeated_checkpoint != expected: return _fail("defeated_checkpoint_changed_or_unverified")
 			elif recovery.phase != "complete": return _fail("new_run_requires_completed_circuit")
 			var condition_policy := validate_new_run_conditions(recovery.player)
 			if not condition_policy.success: return _fail(condition_policy.reason)
@@ -183,6 +188,7 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 	if recovery.is_empty(): session.simulation.configure_nac_automation(&"player",VaelisForceFixture.default_nac_automation_settings())
 	var p: Dictionary = candidate.permanent
 	state.progression = {"exp_type":source.progression_policy.exp_type,"level":p.level,"expm":candidate.xp.earned,"expc":candidate.xp.unspent,"run_earned_xp":p.xp_baseline.earned,"run_spent_xp":p.xp_baseline.spent,"award_ids":[],"history":[],"base_hpm":source.combat_stats.hpm,"base_resource_maxima":source.resource_maxima.duplicate(true)}
+	if _prior.has("expc_credits"): state.progression["expc_credit_total"] = CharacterSaveContract.Credit.inspect(_prior).total
 	if p.has("development"): state.progression["development"] = p.development.duplicate(true)
 	state.progression["development_run_id"] = run_id
 	for award: Dictionary in p.award_receipts: state.progression.award_ids.append(award.award_id)
@@ -205,6 +211,7 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 
 func restore_ledger(ledger: ArenaRewardLedger) -> void:
 	ledger.initial_expc = int(source.progression_policy.initial_expc)
+	ledger.expc_credit_total = CharacterSaveContract.Credit.inspect(_prior).get("total",0)
 	ledger.earned_xp = int(candidate.permanent.xp_baseline.earned)
 	ledger.spent_xp = int(candidate.permanent.xp_baseline.spent)
 	ledger.player_level = int(candidate.permanent.level)
@@ -464,7 +471,7 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 		for field: String in Profiles.purchase_fields(purchase):
 			if proof.get(field) != purchase.get(field): return _fail("purchase_authoritative_proof_missing")
 		var id := "%s/starter_admission/%s/%s/purchase/%s/%s" % [profile_id,run_id,session._current_reward_wave_id(),purchase.target_id,purchase.value_after]
-		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") in ["str","dex"]: id += "/request_"+key.sha256_text()
+		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") in ["str","dex","spd"]: id += "/request_"+key.sha256_text()
 		_purchases[key] = id
 		_add_receipt("purchase","purchase_"+id.sha256_text().substr(0,48),{"purchase_id":id,"cost":purchase.cost},session._current_reward_wave_id())
 	for record: Dictionary in state.progression.get("history",[]):
@@ -482,6 +489,7 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 		if not checkpoints.has(checkpoint_id): checkpoints.append(checkpoint_id)
 	_evidence = _lineage.merged({"profile_namespace":mode,"run_history":_runs.duplicate(),"generation":generation+1,"items":items.filter(func(item: Dictionary) -> bool: return item.quantity > 0).duplicate(true),"award_receipts":_awards.duplicate(true),"purchase_ids":_purchases.duplicate(true),"growth_ids":_growth.duplicate(true),"secured_checkpoints":checkpoints,"equipment_state":equipment},true)
 	if not _run_policy_history.is_empty(): _evidence["run_reward_policy"] = _run_policy_history.duplicate(true)
+	if _prior.has("expc_credits"): _evidence["expc_credits"] = _prior.expc_credits.duplicate(true)
 	var defense := session.simulation.get_defense_profile(&"player")
 	_source_binding = Profiles.fingerprint({"actor":actor.to_dictionary(),"state":state.to_dictionary(),"ledger":ledger,"defense":defense.to_dictionary()})
 	_projection_window = true
@@ -550,9 +558,10 @@ func _capture(session: ArenaCombatSession, phase: String) -> Dictionary:
 			if item.get("collection_status") == "uncollected": loot.append(item.duplicate(true))
 	var checkpoint := {"version":1,"phase":phase,"run_id":run_id,"wave_id":session._current_reward_wave_id(),"seed":str(session._seed_value),"clock_us":session.simulation.clock.get_elapsed_us(),"rng":session.simulation.random.wave_entry_state(),"battlefield_digest":Profiles.fingerprint(session.get_battlefield().to_dictionary()),"player_position":[state.position_microfeet.x,state.position_microfeet.y],"opponent_spawn":[session._initial_opponent_position_microfeet.x,session._initial_opponent_position_microfeet.y],"player":player,"roster":session._arena_wave_state_machine.get_resolved_roster(),"opening":opening,"enemy_positions":positions,"uncollected_loot":loot,"ledger":session.get_reward_state(),"request_sequence":session._next_request_sequence}
 	checkpoint["movement"] = session.player_movement_boundary_provider.call()
-	# Equipment transactions update actor MR before the controller refreshes its
-	# motion view. Preserve dynamic fatigue while binding the new verified MR.
+	# Bind profile values to verified actor progression/equipment without
+	# replacing the motion provider's dynamic fatigue, cooldown or RNG state.
 	checkpoint.movement.profile.mr = int(session.simulation.get_actor_definition(&"player").get_combat_stat("mr"))
+	checkpoint.movement.profile.spd = int(session.simulation.get_actor_definition(&"player").attributes.spd)
 	checkpoint["movement_ledger"] = {"round_index":session._player_movement_round_index,"spent_microfeet":session._player_movement_spent_microfeet}
 	var valid := Boundary.validate(checkpoint,session.simulation.get_actor_definition(&"player"))
 	return {"success":true,"checkpoint":checkpoint} if valid.success else valid

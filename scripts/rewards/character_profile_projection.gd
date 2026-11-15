@@ -4,6 +4,7 @@ extends RefCounted
 const Contract = preload("res://scripts/rewards/character_save_contract.gd")
 const Advancement = preload("res://scripts/rewards/prime_v3_advancement_catalog.gd")
 const Growth = preload("res://scripts/rewards/prime_v3_level_catalog.gd")
+const Credit = preload("res://scripts/rewards/character_expc_credit.gd")
 const HISTORY_FIELDS := ["prior_level", "level", "threshold", "hit_die_sides", "die_flat_bonus", "roll", "hpb", "hpm_increase", "hpm_before", "hpm_after", "resource", "wisdom", "maximum_before", "maximum_increase", "maximum_after"]
 const PURCHASE_FIELDS := ["purchase_kind", "target_id", "value_before", "value_after", "cost", "source_ref"]
 const PERMANENT_FIELDS := ["level", "growth", "resource_maxima", "ability_allowances", "equipment_refs", "inventory_quantities", "xp_baseline", "award_receipts"]
@@ -56,14 +57,16 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 	var earned := int(ledger.get("earned_xp",-1))
 	var spent := int(ledger.get("spent_xp",-1))
 	var expm := initial_expm + earned
-	var expc := initial_expc + earned - spent
+	var credit := Credit.inspect(evidence.merged({"character_id":evidence.get("profile_id"),"generation":evidence.get("generation"),"lineage":evidence}))
+	if not credit.success or ledger.get("expc_credit_total",0) != credit.total: return _fail("expc_credit_ledger_mismatch")
+	var expc: int = initial_expc + earned + credit.total - spent
 	if state.progression.get("expm",initial_expm) != expm or state.progression.get("expc",initial_expc) != expc: return _fail("progression_ledger_mismatch")
 	if state.progression.get("run_earned_xp",0) != earned or state.progression.get("run_spent_xp",0) != spent: return _fail("progression_run_totals_mismatch")
 	var payload := {
 		"character_id":evidence.get("profile_id",""), "definition_id":String(source.definition_id),
 		"rules_revision":evidence.get("rules_revision",""), "generation":evidence.get("generation",0),
 		"base_attributes":source.attributes.duplicate(true),
-		"xp":{"earned":expm,"spent":expm-expc,"unspent":expc}, "purchases":purchases,
+		"xp":{"earned":expm,"spent":expm-expc+credit.total,"unspent":expc}, "purchases":purchases,
 		"items":evidence.get("items",[]).duplicate(true), "secured_checkpoints":evidence.get("secured_checkpoints",[]).duplicate(),
 		"lineage":{}, "permanent":{
 			"level":state.progression.get("level",actor.level), "growth":history,
@@ -72,6 +75,7 @@ static func project(source: CombatCharacterDefinitionResource, actor: CombatActo
 			"xp_baseline":{"expm":initial_expm,"expc":initial_expc,"earned":earned,"spent":spent}, "award_receipts":awards}}
 	for field: String in LINEAGE_FIELDS: payload.lineage[field] = evidence.get(field)
 	if evidence.has("profile_namespace"): payload["profile_namespace"] = save_namespace
+	if evidence.has("expc_credits"): payload["expc_credits"] = evidence.expc_credits.duplicate(true)
 	if evidence.has("run_history"): payload["run_history"] = evidence.run_history.duplicate()
 	if evidence.has("run_reward_policy"):
 		if not evidence.run_reward_policy is Dictionary: return _fail("invalid_run_reward_policy")
@@ -126,10 +130,12 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	var policy := actor.progression_policy
 	if not Growth.validate(policy,actor).is_empty(): return _fail("progression_source_unverified")
 	var b: Dictionary = p.xp_baseline
+	var credit := Credit.inspect(payload)
+	if not credit.success: return credit
 	if not _keys(b,["expm","expc","earned","spent"]): return _fail("xp_baseline_invalid")
 	for value: Variant in b.values():
 		if not Contract._integer(value,0): return _fail("xp_baseline_invalid")
-	if b.expm != policy.initial_expm or b.expc != policy.initial_expc or b.spent > b.expc+b.earned or payload.xp.earned != b.expm+b.earned or payload.xp.unspent != b.expc+b.earned-b.spent: return _fail("xp_baseline_mismatch")
+	if b.expm != policy.initial_expm or b.expc != policy.initial_expc or b.spent > b.expc+b.earned+credit.total or payload.xp.earned != b.expm+b.earned or payload.xp.unspent != b.expc+b.earned+credit.total-b.spent: return _fail("xp_baseline_mismatch")
 	var award_total := 0
 	var award_ids := {}
 	for receipt: Variant in p.award_receipts:
@@ -148,7 +154,7 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		if not preview.available or preview.cost != purchase.cost or preview.source_ref != purchase.source_ref: return _fail("unsupported_or_inconsistent_purchase")
 		# Isolated history replay: equipment is validated after ALL purchases, so
 		# later acquired equipment need not have been legal at an earlier STR.
-		var applied := actor.apply_verified_dexterity_advancement(purchase.value_before,purchase.value_after,String(purchase.get("allocation",""))) if purchase.purchase_kind == "attribute" and purchase.target_id == "dex" else actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
+		var applied := actor.apply_verified_speed_advancement(purchase.value_before,purchase.value_after) if purchase.purchase_kind == "attribute" and purchase.target_id == "spd" else actor.apply_verified_dexterity_advancement(purchase.value_before,purchase.value_after,String(purchase.get("allocation",""))) if purchase.purchase_kind == "attribute" and purchase.target_id == "dex" else actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
 		if not applied.success: return _fail("purchase_application_failed")
 		purchase_cost += int(purchase.cost)
 	if actor.attributes.get("dex") != source.attributes.get("dex") and not p.has("development"): return _fail("dex_purchase_allocation_history_missing")
@@ -193,6 +199,7 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		var recovery_validation := CharacterWaveCheckpoint.validate(payload.recovery,actor)
 		if not recovery_validation.success: return recovery_validation
 		var ledger: Dictionary = payload.recovery.ledger
+		if ledger.get("expc_credit_total",0) != credit.total or (credit.total > 0 and ledger.get("unspent_xp") != b.expc+b.earned+credit.total-b.spent): return _fail("expc_credit_ledger_mismatch")
 		if ledger.get("mode") != save_namespace or ledger.get("earned_xp") != b.earned or ledger.get("spent_xp") != b.spent or ledger.get("player_level") != p.level: return _fail("recovery_progression_generation_mismatch")
 		if payload.has("run_reward_policy") and not _ledger_matches_run_policy(payload, ledger):
 			return _fail("run_reward_policy_ledger_mismatch")

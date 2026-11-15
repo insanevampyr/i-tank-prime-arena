@@ -173,6 +173,36 @@ func apply_verified_dexterity_advancement(expected: int, target: int, allocation
 	return {"success":true,"derived_after":{"acc":base_combat_stats.acc,"dt":base_combat_stats.dt,"dp":base_combat_stats.dp}}
 
 
+func preview_verified_speed_advancement(expected: int, target: int) -> Dictionary:
+	if typeof(attributes.get("spd")) != TYPE_INT or attributes.spd != expected:
+		return {"success":false,"reason":"stale_advancement_value"}
+	if expected < 1 or target != expected + 1 or target > 20:
+		return {"success":false,"reason":"speed_mortal_purchase_limit"}
+	var mode: Variant = progression_policy.get("resource_mode", "")
+	if typeof(mode) != TYPE_STRING or mode not in ["mana", "regular"]:
+		return {"success":false,"reason":"speed_chart_mode_unavailable"}
+	var before := AttributeRules.lookup("SPD", expected, mode)
+	var after := AttributeRules.lookup("SPD", target, mode)
+	if not before.success or not after.success:
+		return {"success":false,"reason":"speed_chart_mode_unavailable"}
+	var old_values := {"mr":before.values.MR.value,"at":before.values.AT.value}
+	var new_values := {"mr":after.values.MR.value,"at":after.values.AT.value}
+	for field: String in ["mr", "at"]:
+		if typeof(base_combat_stats.get(field)) != TYPE_INT or base_combat_stats[field] != old_values[field]:
+			return {"success":false,"reason":"speed_derived_source_mismatch"}
+	return {"success":true,"derived_before":old_values,"derived_after":new_values}
+
+
+func apply_verified_speed_advancement(expected: int, target: int) -> Dictionary:
+	var checked := preview_verified_speed_advancement(expected, target)
+	if not checked.success: return checked
+	# All source checks precede mutation. Equipment remains a separate layer.
+	attributes.spd = target
+	for field: String in ["mr", "at"]: base_combat_stats[field] = checked.derived_after[field]
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return checked
+
+
 func to_dictionary() -> Dictionary:
 	var snapshot := {
 		"actor_id": String(actor_id),

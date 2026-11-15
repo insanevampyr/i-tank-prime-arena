@@ -161,7 +161,7 @@ func _test_rejections(f: Dictionary, legacy: Dictionary, first_entry: Dictionary
 	_expect(not Contract.validate_replacement(legacy, bad).success, "A later wave cannot introduce a policy.")
 	bad = legacy.duplicate(true)
 	bad.recovery.phase = "downtime"
-	_expect(not Contract.validate_replacement(bad, first_entry).success, "Downtime alone cannot authorize a new run.")
+	_expect(Contract.validate_replacement(bad, first_entry).success, "A saved downtime may precede a new Wave 1 entry; host authorization remains required before publication.")
 	bad = mixed.duplicate(true)
 	bad.run_reward_policy.runs[1].xp_multiplier = 11 - bad.run_reward_policy.runs[1].xp_multiplier
 	bad.recovery.ledger.xp_multiplier = bad.run_reward_policy.runs[1].xp_multiplier

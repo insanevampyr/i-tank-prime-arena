@@ -87,6 +87,11 @@ const CharacterPersistenceSessionTests = preload("res://tests/test_character_per
 const PlayableCharacterAdmissionTests = preload("res://tests/test_playable_character_admission.gd")
 const HistoricalVaelisAdmissionTests = preload("res://tests/test_historical_vaelis_admission.gd")
 const PermanentDexTests = preload("res://tests/test_permanent_dex_advancement.gd")
+const PermanentSpdTests = preload("res://tests/test_permanent_spd_advancement.gd")
+const LoadedRunSelectionTests = preload("res://tests/test_loaded_run_selection.gd")
+const ExpcTestCreditTests = preload("res://tests/test_expc_test_credit.gd")
+const BackupResponsivenessTests = preload("res://tests/test_backup_responsiveness.gd")
+const EnemyCrowdingTests = preload("res://tests/test_enemy_crowding.gd")
 const CharacterSheetTests = preload("res://tests/test_character_sheet.gd")
 const BuildIdentificationTests = preload("res://tests/test_build_identification.gd")
 const PlayableVaelisPersistenceTests = preload("res://tests/test_playable_vaelis_persistence.gd")
@@ -110,6 +115,11 @@ func _run_tests() -> void:
 	# disposable storage explicitly and restores this flag on completion.
 	PlayableCharacterPersistence.test_nonpersistent = true
 	var suites := [
+		{"name":"Task 43B permanent SPD advancement", "instance":PermanentSpdTests.new()},
+		{"name":"Task 43D saved-run selection", "instance":LoadedRunSelectionTests.new()},
+		{"name":"Task 43E EXPC credit", "instance":ExpcTestCreditTests.new()},
+		{"name":"Task 43E backup responsiveness", "instance":BackupResponsivenessTests.new()},
+		{"name":"Task 43E enemy crowding", "instance":EnemyCrowdingTests.new()},
 		{"name":"Task 42A read-only character sheet", "instance":CharacterSheetTests.new()},
 		{"name":"Task 41B permanent DEX advancement", "instance":PermanentDexTests.new()},
 		{"name":"Task 39W Fix6 build identification", "instance":BuildIdentificationTests.new()},

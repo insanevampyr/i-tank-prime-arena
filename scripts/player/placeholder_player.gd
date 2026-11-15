@@ -195,6 +195,13 @@ func refresh_equipped_movement_rate(effective_mr: int) -> void:
 		test_base_mr = effective_mr
 
 
+func refresh_permanent_speed_profile(actor_definition: CombatActorDefinition) -> void:
+	# Refresh only profile values, preserving dynamic Running state and its RNG.
+	test_effective_spd = int(actor_definition.attributes.spd)
+	refresh_equipped_movement_rate(int(actor_definition.get_combat_stat("mr")))
+	if _movement != null: _movement.set_effective_spd(test_effective_spd)
+
+
 func configure_authoritative_actor_profile(actor_definition: CombatActorDefinition) -> Dictionary:
 	if actor_definition == null:
 		return {"success": false, "reason": "missing_actor_definition"}

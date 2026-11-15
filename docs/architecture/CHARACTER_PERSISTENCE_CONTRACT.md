@@ -1,5 +1,166 @@
 # Task 36D: proposed character persistence contract
 
+## Task 43E Pass 1 — owner-scoped EXPC credit
+
+Envelope V5 was unused and now identifies profiles with `expc_credits`, a
+version-1 append-only record. V2/V4 documents without credits retain their exact
+encoding and validation. Simulation schema 12 and the IndexedDB layout remain
+unchanged. V5 may retain the existing optional V4 run-policy record. Older
+binaries without V5 support must not be used to write credited profiles.
+
+The only supported grant is UUID `2a3dc1f6-3870-46f0-bf50-bcce11e77c6b`, amount
+10,000, for historical `dev_vaelis_thorn` in `dev_normal` with baseline
+`3df0412b72ba5d966b2eb645887fedfbb591782cffc7bff41c192e52583c6d20`.
+`character_expc_credit.gd` is a pure maintenance preparation API, not a player
+command or startup action. It requires an explicit confirmation bound to that
+profile, namespace, amount, current generation and exact prior payload digest.
+An existing grant returns an idempotent no-op. Duplicate/modified credit records,
+other profiles, stale heads, downgrades and removed history are rejected.
+
+Credits are separate from ordinary earned XP and award receipts. Spendable EXPC
+is authored baseline + ordinary earnings + validated credits - actual purchases.
+EXPM, levels, historical growth, current resources, items and old receipts do not
+change on grant. Existing ledger spending/projection/hydration and checkpoints
+carry the validated credit total; ordinary level gains still use ordinary XP.
+
+No owner data was accessed or credited by this implementation. Future live use
+requires a separately owner-operated maintenance adapter: read the actual origin's
+verified profile under its existing writer lease; display profile/namespace,
+generation, head digest and +10,000 EXPC / +0 EXPM; obtain explicit confirmation;
+call `Credit.prepare`; submit the exact proposal through the existing coordinator
+with expected generation/checkpoints and a verifier bound to that proposal;
+reconcile/read back the exact transaction before ordinary admission. A changed
+head requires a new confirmation. Lost acknowledgement retries the same proposal.
+Do not edit IndexedDB directly, use a Desktop substitute, auto-grant on startup,
+or expose an arbitrary amount/profile/ID input. The live adapter and actual owner
+publication are deliberately not activated in this task.
+
+## Task 43E Pass 2 — incremental read-only backup work
+
+Player SAVE/LOAD requests use the incremental option of `CharacterBackupReader`.
+The synchronous API remains supported. A pending stage/count is exposed before
+processing; history validation advances one generation per poll and lexical
+file/body checks advance at most 32,768 characters per poll. JSON parsing,
+encoding, hashing and a single generation's validation remain atomic library/
+document operations, so this is not a hard real-time latency guarantee.
+
+Export freezes the exact source documents and transaction identities, performs
+full source/receipt/continuity validation once, then checks both serialized layers
+and requires decoded records to equal that private validated snapshot byte for
+byte. No externally supplied "already validated" flag or persistent trust cache
+is accepted. Imported files always undergo full validation. Destination-history
+comparison also advances by generation; restoration still revalidates independently.
+
+The controller pauses both combat and independent Running processing while file
+selection/read work is pending. Duplicate requests are blocked. CANCEL discards
+pure work; an in-flight read response is drained without applying it. No read-only
+operation can write a profile. Restoration publication/uncertainty restrictions
+remain separate and unchanged. Existing byte/depth/token/generation limits remain.
+
+Disposable reconstructed 168-generation measurement (not owner profile data):
+16,315,722 original document bytes, 18,476,755 exported bytes. The unchanged
+synchronous API took 51,151 ms; incremental export took 22,388 ms (56% less).
+The largest measured poll was 367 ms. The fixture includes legal JSON whitespace
+to reproduce the prior raw-size boundary; these timings are not live Web timings.
+Per-document validation and library parsing/encoding still bound responsiveness;
+actual browser feedback/latency requires owner acceptance after a later export.
+
+## Task 43E Pass 3 — bounded melee crowding navigation
+
+An occupied legal melee ring is distinguished from unavailable static terrain
+using the existing battlefield candidate and path checks. Ordinary idle melee
+enemies can route to a navigation-only outer staging ring, with separate goal
+reservations. This does not create attack positions or change weapon reach.
+Hades follower, gargoyle and boss source tactics retain their existing paths.
+All movement still passes through the original collision, spacing, MR budget,
+initiative and Act scheduling systems; staging consumes no additional RNG.
+
+Release of a melee slot is checked before a staging wait. Failed staging retries
+at most once per existing combat round or after the existing one-foot target
+movement threshold. Other failed routes coalesce unrelated occupancy changes
+while the mover is unchanged and target movement is below that threshold.
+An identical sealed-route signature retains its existing cache behavior.
+Navigation intent is transient session data, not a new save or schema-12 field.
+
+Pre-change characterization reproduced 33 failures. Seed 23's stationary eight
+Goblins performed 3-458 full rebuilds each in 35 simulated seconds; the moving
+case performed 5-680 and included an actor making zero progress. After correction,
+stationary rebuilds are 2-8 (15.0-22.1 feet net progress); moving rebuilds are
+3-8 (14.5-31.5 feet). Stationary reversals are 0-6 and moving reversals 0-6.
+Seed 3's four-Goblin stationary control retains 1,1,2,2 rebuilds. Tests retain
+wall/corner legality, sealed-route caching, released-slot pursuit, deterministic
+full-history replay and a bounded simulated two-client event-delivery window.
+Actual crowded-play Web acceptance remains a later owner checkpoint.
+
+## Task 43D — explicit unfinished-run selection
+
+Player-facing loading of an existing unfinished Vaelis run presents RESUME RUN
+or NEW RUN before gameplay. Resume retains the verified run, checkpoint and XP
+policy without publication. New Run requires separate confirmation; cancel
+returns to the choice without a write. Legacy DEV may explicitly choose x1 or
+x10. NORMAL retains the multiplier authorized by its saved run in this flow.
+Neither DEV visibility nor a fresh UI default relabels a saved run.
+
+Abandonment is an exact-head-bound host request containing profile, namespace,
+run/wave, generation, intent and payload digest. Persistence rechecks it against
+fresh verified history. Entry and downtime checkpoints are eligible; active
+combat and pending storage are not. The existing new-run condition/resource
+policy applies. Committed XP, purchases, attributes, items, equipment, receipts
+and secured checkpoints remain unchanged. A new unique run ID, immutable V4
+policy and first Wave 1 entry publish in the same existing coordinator generation.
+V4 validation permits an old downtime checkpoint before this new Wave 1 entry;
+all existing XP equality, immutable prefix and publication authority checks remain.
+
+No save field, envelope version, simulation schema or storage format is added.
+V2 originals remain byte-identical as a legacy prefix. Confirmation is consumed
+before publication; asynchronous admission captures the namespace and multiplier.
+Unacknowledged publication remains blocked and retries the exact proposal.
+Focused tests use disposable historical fixtures and simulated browser transport.
+
+## Task 43C — bounded complete-history backup sizes
+
+Backup version 1, character envelopes V2/V4 and simulation schema 12 are
+unchanged. Limits apply to UTF-8 bytes at distinct representation boundaries:
+
+| Representation | Inclusive maximum |
+| --- | ---: |
+| One generation document, and its decoded payload JSON | 16,777,216 (16 MiB) |
+| Sum of all original generation document bytes | 33,554,432 (32 MiB) |
+| Encoded canonical backup body | 68,157,440 (65 MiB) |
+| Final encoded backup file | 136,315,904 (130 MiB + 1 KiB) |
+
+The former shared 16 MiB limit rejected export self-validation for the audited
+Legacy DEV generation 168: 16,315,722 original document bytes became a
+19,133,938-byte body and a 24,749,653-byte file through nested JSON escaping.
+The 176,276-byte largest generation was not oversized. These are read-only
+audit measurements, not owner data incorporated into tests.
+
+The individual-document budget is preserved. The combined-history budget is
+doubled to give approximately twice the audited raw-history capacity while
+remaining finite. Quoting valid JSON text costs at most twice its UTF-8 bytes
+(quotes, backslashes and legal whitespace controls). Body budget is therefore
+`2 * history + 1 MiB`: 4096 rows with at most 64 ASCII transaction-ID characters
+and fixed, source-verified manifest fields fit within that metadata allowance.
+The file budget is `2 * body + 1 KiB` for the second escaping layer and fixed
+container fields. These are conservative upper bounds, not target file sizes.
+The existing 4096-generation, depth-64 and 500,000-token bounds remain active.
+
+Creation/self-validation, preview, Desktop read/new-file output and Web file
+selection use the same boundaries. Desktop restoration bundles use the same
+encoded budgets and enforce individual/combined document limits on readback;
+their format, explicit confirmation, exact-prefix policy and publication
+mechanism remain unchanged. Checksums, source hydration, receipts, continuity,
+namespace and anti-rollback validators are retained. No document is pruned,
+rewritten or truncated, and failed export/preview performs no profile writes.
+
+Focused tests reconstruct a disposable 168-generation history from this
+suite's source-verified profile and add legal JSON whitespace to reach the
+audited aggregate size. This exercises escaping and exact-byte preservation
+without reading owner storage or claiming an export of the owner's actual
+profile. Larger backups have higher transient memory/validation costs; growth
+past 32 MiB or 4096 generations still fails explicitly and requires a separate
+review. No unlimited retention or low-memory Web guarantee is claimed.
+
 ## Task 36L-Pass2 — confirmed restoration (controlling)
 
 ### Task 37A optional development extension
