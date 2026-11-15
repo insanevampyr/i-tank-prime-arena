@@ -2291,7 +2291,7 @@ func _on_purchase_advancement_pressed() -> void:
 		return
 	var option: Dictionary = _advancement_options[_advancement_option.selected]
 	var selection := {"allocation":option.get("allocation",""),"expected_current_value":option.get("current_value"),"expected_cost":option.get("cost")}
-	if option.get("target_id") == "spd": selection.erase("allocation")
+	if option.get("target_id") in ["spd","wis"]: selection.erase("allocation")
 	var result := _session.request_character_advancement(
 		StringName(String(option.get("purchase_kind", ""))),
 		StringName(String(option.get("target_id", ""))), "",
@@ -2443,6 +2443,11 @@ func _update_rewards_panel_text(
 	var item := _selected_inventory_entry()
 	var inventory_text := "No collected or equipped items"
 	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "wis":
+		var wisdom := player_actor.preview_verified_wisdom_advancement(int(option.current_value),int(option.target_value))
+		if wisdom.success:
+			availability += "\nWIS %s -> %s | SS %s -> %s | %s EXPC | Available EXPC %s." % [option.current_value,option.target_value,wisdom.derived_before.ss,wisdom.derived_after.ss,option.cost,rewards.get("unspent_xp",0)]
+			availability += "\nMana Max %s -> %s (+1). Current Mana unchanged. MSL/MR/H remain chart references only." % [wisdom.mana_max_before,wisdom.mana_max_after] if wisdom.mana_max_increase == 1 else "\nAbility user: no Mana pool or extra Ability Points granted."
 	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "spd":
 		var speed := player_actor.preview_verified_speed_advancement(int(option.current_value), int(option.target_value))
 		if speed.success:

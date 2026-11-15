@@ -144,28 +144,44 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		award_total += int(receipt.xp)
 	if award_total != b.earned: return _fail("award_total_mismatch")
 	var purchase_cost := 0
+	var wisdom_purchases: Array[Dictionary] = []
 	for purchase: Dictionary in payload.purchases:
 		if not _keys(purchase,purchase_fields(purchase)+["purchase_id"]) or not _namespaced(purchase.purchase_id,profile_id,lineage.run_id): return _fail("invalid_purchase_record")
 		for field: String in ["purchase_kind","target_id","source_ref"]:
 			if not purchase[field] is String: return _fail("invalid_purchase_record")
 		for field: String in ["value_before","value_after","cost"]:
 			if not Contract._integer(purchase[field],0): return _fail("invalid_purchase_record")
+		var is_wisdom: bool = purchase.purchase_kind == "attribute" and purchase.target_id == "wis"
 		var preview := Advancement.make_purchase_preview(StringName(purchase.purchase_kind),StringName(purchase.target_id),purchase.value_before,purchase.value_after,String(purchase.get("allocation","")))
 		if not preview.available or preview.cost != purchase.cost or preview.source_ref != purchase.source_ref: return _fail("unsupported_or_inconsistent_purchase")
+		purchase_cost += int(purchase.cost)
+		if is_wisdom:
+			var expected_wisdom: Variant = actor.attributes.get("wis") if wisdom_purchases.is_empty() else wisdom_purchases.back().value_after
+			if purchase.value_before != expected_wisdom: return _fail("wisdom_purchase_history_discontinuity")
+			wisdom_purchases.append(purchase)
+			continue
 		# Isolated history replay: equipment is validated after ALL purchases, so
 		# later acquired equipment need not have been legal at an earlier STR.
 		var applied := actor.apply_verified_speed_advancement(purchase.value_before,purchase.value_after) if purchase.purchase_kind == "attribute" and purchase.target_id == "spd" else actor.apply_verified_dexterity_advancement(purchase.value_before,purchase.value_after,String(purchase.get("allocation",""))) if purchase.purchase_kind == "attribute" and purchase.target_id == "dex" else actor.apply_verified_strength_advancement(purchase.value_before,purchase.value_after,false) if purchase.purchase_kind == "attribute" and purchase.target_id == "str" else actor.apply_verified_resistance_advancement(String(purchase.target_id),purchase.value_before,purchase.value_after)
 		if not applied.success: return _fail("purchase_application_failed")
-		purchase_cost += int(purchase.cost)
 	if actor.attributes.get("dex") != source.attributes.get("dex") and not p.has("development"): return _fail("dex_purchase_allocation_history_missing")
 	if purchase_cost != b.spent: return _fail("purchase_spending_mismatch")
 	var expected_level := actor.level
 	var seen_growth := {}
+	var wisdom_cursor := 0
 	for record: Variant in p.growth:
 		if not record is Dictionary or not _keys(record,HISTORY_FIELDS+["growth_id"]) or not _namespaced(record.growth_id,profile_id,lineage.run_id) or seen_growth.has(record.growth_id): return _fail("invalid_growth_record")
 		seen_growth[record.growth_id] = true
 		for field: String in HISTORY_FIELDS:
 			if field != "resource" and typeof(record[field]) != TYPE_INT: return _fail("invalid_growth_number")
+		# Event-time WIS and maximum_before determine the relevant order of
+		# monotone +1 purchases. Never reorder/modify a stored growth record.
+		if record.wisdom < int(actor.attributes.get("wis",0)): return _fail("growth_wisdom_history_decreased")
+		while actor.attributes.get("wis") != record.wisdom:
+			if wisdom_cursor >= wisdom_purchases.size(): return _fail("growth_wisdom_purchase_evidence_missing")
+			var step: Dictionary = wisdom_purchases[wisdom_cursor]
+			if not actor.apply_verified_wisdom_advancement(step.value_before,step.value_after).success: return _fail("wisdom_purchase_application_failed")
+			wisdom_cursor += 1
 		var terms := CharacterLevelProgression.growth_terms(actor)
 		var die := int(terms.die)
 		var flat := int(terms.flat)
@@ -177,6 +193,10 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		actor.apply_equipment_stat_modifiers({})
 		actor.resource_maxima[resource] = record.maximum_after
 		expected_level += 1
+	while wisdom_cursor < wisdom_purchases.size():
+		var step: Dictionary = wisdom_purchases[wisdom_cursor]
+		if not actor.apply_verified_wisdom_advancement(step.value_before,step.value_after).success: return _fail("wisdom_purchase_application_failed")
+		wisdom_cursor += 1
 	if p.level != expected_level or p.level != Growth.level_for(policy.exp_type,payload.xp.earned) or p.resource_maxima != actor.resource_maxima or p.ability_allowances != actor.ability_allowances: return _fail("level_or_entitlement_mismatch")
 	for maximum: Variant in p.resource_maxima.values():
 		if not Contract._integer(maximum,0): return _fail("invalid_resource_maximum")

@@ -1,5 +1,8 @@
 extends SceneTree
 
+const PermanentWisTests = preload("res://tests/test_permanent_wis_advancement.gd")
+const WisdomManaReplayTests = preload("res://tests/test_wisdom_mana_replay.gd")
+
 const KnockbackWallContactTests = preload("res://tests/test_knockback_wall_contact.gd")
 const KnockbackBalanceTests = preload("res://tests/test_knockback_balance.gd")
 const BalanceFoundationTests = preload("res://tests/test_balance_skill_foundation.gd")
@@ -220,6 +223,8 @@ func _run_tests() -> void:
 		{"name": "Task 27 nine-location targeting", "instance": NineLocationTargetingTests.new()},
 		{"name": "Task 28 size-based targeting", "instance": SizeBasedTargetingTests.new()},
 	]
+	suites.append({"name":"44B permanent WIS","instance":PermanentWisTests.new()})
+	suites.append({"name":"44B historical Mana replay","instance":WisdomManaReplayTests.new()})
 	var requested_suite := ""
 	for argument: String in OS.get_cmdline_user_args():
 		if argument.begins_with("--suite="):

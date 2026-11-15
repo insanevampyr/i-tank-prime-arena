@@ -3429,7 +3429,7 @@ func apply_verified_character_advancement(
 	if state.current_hpc == null or int(state.current_hpc) <= 0:
 		return _failure("actor_incapacitated")
 	var expected_target := &"sr" if purchase_kind == &"special_resistance" else (
-		&"tb" if purchase_kind == &"talent_bonus" else (target_id if purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd"] else &"" )
+		&"tb" if purchase_kind == &"talent_bonus" else (target_id if purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis"] else &"" )
 	)
 	if expected_target == &"" or target_id != expected_target:
 		return _failure("unsupported_advancement_purchase")
@@ -3440,7 +3440,7 @@ func apply_verified_character_advancement(
 			if state.weapon_handling[ref] != CombatWeaponHandling.ONE_HAND_HOLD: continue
 			var weapon := CombatDefinitionCatalog.load_default_fixture_catalog().get_weapon(StringName(ref))
 			if weapon != null and weapon.effective_hands_required(target_value) != 2: return _failure("stow_or_regrip_before_strength_purchase")
-	if target_id == &"spd" and not state.current_action_instance_id.is_empty():
+	if target_id in [&"spd",&"wis"] and not state.current_action_instance_id.is_empty():
 		return _failure("advancement_requires_idle_actor")
 	var preserved_state := {
 		"current_hpc": state.current_hpc,
@@ -3459,7 +3459,7 @@ func apply_verified_character_advancement(
 			record = initial.record
 		proposed = CharacterDevelopment.append(record,"dex_purchase_%s" % target_value,"dex_purchase",{"before":expected_current_value,"after":target_value,"allocation":allocation})
 		if not proposed.success: return proposed
-	var applied := definition.apply_verified_speed_advancement(expected_current_value,target_value) if target_id == &"spd" else definition.apply_verified_dexterity_advancement(expected_current_value,target_value,allocation) if target_id == &"dex" else definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
+	var applied := definition.apply_verified_wisdom_advancement(expected_current_value,target_value) if target_id == &"wis" else definition.apply_verified_speed_advancement(expected_current_value,target_value) if target_id == &"spd" else definition.apply_verified_dexterity_advancement(expected_current_value,target_value,allocation) if target_id == &"dex" else definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
 	if not applied.get("success", false):
 		return applied
 	if target_id == &"spd" and applied.derived_before.at != applied.derived_after.at:

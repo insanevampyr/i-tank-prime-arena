@@ -1123,7 +1123,7 @@ func request_character_advancement(
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
-	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd"]:
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis"]:
 		var prefix := "%s/starter_admission/%s/" % [_playable_persistence.profile_id,_playable_persistence.run_id]
 		var suffix := "/request_"+stable_request_id.sha256_text()
 		for prior: Dictionary in _playable_persistence._prior.get("purchases",[]):

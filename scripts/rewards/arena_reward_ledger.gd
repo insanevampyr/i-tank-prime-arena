@@ -231,9 +231,9 @@ func purchase_advancement(
 		return {"success": false, "reason": "test_mode_advancement_prohibited"}
 	if target_id == &"dex":
 		if selection.size() != 3 or not selection.get("allocation") is String or selection.allocation not in ["dt","dp"] or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT: return {"success":false,"reason":"explicit_dex_allocation_required"}
-	if target_id == &"spd":
+	if target_id in [&"spd",&"wis"]:
 		if selection.size() != 2 or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT:
-			return {"success":false,"reason":"speed_purchase_preview_required"}
+			return {"success":false,"reason":"wisdom_purchase_preview_required" if target_id == &"wis" else "speed_purchase_preview_required"}
 	var matching_option := {}
 	for option: Dictionary in get_purchase_options(simulation):
 		if String(option.get("purchase_kind", "")) == String(purchase_kind) \
@@ -253,7 +253,7 @@ func purchase_advancement(
 		return {"success": false, "reason": "insufficient_xp"}
 	var current_value := int(matching_option.get("current_value", -1))
 	var target_value := int(matching_option.get("target_value", -1))
-	if target_id in [&"dex", &"spd"] and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
+	if target_id in [&"dex", &"spd", &"wis"] and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
 	var application := simulation.apply_verified_character_advancement(
 		player_actor_id, purchase_kind, target_id, current_value, target_value, String(selection.get("allocation",""))
 	)

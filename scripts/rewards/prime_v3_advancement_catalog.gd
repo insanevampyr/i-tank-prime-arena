@@ -69,6 +69,9 @@ static func make_purchase_preview(
 				elif target_id == &"spd":
 					available = current_value >= 1 and target_value <= 20
 					if not available: blocked_reason = "speed_mortal_purchase_limit"
+				elif target_id == &"wis":
+					available = current_value >= 1 and target_value <= 20
+					if not available: blocked_reason = "wisdom_mortal_purchase_limit"
 				else: blocked_reason = _attribute_blocked_reason(target_id)
 			else:
 				available = cost != null
@@ -120,6 +123,11 @@ static func build_actor_purchase_options(actor: CombatActorDefinition) -> Array[
 			if not speed.success:
 				option.available = false
 				option.blocked_reason = speed.reason
+		if attribute_id == &"wis" and option.available:
+			var wisdom := actor.preview_verified_wisdom_advancement(int(current),int(current)+1)
+			if not wisdom.success:
+				option.available = false
+				option.blocked_reason = wisdom.reason
 		if attribute_id == &"dex":
 			for allocation: String in ["dt","dp"]:
 				var choice := make_purchase_preview(&"attribute", &"dex", int(current), int(current)+1, allocation)
@@ -148,8 +156,6 @@ static func _attribute_blocked_reason(attribute_id: StringName) -> String:
 	match attribute_id:
 		&"dex":
 			return "dex_increase_requires_authoritative_dt_dp_allocation_choice"
-		&"wis":
-			return "wis_increase_requires_verified_mana_and_magic_derived_recalculation_policy"
 		&"app":
 			return "appearance_uses_source_specific_advancement_not_this_chart"
 		_:

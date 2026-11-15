@@ -18,6 +18,8 @@ var level: int
 var progression_policy: Dictionary = {}
 var class_names: PackedStringArray = PackedStringArray()
 var progression_hpm_increase: int = 0
+# Derived only by replaying verified purchases; not a new save/snapshot field.
+var wisdom_mana_purchase_increase: int = 0
 var attributes: Dictionary
 var base_combat_stats: Dictionary
 var combat_stats: Dictionary
@@ -199,6 +201,43 @@ func apply_verified_speed_advancement(expected: int, target: int) -> Dictionary:
 	# All source checks precede mutation. Equipment remains a separate layer.
 	attributes.spd = target
 	for field: String in ["mr", "at"]: base_combat_stats[field] = checked.derived_after[field]
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return checked
+
+
+func preview_verified_wisdom_advancement(expected: int, target: int) -> Dictionary:
+	if typeof(attributes.get("wis")) != TYPE_INT or attributes.wis != expected:
+		return {"success":false,"reason":"stale_advancement_value"}
+	if expected < 1 or target != expected + 1 or target > 20:
+		return {"success":false,"reason":"wisdom_mortal_purchase_limit"}
+	var mode: Variant = progression_policy.get("resource_mode")
+	if mode not in ["mana", "ability"]:
+		return {"success":false,"reason":"wisdom_chart_mode_unavailable"}
+	var source: Variant = field_sources.get("attributes.wis",field_sources.get("attributes"))
+	if not source is String or source.is_empty() or unresolved_fields.has("attributes.wis") or unresolved_fields.has("attributes"):
+		return {"success":false,"reason":"wisdom_source_unavailable"}
+	var before := AttributeRules.lookup("WIS",expected,"mana" if mode == "mana" else "regular")
+	var after := AttributeRules.lookup("WIS",target,"mana" if mode == "mana" else "regular")
+	if typeof(base_combat_stats.get("ss")) != TYPE_INT or base_combat_stats.ss != before.values.SS.value:
+		return {"success":false,"reason":"wisdom_derived_source_mismatch"}
+	# Other chart references remain references, never newly activated mechanics.
+	for field: String in ["msl","mana_recovery_per_hour"]:
+		if base_combat_stats.has(field): return {"success":false,"reason":"wisdom_authored_derived_exception_unsupported"}
+	if mode == "mana" and (typeof(resource_maxima.get("mana")) != TYPE_INT or resource_maxima.mana < 0):
+		return {"success":false,"reason":"wisdom_mana_source_unavailable"}
+	return {"success":true,"derived_before":{"ss":before.values.SS.value},"derived_after":{"ss":after.values.SS.value},
+		"mana_max_before":resource_maxima.get("mana"),"mana_max_increase":1 if mode == "mana" else 0,
+		"mana_max_after":int(resource_maxima.mana)+1 if mode == "mana" else null}
+
+
+func apply_verified_wisdom_advancement(expected: int, target: int) -> Dictionary:
+	var checked := preview_verified_wisdom_advancement(expected,target)
+	if not checked.success: return checked
+	attributes.wis = target
+	base_combat_stats.ss = checked.derived_after.ss
+	if checked.mana_max_increase == 1:
+		resource_maxima.mana = checked.mana_max_after
+		wisdom_mana_purchase_increase += 1
 	apply_equipment_stat_modifiers(equipment_stat_modifiers)
 	return checked
 

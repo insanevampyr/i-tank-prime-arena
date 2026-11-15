@@ -46,6 +46,6 @@ static func validate(policy: Dictionary, actor: CombatActorDefinition) -> String
 	if int(policy.get("initial_expc",-1)) < 0 or int(policy.initial_expc) > int(policy.initial_expm): return "progression_initial_xp_unverified"
 	if policy.resource_mode == "mana" and (not actor.resource_maxima.has("mana") or not actor.attributes.has("wis")): return "progression_mana_unverified"
 	if actor.level == 1 and actor.progression_hpm_increase == 0:
-		if policy.resource_mode == "mana" and (not policy.has("initial_wis") or int(actor.resource_maxima.mana) != int(policy.initial_wis)+10): return "progression_initial_mana_or_exception_unverified"
+		if policy.resource_mode == "mana" and (not policy.has("initial_wis") or int(actor.resource_maxima.mana) != int(policy.initial_wis)+10+actor.wisdom_mana_purchase_increase): return "progression_initial_mana_or_exception_unverified"
 		if policy.resource_mode == "ability" and int(actor.resource_maxima.get("ap",0)) != 0: return "progression_initial_ap_or_exception_unverified"
 	return ""
