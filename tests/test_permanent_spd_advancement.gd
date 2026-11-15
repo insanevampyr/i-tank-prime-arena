@@ -31,6 +31,7 @@ func fixture(score: int = 11, mode: String = "mana", funds: int = 20000) -> Dict
 
 func run() -> Array[String]:
 	boundaries()
+	exact_affordability()
 	rejections()
 	timing()
 	historical()
@@ -61,6 +62,21 @@ func boundaries() -> void:
 			check(f.sim.random.wave_entry_state() == rng and f.actor.source_character_definition.to_dictionary() == source,"No purchase RNG or authored-identity mutation.")
 			var unchanged: Dictionary = f.sim.get_state_snapshot()
 			check(f.ledger.purchase_advancement(f.sim,"speed_step",&"attribute",&"spd",selection(score+1)).reason == "duplicate_advancement_request" and f.sim.get_state_snapshot() == unchanged,"Repeated request cannot spend, grant or append events again.")
+
+func exact_affordability() -> void:
+	for mode: String in ["mana","regular"]:
+		for score: int in [1,5,6,10,11,15,16,19]:
+			var cost := price(score)
+			for margin: int in [-1,0,1]:
+				var f := fixture(score,mode,cost+margin)
+				var before: Dictionary = f.sim.get_state_snapshot()
+				var result: Dictionary = f.ledger.purchase_advancement(f.sim,"exact_spd",&"attribute",&"spd",selection(score))
+				if margin < 0:
+					check(result.get("reason") == "insufficient_xp" and f.sim.get_state_snapshot() == before and f.ledger.spent_xp == 0,"One below each current-score price fails without mutation.")
+				else:
+					check(result.success and f.ledger.spent_xp == cost and f.ledger.to_dictionary().unspent_xp == margin and f.actor.attributes.spd == score+1,"Exact and one-above balances pay exactly once in both modes.")
+					var after: Dictionary = f.sim.get_state_snapshot()
+					check(f.ledger.purchase_advancement(f.sim,"exact_spd",&"attribute",&"spd",selection(score+1)).get("reason") == "duplicate_advancement_request" and f.sim.get_state_snapshot() == after,"A fully spent or one-point wallet cannot replay a paid purchase.")
 
 func rejections() -> void:
 	var f := fixture()

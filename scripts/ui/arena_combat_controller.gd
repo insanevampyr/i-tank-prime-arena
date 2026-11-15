@@ -138,6 +138,7 @@ var _browser_motion_paused := false
 var _browser_motion_was_processing := false
 var _browser_controls_locked := false
 var _backup_actions: CharacterBackupActions
+var _expc_grant_actions: Node
 
 @onready var _player: PlaceholderPlayer = get_node_or_null(player_path)
 @onready var _opponent: Node2D = get_node_or_null(opponent_path)
@@ -221,6 +222,9 @@ func _ready() -> void:
 	_backup_actions.name = "CharacterBackupActions"
 	add_child(_backup_actions)
 	_backup_actions.setup(self,_character_selector)
+	_expc_grant_actions = preload("res://scripts/ui/character_expc_grant_actions.gd").new()
+	add_child(_expc_grant_actions)
+	_expc_grant_actions.setup(self)
 	_build_identity_label = Label.new()
 	_build_identity_label.name = "BuildIdentity"
 	_character_selector.get_parent().add_child(_build_identity_label)
@@ -857,6 +861,7 @@ static func _is_attack_key(keycode: Key) -> bool:
 
 
 func _on_encounter_button_pressed() -> void:
+	if _expc_grant_actions != null and _expc_grant_actions.blocks_gameplay(): return
 	if not _loaded_run_choice.is_empty(): return
 	if not _web_operation.is_empty():
 		_retry_browser_operation()
@@ -905,6 +910,7 @@ func _on_encounter_button_pressed() -> void:
 
 
 func _on_encounter_selector_pressed() -> void:
+	if _expc_grant_actions != null and _expc_grant_actions.blocks_gameplay(): return
 	if not _loaded_run_choice.is_empty(): return
 	var previous_index := _encounter_selector_index
 	var previous_test_mode := _developer_test_mode
@@ -963,6 +969,7 @@ static func _selector_index_for_fixture(encounter_fixture_id: StringName, test_m
 
 
 func _on_character_selector_pressed() -> void:
+	if _expc_grant_actions != null and _expc_grant_actions.blocks_gameplay(): return
 	if not _loaded_run_choice.is_empty(): return
 	if _can_cancel_browser_load():
 		_cancel_browser_creation()
@@ -1253,6 +1260,7 @@ func _use_browser_character_persistence() -> bool:
 	return (OS.has_feature("web") or PlayableBrowserPersistence.test_factory.is_valid()) and not PlayableCharacterPersistence.test_nonpersistent and _player_character_id == Fixture.PLAYER_CHARACTER_VAELIS and not _developer_test_mode and _encounter_fixture_id not in [Fixture.ENCOUNTER_MEDIUM_GUARDS,Fixture.ENCOUNTER_SYNTHETIC_SMALL_GUARD]
 
 func _browser_transition_blocked() -> bool:
+	if _expc_grant_actions != null and _expc_grant_actions.blocks_gameplay(): return true
 	if _backup_actions != null and (_backup_actions._selecting or (_backup_actions._reader != null and _backup_actions._reader._result.get("state") == "pending")): return true
 	return not _loaded_run_choice.is_empty() or (_backup_actions != null and _backup_actions.restoration_blocked) or not _web_operation.is_empty() or (_session != null and _session._playable_persistence is PlayableBrowserPersistence and _session._playable_persistence.pending_or_unsecured())
 
@@ -1626,6 +1634,7 @@ func _exit_tree() -> void:
 
 
 func _reset_encounter() -> void:
+	if _expc_grant_actions != null and _expc_grant_actions.blocks_gameplay(): return
 	_clear_attack_hold_intent()
 	_player.reset_for_encounter(_initial_player_position_feet)
 	_opponent.position = _initial_opponent_position_feet * _player.pixels_per_foot

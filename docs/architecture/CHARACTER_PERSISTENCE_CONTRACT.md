@@ -1,5 +1,42 @@
 # Task 36D: proposed character persistence contract
 
+## Task 43G — explicit one-time DEV credit delivery
+
+The fixed #43E grant now has a narrowly scoped maintenance adapter and Character
+Menu confirmation. Open the existing Legacy DEV profile, choose RESUME RUN (or
+finish an explicit NEW RUN decision), then use REVIEW ONE-TIME +10,000 EXPC next
+to Save/Load and legacy-profile access. No DEV visibility setting changes its
+profile authorization. NORMAL, TEST, other profiles and unsupported baselines
+cannot receive this credit; no amount, profile or grant-ID input is exposed.
+
+The adapter requires an admitted, acknowledged safe checkpoint and matching live
+EXPC/EXPM balances. It rereads and fully validates saved history, one generation
+per validation poll, before displaying the actual profile, namespace, committed
+generation, head/history SHA-256, current/proposed EXPC and unchanged EXPM. The
+confirmation is bound to an operation-local token, exact quote and unchanged
+runtime state. NOT NOW performs no write. Character/session replacement, combat,
+Running and ordinary character commands are blocked while verification,
+confirmation or uncertain publication is active.
+
+Confirmation prepares only the fixed #43E proposal and uses the existing
+Desktop/Browser coordinators and Browser writer lease. The exact prepared bytes
+remain retained after an abort, missing acknowledgement or inconsistent response.
+CHECK / RETRY SAME GRANT reconciles that proposal before any retry. Uncertainty
+cannot be canceled into normal gameplay; reload/recovery must verify the actual
+head. Only verified readback updates the in-memory wallet, candidate XP and ledger.
+It does not reapply character hydration, refill resources or replay purchases.
+One `reward_expc_test_credit_applied` diagnostic event records the persistent grant
+and transaction identity, generation and zero EXPM delta without combat RNG. It
+is not an ordinary XP reward. The APPLIED marker remains disabled after reload,
+spending, Refresh and NEW RUN. V5, V2/V4 histories, receipt/rollback validation and
+simulation schema 12 retain their existing #43E contracts.
+
+SPD mechanics are unchanged. Dedicated tests now cover balances one below,
+exactly equal to, and one above every implemented cost bracket and boundary in
+both Mana/Regular modes. V5 delivery tests additionally purchase permanent SPD,
+reload and restore the exact backup history using disposable profiles only.
+No owner IndexedDB or character data is used during development acceptance.
+
 ## Task 43E Pass 1 — owner-scoped EXPC credit
 
 Envelope V5 was unused and now identifies profiles with `expc_credits`, a
