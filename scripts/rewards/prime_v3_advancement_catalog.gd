@@ -69,6 +69,9 @@ static func make_purchase_preview(
 				elif target_id == &"spd":
 					available = current_value >= 1 and target_value <= 20
 					if not available: blocked_reason = "speed_mortal_purchase_limit"
+				elif target_id == &"end":
+					available = current_value >= 1 and target_value <= 20
+					if not available: blocked_reason = "endurance_mortal_purchase_limit"
 				elif target_id == &"wis":
 					available = current_value >= 1 and target_value <= 20
 					if not available: blocked_reason = "wisdom_mortal_purchase_limit"
@@ -123,6 +126,11 @@ static func build_actor_purchase_options(actor: CombatActorDefinition) -> Array[
 			if not speed.success:
 				option.available = false
 				option.blocked_reason = speed.reason
+		if attribute_id == &"end" and option.available:
+			var endurance := actor.preview_verified_endurance_advancement(int(current),int(current)+1)
+			if not endurance.success:
+				option.available = false
+				option.blocked_reason = endurance.reason
 		if attribute_id == &"wis" and option.available:
 			var wisdom := actor.preview_verified_wisdom_advancement(int(current),int(current)+1)
 			if not wisdom.success:

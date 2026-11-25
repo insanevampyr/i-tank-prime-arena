@@ -25,6 +25,14 @@ func pending(stage: String, progress: int = 0, total: int = 0) -> Dictionary:
 	return result
 
 func step() -> Dictionary:
+	var output := _step()
+	if output.get("state") != "pending": _release_buffers()
+	return output
+
+func _release_buffers() -> void:
+	history = {}; job = {}; checked = {}; manifest = {}; outer = {}; text = ""; scan = null
+
+func _step() -> Dictionary:
 	if result.get("state") != "pending": return result
 	if mode not in ["normal","dev_normal"]:
 		result = Backup.fail("unsupported_namespace"); return result
@@ -42,19 +50,14 @@ func step() -> Dictionary:
 		phase = "encode"
 		return pending("Encoding complete history")
 	if phase == "encode":
-		var head: Dictionary = checked.records.back()
-		var payload: Dictionary = checked.payload
-		var body := {"profile_id":payload.character_id,"namespace":mode,"definition_id":payload.definition_id,"rules_revision":payload.rules_revision,"created_utc":date,"head_generation":head.generation,"head_transaction_id":head.transaction_id,"generations":checked.records}
-		var body_json := JSON.stringify(body,"",true,true)
-		text = JSON.stringify({"format":Backup.FORMAT,"backup_version":Backup.VERSION,"body_json":body_json,"sha256":body_json.sha256_text()},"",true,true)
-		phase = "start_file"
-		return pending("Checking encoded file")
+		result = Backup._encode_checked(checked,mode,date)
+		return result
 	if phase == "start_file":
 		scan = Backup.JsonScan.new(text,Backup.MAX_FILE_BYTES)
 		phase = "file"
 		return pending("Checking encoded file",0,text.length())
 	if phase == "file":
-		var next := scan.step()
+		var next := scan.step(1048576)
 		if next.get("state") == "pending": return pending("Checking encoded file",scan.cursor,text.length())
 		if not next.success: result = next; return result
 		var parsed: Variant = JSON.parse_string(text)
@@ -65,7 +68,7 @@ func step() -> Dictionary:
 		phase = "body"
 		return pending("Checking manifest",0,outer.body_json.length())
 	if phase == "body":
-		var next := scan.step()
+		var next := scan.step(1048576)
 		if next.get("state") == "pending": return pending("Checking manifest",scan.cursor,outer.body_json.length())
 		if not next.success: result = next; return result
 		var parsed := Backup._parse_scanned_manifest(outer,mode)
@@ -87,4 +90,4 @@ func step() -> Dictionary:
 
 func cancel() -> void:
 	result = {"success":false,"state":"cancelled","reason":"backup_cancelled"}
-	history = {}; job = {}; checked = {}; manifest = {}; outer = {}; text = ""; scan = null
+	_release_buffers()

@@ -4,6 +4,7 @@ extends RefCounted
 const Contract = preload("res://scripts/rewards/character_save_contract.gd")
 const Advancement = preload("res://scripts/rewards/prime_v3_advancement_catalog.gd")
 const Growth = preload("res://scripts/rewards/prime_v3_level_catalog.gd")
+const EndHistory = preload("res://scripts/rewards/endurance_growth_history.gd")
 const Credit = preload("res://scripts/rewards/character_expc_credit.gd")
 const HISTORY_FIELDS := ["prior_level", "level", "threshold", "hit_die_sides", "die_flat_bonus", "roll", "hpb", "hpm_increase", "hpm_before", "hpm_after", "resource", "wisdom", "maximum_before", "maximum_increase", "maximum_after"]
 const PURCHASE_FIELDS := ["purchase_kind", "target_id", "value_before", "value_after", "cost", "source_ref"]
@@ -145,16 +146,21 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 	if award_total != b.earned: return _fail("award_total_mismatch")
 	var purchase_cost := 0
 	var wisdom_purchases: Array[Dictionary] = []
+	var endurance_purchases: Array[Dictionary] = []
 	for purchase: Dictionary in payload.purchases:
 		if not _keys(purchase,purchase_fields(purchase)+["purchase_id"]) or not _namespaced(purchase.purchase_id,profile_id,lineage.run_id): return _fail("invalid_purchase_record")
 		for field: String in ["purchase_kind","target_id","source_ref"]:
 			if not purchase[field] is String: return _fail("invalid_purchase_record")
 		for field: String in ["value_before","value_after","cost"]:
 			if not Contract._integer(purchase[field],0): return _fail("invalid_purchase_record")
+		var is_endurance: bool = purchase.purchase_kind == "attribute" and purchase.target_id == "end"
 		var is_wisdom: bool = purchase.purchase_kind == "attribute" and purchase.target_id == "wis"
 		var preview := Advancement.make_purchase_preview(StringName(purchase.purchase_kind),StringName(purchase.target_id),purchase.value_before,purchase.value_after,String(purchase.get("allocation","")))
 		if not preview.available or preview.cost != purchase.cost or preview.source_ref != purchase.source_ref: return _fail("unsupported_or_inconsistent_purchase")
 		purchase_cost += int(purchase.cost)
+		if is_endurance:
+			endurance_purchases.append(purchase)
+			continue
 		if is_wisdom:
 			var expected_wisdom: Variant = actor.attributes.get("wis") if wisdom_purchases.is_empty() else wisdom_purchases.back().value_after
 			if purchase.value_before != expected_wisdom: return _fail("wisdom_purchase_history_discontinuity")
@@ -166,6 +172,11 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		if not applied.success: return _fail("purchase_application_failed")
 	if actor.attributes.get("dex") != source.attributes.get("dex") and not p.has("development"): return _fail("dex_purchase_allocation_history_missing")
 	if purchase_cost != b.spent: return _fail("purchase_spending_mismatch")
+	var end_proof := {}
+	if not endurance_purchases.is_empty():
+		end_proof = EndHistory.resolve(source,payload,evidence)
+		if not end_proof.success: return _fail(end_proof.reason)
+	var end_cursor := 0
 	var expected_level := actor.level
 	var seen_growth := {}
 	var wisdom_cursor := 0
@@ -182,6 +193,15 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 			var step: Dictionary = wisdom_purchases[wisdom_cursor]
 			if not actor.apply_verified_wisdom_advancement(step.value_before,step.value_after).success: return _fail("wisdom_purchase_application_failed")
 			wisdom_cursor += 1
+		if not endurance_purchases.is_empty():
+			var event_source: Dictionary = end_proof.growth.get(record.growth_id,{})
+			if event_source.get("record_digest") != fingerprint(record): return _fail("end_growth_evidence_missing")
+			while actor.attributes.end != event_source.get("end"):
+				if end_cursor >= endurance_purchases.size() or actor.attributes.end > int(event_source.get("end",-1)): return _fail("end_event_time_order_mismatch")
+				var step: Dictionary = endurance_purchases[end_cursor]
+				if not actor.apply_verified_endurance_advancement(step.value_before,step.value_after).success: return _fail("end_purchase_application_failed")
+				end_cursor += 1
+			if record.hpb != event_source.get("hpb"): return _fail("end_event_time_hpb_mismatch")
 		var terms := CharacterLevelProgression.growth_terms(actor)
 		var die := int(terms.die)
 		var flat := int(terms.flat)
@@ -197,13 +217,21 @@ static func hydrate(payload: Dictionary, source: CombatCharacterDefinitionResour
 		var step: Dictionary = wisdom_purchases[wisdom_cursor]
 		if not actor.apply_verified_wisdom_advancement(step.value_before,step.value_after).success: return _fail("wisdom_purchase_application_failed")
 		wisdom_cursor += 1
+	while end_cursor < endurance_purchases.size():
+		var step: Dictionary = endurance_purchases[end_cursor]
+		if not actor.apply_verified_endurance_advancement(step.value_before,step.value_after).success: return _fail("end_purchase_application_failed")
+		end_cursor += 1
 	if p.level != expected_level or p.level != Growth.level_for(policy.exp_type,payload.xp.earned) or p.resource_maxima != actor.resource_maxima or p.ability_allowances != actor.ability_allowances: return _fail("level_or_entitlement_mismatch")
 	for maximum: Variant in p.resource_maxima.values():
 		if not Contract._integer(maximum,0): return _fail("invalid_resource_maximum")
 	var catalog := CombatDefinitionCatalog.load_default_fixture_catalog()
+	if CharacterDevelopment.legacy_vaelis_split(source):
+		var dodge := CharacterDevelopment.runtime_dodge(source,int(actor.base_combat_stats.dt),int(actor.base_combat_stats.dp))
+		actor.base_combat_stats.dt = dodge.dt
+		actor.base_combat_stats.dp = dodge.dp
 	if p.has("development"):
 		var development := CharacterDevelopment.inspect(p.development)
-		var allocation: Dictionary = DexAllocation.validate(development.allocation).totals
+		var allocation: Dictionary = DexAllocation.validate(CharacterDevelopment.runtime_allocation(development.allocation,source)).totals
 		actor.base_combat_stats.dt = allocation.dt
 		actor.base_combat_stats.dp = allocation.dp
 		actor.base_combat_stats.acc = PrimeV3DexChart.accuracy(allocation.dex,"mana" if actor.progression_policy.get("resource_mode") == "mana" else "regular")

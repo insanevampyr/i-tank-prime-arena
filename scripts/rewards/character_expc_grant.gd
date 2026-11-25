@@ -115,12 +115,28 @@ func retry() -> Dictionary:
 	return _publish()
 
 func _published(response: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _session._character_capture_gate if _session != null else null
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if response.get("state") == "pending": return status
 	if not response.get("success",false) or response.get("generation") != _prepared.payload.generation or response.get("latest_generation") != _prepared.payload.generation or response.get("transaction_id") != _prepared.transaction_id or (response.has("document") and response.document != _prepared.document):
 		return _fail(response.get("reason","credit_readback_unverified"),true)
 	if _session._playable_persistence != _service or _runtime_digest() != _runtime: return _fail("credit_live_state_changed_reload_required",true)
 	var ack := _service._ack(response)
 	if not ack.success: return _fail(ack.get("reason","credit_readback_unverified"),true)
+	_apply_runtime(_service.generation)
+	if _service is PlayableBrowserPersistence:
+		_service._browser_result = response.duplicate(true)
+		_service._phase = "finished"
+	var state := _session.get_actor_state(&"player")
+	status = {"success":true,"state":"applied","generation":_service.generation,"expc":state.progression.expc,"expm":state.progression.expm}
+	return status
+
+# Shared original effect only. Publication authority remains in the caller:
+# real verified readback above, or the cache-isolated dormant aggregate.
+func _apply_runtime(generation: int) -> void:
 	_service.candidate.xp = _prepared.payload.xp.duplicate(true)
 	var state := _session.get_actor_state(&"player")
 	state.progression.expc = _prepared.payload.xp.unspent
@@ -128,12 +144,7 @@ func _published(response: Dictionary) -> Dictionary:
 	state.revision += 1
 	_session._reward_ledger.expc_credit_total = Credit.AMOUNT
 	_session.simulation.set_reward_state_snapshot(_session.get_reward_state())
-	_session.simulation.record_reward_event(&"reward_expc_test_credit_applied",&"player",&"player",{"grant_id":Credit.GRANT_ID,"transaction_id":_prepared.transaction_id,"generation":_service.generation,"expc_credit":Credit.AMOUNT,"expm_change":0})
-	if _service is PlayableBrowserPersistence:
-		_service._browser_result = response.duplicate(true)
-		_service._phase = "finished"
-	status = {"success":true,"state":"applied","generation":_service.generation,"expc":state.progression.expc,"expm":state.progression.expm}
-	return status
+	_session.simulation.record_reward_event(&"reward_expc_test_credit_applied",&"player",&"player",{"grant_id":Credit.GRANT_ID,"transaction_id":_prepared.transaction_id,"generation":generation,"expc_credit":Credit.AMOUNT,"expm_change":0})
 
 func cancel() -> bool:
 	if status.get("state") in ["applied","already_applied"]: return true

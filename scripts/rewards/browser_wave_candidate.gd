@@ -43,6 +43,8 @@ static func prepare(source: ArenaCombatSession) -> Dictionary:
 static func copy_data(source: Object, target: Object, excluded: Array = []) -> void:
 	for property: Dictionary in source.get_script().get_script_property_list():
 		var field := String(property.name)
+		# Process-local gate ownership never transfers to a candidate clone.
+		if field == "_character_capture_gate": continue
 		if not (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) or excluded.has(field): continue
 		var value: Variant = source.get(field)
 		target.set(field,value.duplicate(true) if value is Dictionary or value is Array else value)

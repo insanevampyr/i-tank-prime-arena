@@ -7,7 +7,21 @@ const EXTENSION := ".itankbackup.json"
 const BRIDGE := """
 (()=>{if(window.ArenaBackupFiles)return;
 let status={state:'idle'},input=null,sequence=0;
+// Bounded work pump, independent of animation frames. Waiting for browser I/O
+// uses a timer; ready CPU chunks use MessageChannel tasks (never a busy wait).
+let pulseCallback=null,pulseChannel=null,pulseTimer=0,pulseQueued=false,pulseCPU=false;
+const stopPulse=()=>{pulseCallback=null;if(pulseTimer)clearTimeout(pulseTimer);pulseTimer=0;
+ if(pulseChannel){pulseChannel.port1.close();pulseChannel.port2.close();}pulseChannel=null;pulseQueued=false;
+ document.removeEventListener('visibilitychange',wakePulse);};
+function wakePulse(){if(!pulseCallback||pulseQueued||!pulseChannel)return;pulseQueued=true;
+ if(pulseCPU)pulseChannel.port2.postMessage(0);
+ else pulseTimer=setTimeout(()=>{pulseTimer=0;if(pulseChannel)pulseChannel.port2.postMessage(0);},50);}
 window.ArenaBackupFiles={
+ startPulse(callback){if(typeof MessageChannel!=='function')return false;stopPulse();pulseCallback=callback;pulseChannel=new MessageChannel();
+  pulseChannel.port1.onmessage=()=>{pulseQueued=false;const current=pulseCallback;if(!current)return;current();if(pulseCallback)wakePulse();};
+  document.addEventListener('visibilitychange',wakePulse);return true;},
+ pulseState(active,cpu){if(!active){stopPulse();return;}pulseCPU=!!cpu;wakePulse();},
+ stopPulse(){stopPulse();},
  choose(limit){
   if(status.state==='pending')return false;
   const current=++sequence;status={state:'pending'};input=document.createElement('input');

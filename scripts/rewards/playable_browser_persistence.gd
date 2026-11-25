@@ -21,6 +21,11 @@ var _confirmed_missing := false
 var _owns_lease := false
 
 func open_browser(p_mode: String, previous: PlayableBrowserPersistence = null, new_run: bool = false, defeated: Dictionary = {}, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var requested := ArenaRewardLedger.resolve_run_policy(p_mode, xp_multiplier)
 	if not requested.success: return _error("failed", requested.reason)
 	mode = p_mode
@@ -48,6 +53,11 @@ func _send(operation: String, arguments: Dictionary) -> Dictionary:
 	return _browser_result
 
 func poll_browser() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _phase == "publication":
 		var publication := _async.poll()
 		if publication.state == "pending": return publication
@@ -87,12 +97,22 @@ func poll_browser() -> Dictionary:
 	return response
 
 func confirm_creation() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _browser_result.get("state") != "confirmation_required": return Browser.status("failed","confirmation_not_requested")
 	_confirmed_missing = true
 	# Re-read after confirmation; never replace a profile that appeared meanwhile.
 	return _send("inspect",{"profile":profile_id})
 
 func publish_prepared() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	_async = AsyncCoordinator.new(browser)
 	_browser_result = _async.begin_commit(_prepared,source,profile_id,Admission.RULES,owner if previous_owner.is_empty() else previous_owner,_verify)
 	_phase = "publication"
@@ -100,16 +120,31 @@ func publish_prepared() -> Dictionary:
 	return _browser_result
 
 func reconcile() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	# The retained exact proposal is checked for an existing transaction first;
 	# if an aborted write did not publish, retrying the same proposal is safe.
 	if _prepared.is_empty(): return Browser.status("failed","no_pending_checkpoint")
 	return publish_prepared()
 
 func transfer_lease() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if previous_owner.is_empty(): return {"success":true}
 	return _send("transfer",{"profile":profile_id,"owner":previous_owner,"next_owner":owner})
 
 func release_lease() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _owns_lease: return {"success":true}
 	return _send("release",{"profile":profile_id,"owner":owner})
 
@@ -117,6 +152,11 @@ func pending_or_unsecured() -> bool:
 	return _browser_result.get("state") in ["pending","confirmation_required"] or (not _prepared.is_empty() and not _last_ack)
 
 func _error(state: String, reason: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	_browser_result = Browser.status(state,reason)
 	var text := "Recovery required" if state == "recovery_required" else ("Character currently open in another tab" if reason == "profile_in_use" else ("Storage unavailable" if state == "unavailable" else "Progress not saved"))
 	_status = {"persistent":false,"state":state,"reason":reason,"text":text}

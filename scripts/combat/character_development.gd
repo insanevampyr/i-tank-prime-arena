@@ -10,6 +10,30 @@ static func starting(policy: String, pool: int) -> Dictionary:
 	if policy != STANDARD_POLICY or pool != 9: return fail("starting_allocation_policy_unverified")
 	return DexAllocation.create(pool,6,3)
 
+# #45D owner correction: retain exact historical lineage and commands on disk,
+# but use the approved 6/3 starter split for these verified Vaelis sources.
+static func legacy_vaelis_split(source: CombatCharacterDefinitionResource) -> bool:
+	if source == null or source.definition_id != &"vaelis_thorn": return false
+	var original := source.to_dictionary()
+	original.proficiencies.erase("balance") # Verified runtime skill evolution is separate.
+	return JSON.stringify(original,"",true,true).sha256_text() == "3df0412b72ba5d966b2eb645887fedfbb591782cffc7bff41c192e52583c6d20"
+
+static func runtime_allocation(allocation: Dictionary, source: CombatCharacterDefinitionResource) -> Dictionary:
+	var corrected := allocation.duplicate(true)
+	if legacy_vaelis_split(source) and corrected.get("baseline") == {"dex":9,"dt":3,"dp":6}:
+		corrected.baseline.dt = 6
+		corrected.baseline.dp = 3
+	return corrected
+
+static func runtime_dodge(source: CombatCharacterDefinitionResource, dt: int, dp: int) -> Dictionary:
+	return {"dt":dt+3,"dp":dp-3} if legacy_vaelis_split(source) else {"dt":dt,"dp":dp}
+
+static func create_for_actor(actor: CombatActorDefinition) -> Dictionary:
+	var source := actor.source_character_definition
+	if legacy_vaelis_split(source) and actor.attributes.get("dex") == source.attributes.dex:
+		return create(source.attributes.dex,source.combat_stats.dt,source.combat_stats.dp)
+	return create(int(actor.attributes.get("dex",-1)),int(actor.base_combat_stats.get("dt",-1)),int(actor.base_combat_stats.get("dp",-1)))
+
 static func create(dex: int, dt: int, dp: int) -> Dictionary:
 	var initial := DexAllocation.create(dex,dt,dp)
 	if not initial.success: return initial

@@ -18,6 +18,8 @@ var _owns_browser := false
 var _job := ""
 var _mode := ""
 var _kind := ""
+var _verified_text := ""
+var _verified_snapshot := ""
 var _backup := {}
 var _result := {"success":false,"state":"idle"}
 
@@ -41,10 +43,13 @@ func begin_export(service: PlayableCharacterPersistence, incremental: bool = fal
 func begin_preview(text: String, save_namespace: String, storage: CharacterSaveStorage = null, browser: CharacterBrowserStorage = null, incremental: bool = false) -> Dictionary:
 	if _result.get("state") == "pending": return Backup.fail("backup_operation_in_flight")
 	_cancelled = false
+	_verified_text = text
+	_verified_snapshot = ""
 	_incremental = incremental
 	if not incremental:
 		_backup = Backup.decode(text,save_namespace)
 		if not _backup.success: return _backup
+		_verified_snapshot = Backup.snapshot_digest(_backup)
 	_mode = save_namespace
 	_kind = "preview"
 	_storage = storage
@@ -82,6 +87,7 @@ func poll() -> Dictionary:
 		if not response.get("success",false): _result = response; return response
 		if _kind == "preview_decode":
 			_backup = response; _kind = "preview"
+			_verified_snapshot = Backup.snapshot_digest(_backup)
 			return _inspect(_backup.manifest.profile_id)
 		var eligible := export_eligibility(_service)
 		if not eligible.success or response.payload != CharacterSaveContract.decode(CharacterSaveContract.encode(_service._prior).text).get("payload"):
@@ -143,6 +149,11 @@ func _finish(history: Dictionary) -> Dictionary:
 		_owns_browser = false
 	return _result.duplicate(true)
 
+# Typed host handoff only; JSON/imported flags cannot create a verified reader.
+func validated_preview(text: String, save_namespace: String) -> Dictionary:
+	if _cancelled or _result.get("state") != "preview" or save_namespace != _mode or text != _verified_text or _verified_snapshot.is_empty() or Backup.snapshot_digest(_backup) != _verified_snapshot: return Backup.fail("backup_changed")
+	return _backup.duplicate(true)
+
 func _compare_checked_destination(checked: Dictionary) -> String:
 	if not checked.success:
 		return "unsupported_namespace_or_version" if checked.get("reason") in ["unsupported_format_or_version","unsupported_character_version","profile_source_or_namespace_mismatch"] else "corrupt_or_uncertain_destination"
@@ -161,6 +172,8 @@ func cancel_read_only() -> void:
 	_cancelled = true
 	if _task != null: _task.cancel(); _task = null
 	_destination_job = {}; _deferred_profile = ""; _wait_frame = false
+	_backup = {}; _service = null; _storage = null
+	_verified_text = ""; _verified_snapshot = ""
 	if _job.is_empty(): _result = {"success":false,"state":"cancelled"}
 	if _owns_browser: _browser.dispose(); _owns_browser = false
 
@@ -180,3 +193,8 @@ static func export_eligibility(service: PlayableCharacterPersistence) -> Diction
 func dispose() -> void:
 	if _owns_browser and _browser != null: _browser.dispose()
 	_owns_browser = false
+	if _task != null: _task.cancel(); _task = null
+	_backup = {}; _destination_job = {}; _service = null; _storage = null
+	_verified_text = ""; _verified_snapshot = ""
+	_deferred_profile = ""; _wait_frame = false
+	_result = {"success":false,"state":"cancelled" if _cancelled else "disposed"}

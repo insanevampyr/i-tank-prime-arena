@@ -1,6 +1,9 @@
 class_name CombatActorState
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 var actor_id: StringName
 var current_hpc: Variant = null
 var resources: Dictionary = {}
@@ -107,12 +110,22 @@ func to_dictionary() -> Dictionary:
 
 
 func set_position(value: Vector2i, facing: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	position_microfeet = value
 	facing_millidegrees = facing
 	revision += 1
 
 
 func set_spatial_position(value: Vector2i, elevation: int, facing: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	assert(elevation >= 0, "Authoritative elevation cannot be negative.")
 	position_microfeet = value
 	elevation_microfeet = elevation
@@ -121,6 +134,11 @@ func set_spatial_position(value: Vector2i, elevation: int, facing: int) -> void:
 
 
 func refresh_movement_budget(definition: CombatActorDefinition, round_index: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if movement_round_index == round_index:
 		return
 	movement_round_index = round_index
@@ -130,6 +148,11 @@ func refresh_movement_budget(definition: CombatActorDefinition, round_index: int
 
 
 func spend_movement(amount_microfeet: int) -> bool:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return false
 	assert(amount_microfeet >= 0, "Movement spending cannot be negative.")
 	if remaining_mr_microfeet == null or amount_microfeet > int(remaining_mr_microfeet):
 		return false

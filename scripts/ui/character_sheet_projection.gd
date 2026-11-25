@@ -25,6 +25,7 @@ static func capture(session: ArenaCombatSession) -> Dictionary:
 		"primaries":[],"derived":[],"resistances":[],"resources":[],"effects":[],
 		"skills":[],"specials":[],"equipment":[],"profile":[],"purchases":purchases.duplicate(true),
 		"combat_active":session.is_encounter_active(),"references_available":references.get("success",false)}
+	result["experience"] = experience(actor,state)
 	var race: String = source.race_name if source != null else ""
 	var level: Variant = _level(state.progression.get("level",actor.level))
 	result.subtitle = "%s | %s | %s" % [race if not race.is_empty() else "Race not recorded", ", ".join(actor.class_names) if not actor.class_names.is_empty() else "Class not recorded","Level not available" if level == null else "Level %s" % level]
@@ -35,15 +36,28 @@ static func capture(session: ArenaCombatSession) -> Dictionary:
 		var modified := false
 		for effect: Dictionary in state.timed_stat_effects.values():
 			if effect.get("stat_modifiers",{}).has(key): modified = true
-		if modified: current = balance.profile.effective_dex if id == "DEX" and balance.success else null
+		if modified: current = session.simulation.get_effective_wisdom(actor.actor_id) if id == "WIS" else balance.profile.effective_dex if id == "DEX" and balance.success else null
 		result.primaries.append(_stat(id,Rules.PRIMARY_NAMES[id],_integer(source.attributes.get(key)) if source != null else null,permanent,current,id))
 		var descriptors := Rules.derived_descriptors(id,mode if mode in ["mana","regular"] else "mana")
 		for descriptor: Dictionary in descriptors.entries:
 			var abbreviation: String = descriptor.abbreviation
 			# Unknown resource mode must not pick a Mana/Ability-specific statistic.
 			if mode not in ["mana","regular"] and abbreviation in ["MR/H","MNS","MRF"]: continue
+			if abbreviation == "MR/H":
+				var wisdom: Variant = session.simulation.get_effective_wisdom(actor.actor_id)
+				result.derived.append(_stat("MR/Min","Mana Recovery per Minute",source.attributes.wis*0.5 if source != null and typeof(source.attributes.get("wis")) == TYPE_INT else null,actor.attributes.wis*0.5 if typeof(actor.attributes.get("wis")) == TYPE_INT else null,wisdom*0.5 if typeof(wisdom) == TYPE_INT else null,"WIS"))
+				continue
+			if abbreviation == "MSL":
+				var values: Array = []
+				for score: Variant in [source.attributes.get("wis") if source != null else null,actor.attributes.get("wis"),session.simulation.get_effective_wisdom(actor.actor_id)]:
+					var reference := Rules.lookup("WIS",score,mode) if typeof(score) == TYPE_INT else {}
+					values.append(reference.get("values",{}).get("MSL",{}).get("value"))
+				result.derived.append(_stat("MSL",descriptor.name,source.combat_stats.get("msl",values[0]) if source != null else values[0],actor.get_base_combat_stat("msl") if actor.get_base_combat_stat("msl") != null else values[1],session.simulation.get_effective_actor_combat_stat(actor.actor_id,"msl") if actor.get_combat_stat("msl") != null else values[2],"WIS"))
+				continue
 			var field: String = References.FIELDS.get(abbreviation,EXTRA_FIELDS.get(abbreviation,""))
 			var row := _stat(abbreviation,descriptor.name,_integer(source.combat_stats.get(field)) if source != null else null,_integer(actor.get_base_combat_stat(field)),_integer(session.simulation.get_effective_actor_combat_stat(actor.actor_id,field)),id)
+			if abbreviation in ["DT","DP"] and CharacterDevelopment.legacy_vaelis_split(source):
+				row.original = CharacterDevelopment.runtime_dodge(source,int(source.combat_stats.dt),int(source.combat_stats.dp))[field]
 			row["equipment"] = actor.equipment_stat_modifiers.get(field)
 			result.derived.append(row)
 	for id: String in ["SR","TB"]:
@@ -73,6 +87,32 @@ static func capture(session: ArenaCombatSession) -> Dictionary:
 	_specials(result,session,actor,state,source,recorded)
 	_equipment(result,session,actor,state)
 	_profile(result,session,actor,state,source,recorded)
+	return result
+
+# Read-only, current-level progress. EXPC and accounting credits never enter
+# the threshold calculation; missing/inconsistent evidence remains unavailable.
+static func experience(actor: CombatActorDefinition, state: CombatActorState) -> Dictionary:
+	var p := state.progression
+	var level: Variant = _level(p.get("level",actor.level))
+	var expm: Variant = _integer(p.get("expm"))
+	var available: Variant = _integer(p.get("expc"))
+	var spent: Variant = _integer(p.get("run_spent_xp"))
+	var result := {"level":level,"expm":expm,"available_expc":available,"spent_expc":spent,"needed":null,"within_level":null,"level_span":null,"ratio":null,"status":"Progress unavailable: verified level, EXPM and EXP Type required."}
+	var kind: Variant = actor.progression_policy.get("exp_type")
+	if typeof(kind) != TYPE_INT or level == null or expm == null or expm < 0 or p.get("exp_type",kind) != kind: return result
+	if not actor.progression_policy.get("classes",[]) is Array or kind != PrimeV3LevelCatalog.type_for_classes(actor.progression_policy.get("classes",[])): return result
+	var lower: Variant = PrimeV3LevelCatalog.threshold(kind,level)
+	if lower == null or expm < lower or PrimeV3LevelCatalog.level_for(kind,expm) != level: return result
+	if level == 20:
+		result.status = "Maximum verified level (20). No higher verified threshold."
+		return result
+	var upper: Variant = PrimeV3LevelCatalog.threshold(kind,level+1)
+	if upper == null or upper <= lower: return result
+	result.needed = upper-expm
+	result.within_level = expm-lower
+	result.level_span = upper-lower
+	result.ratio = float(result.within_level)/float(result.level_span)
+	result.status = "Verified class / EXP Type %s thresholds." % kind
 	return result
 
 static func _stat(id: String, title: String, original: Variant, permanent: Variant, effective: Variant, group: String) -> Dictionary:

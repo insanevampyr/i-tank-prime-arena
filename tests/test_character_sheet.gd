@@ -49,7 +49,7 @@ func projection() -> void:
 	check(stat(model.derived,"DT").permanent == actor.source_character_definition.combat_stats.dt+1,"The explicitly selected DT point is displayed.")
 	check(stat(model.derived,"DP").permanent == actor.source_character_definition.combat_stats.dp,"DP allocation is unchanged.")
 	check(stat(model.derived,"DT").effective == s.simulation.get_effective_actor_combat_stat(&"player","dt"),"Equipment-adjusted Dodge comes from live combat, never a UI formula.")
-	check(stat(model.derived,"MSL").effective == null,"Missing live derived values are not filled from the chart.")
+	check(stat(model.derived,"MSL").effective == 3 and actor.get_combat_stat("msl") == null and stat(model.derived,"MIUR").effective == null,"45D projects verified WIS10 MSL3 without creating a learning mechanic or fabricating other missing stats.")
 	check(stat(model.resources,"HPC").current == 7 and stat(model.resources,"MANA").current == 5,"Current resources are not confused with maxima.")
 	check(model.purchases == ledger.purchase_records,"Exact advancement receipts are projected without reinterpretation.")
 	check(model.resistances.size() == 2 and stat(model.resistances,"TB").name == "Tolerance Bonus","SR/TB remain independent and correctly named.")

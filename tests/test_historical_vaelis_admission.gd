@@ -125,7 +125,7 @@ func check_loading(fixture: Dictionary, mode: String, digest: String) -> void:
 	var captured := BalanceActorProfile.capture(actor.source_character_definition,actor,state,c._session.simulation.clock.get_elapsed_us())
 	check(captured.success and BalanceSkillCheck.resolve(captured.get("profile",{}),9).get("target") == 9,"Historical actor retains current verified SI2/SCM0/RB0 Balance.")
 	check(c._session._playable_persistence.source.proficiencies.is_empty() and CharacterProfileProjection.fingerprint(c._session._playable_persistence.source.to_dictionary()) == digest,"Runtime Balance does not rewrite saved source provenance.")
-	check(actor.get_combat_stat("dt") == OLD_SPLITS[digest][0] and actor.get_combat_stat("dp") == OLD_SPLITS[digest][1],"Runtime skill evolution does not redistribute Dodge allocations.")
+	check(actor.get_combat_stat("dt") == 6 and actor.get_combat_stat("dp") == 3,"45D applies the approved runtime starter split while historical source/receipts remain unchanged.")
 	var snapshot := c._session.get_state_snapshot()
 	var events := c._session.simulation.get_resolved_events().map(func(e): return e.to_dictionary())
 	var rng := c._session.simulation.random.wave_entry_state()

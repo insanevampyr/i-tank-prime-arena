@@ -17,6 +17,9 @@ var _export := {}
 var _download_button: Button
 var last_result := {}
 var _draining: Array[CharacterBackupReader] = []
+var _background_callback: JavaScriptObject
+var _background_started := false
+var _processing_work := false
 var restoration_blocked := false
 var _restorer: CharacterBackupRestoration
 var _confirmation: ConfirmationDialog
@@ -141,7 +144,9 @@ func _on_action(action: StringName) -> void:
 			_show_result(Backup.fail("eligible_backup_preview_required"))
 			return
 		_restorer = CharacterBackupRestoration.new()
-		var started := _restorer.begin(_preview_source,_namespace,_destination_service())
+		var started := _restorer.begin(_preview_source,_namespace,_destination_service(),null,null,_reader)
+		# The exact validated snapshot now belongs to the confirmation operation.
+		if _reader != null: _reader.dispose(); _reader = null
 		restoration_blocked = true
 		_handle_restore(started)
 		return
@@ -166,6 +171,13 @@ func _on_action(action: StringName) -> void:
 		return
 	_namespace = ArenaRewardLedger.MODE_DEV_NORMAL if action == &"legacy_preview" else _controller._session.get_reward_mode()
 	_legacy_preview_session = _controller._session if action == &"legacy_preview" else null
+	# A new read-only operation replaces the previous completed output. Do not
+	# retain a complete old export/preview while constructing the next one.
+	if action in [&"export", &"preview", &"legacy_preview"]:
+		if _reader != null: _reader.dispose(); _reader = null
+		_export = {}; last_result = {}; _preview_source = ""
+		if _download_button != null: _download_button.hide()
+		if _restore_button != null: _restore_button.hide()
 	if action == &"export":
 		_show("Preparing your character save. No character data is being changed.")
 		_export_service = _controller._session._playable_persistence
@@ -191,6 +203,8 @@ func _on_action(action: StringName) -> void:
 			_picker.popup_centered_ratio(0.65)
 
 func _process(_delta: float) -> void:
+	if _processing_work: return
+	_processing_work = true
 	_update_controls()
 	if _restorer != null and _restorer.status.state == "pending": _handle_restore(_restorer.poll())
 	if _admitting and _controller._web_operation.is_empty():
@@ -213,6 +227,28 @@ func _process(_delta: float) -> void:
 			elif selected.get("state") == "cancelled": _show("File selection canceled. Your character was not changed.")
 			else: _show_result(Backup.fail(selected.get("reason","file_selection_failed")))
 	if _reader != null and _reader._result.get("state") == "pending": _accept(_reader.poll())
+	_processing_work = false
+	_sync_background_work()
+
+func _background_work(_arguments: Array) -> void:
+	if is_inside_tree(): _process(0.0)
+
+func _sync_background_work() -> void:
+	if not OS.has_feature("web"): return
+	var reading: bool = _reader != null and _reader._result.get("state") == "pending"
+	var restoring: bool = _restorer != null and _restorer.status.get("state") == "pending"
+	var active: bool = reading or restoring or _selecting or not _draining.is_empty()
+	if not active:
+		if _background_started and _bridge != null: _bridge.stopPulse()
+		_background_started = false
+		return
+	if _bridge == null: _bridge = Files.web_bridge()
+	if _bridge == null: return
+	if not _background_started:
+		if _background_callback == null: _background_callback = JavaScriptBridge.create_callback(_background_work)
+		_background_started = bool(_bridge.startPulse(_background_callback))
+	var cpu: bool = reading and (_reader._task != null or not _reader._destination_job.is_empty() or not _reader._deferred_profile.is_empty())
+	if _background_started: _bridge.pulseState(true,cpu)
 
 func _update_controls() -> void:
 	if _controls == null: return
@@ -266,6 +302,7 @@ func _destination_service() -> PlayableCharacterPersistence:
 	return service if service != null and service.mode == _namespace else null
 
 func _accept(result: Dictionary) -> void:
+	_sync_background_work()
 	if result.get("state") == "pending":
 		var progress := " · %s / %s" % [result.progress,result.total] if result.get("total",0) > 0 else ""
 		_show("%s%s\nPlease wait. No character data is being changed. CANCEL stops this read-only operation." % [result.get("stage","Checking your saved character"),progress])
@@ -387,6 +424,7 @@ func _close(offer_run_choice: bool = true) -> void:
 	_preview_source = ""
 	_legacy_preview_session = null
 	_dialog.hide()
+	_sync_background_work()
 	if offer_run_choice: _controller._offer_loaded_run_choice()
 
 func _confirm_restore() -> void:
@@ -409,6 +447,7 @@ func _cancel_restore() -> void:
 	_show("Load canceled. Your character was not changed.")
 
 func _handle_restore(result: Dictionary) -> void:
+	_sync_background_work()
 	if result.get("state") == "pending":
 		_show("Loading and checking the save. Combat, movement and character changes are paused. Please wait for confirmation.")
 	elif result.get("state") == "confirmation_required":
@@ -447,6 +486,9 @@ func _handle_restore(result: Dictionary) -> void:
 			_verify_button.show()
 
 func _exit_tree() -> void:
+	if _background_started and _bridge != null: _bridge.stopPulse()
+	_background_started = false
+	_background_callback = null
 	if _restorer != null: _restorer.dispose()
 	_restorer = null
 	restoration_blocked = false

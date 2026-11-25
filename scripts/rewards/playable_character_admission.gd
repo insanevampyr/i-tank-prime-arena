@@ -103,6 +103,10 @@ static func prepare_starter(character: StringName, mode: String, baseline_digest
 	var runtime_source: CombatCharacterDefinitionResource = source.duplicate(true)
 	runtime_source.proficiencies["balance"] = current_balance
 	actor.source_character_definition = runtime_source
+	var dodge := CharacterDevelopment.runtime_dodge(source,int(actor.base_combat_stats.dt),int(actor.base_combat_stats.dp))
+	actor.base_combat_stats.dt = dodge.dt
+	actor.base_combat_stats.dp = dodge.dp
+	actor.apply_equipment_stat_modifiers(actor.equipment_stat_modifiers)
 	var state := CombatActorState.new(actor)
 	state.inventory_quantities = verified.quantities.duplicate(true)
 	state.hand_occupancy = CombatWeaponHandling.initial_assignments(actor.equipment_refs,CombatDefinitionCatalog.load_default_fixture_catalog(),actor)

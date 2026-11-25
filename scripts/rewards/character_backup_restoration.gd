@@ -9,6 +9,8 @@ var storage: CharacterSaveStorage
 var browser: CharacterBrowserStorage
 var lease_service: PlayableBrowserPersistence
 var _text := ""
+var _validated_text := ""
+var _validated_snapshot := ""
 var _namespace := ""
 var _expected: Array = []
 var _owner := ""
@@ -18,11 +20,12 @@ var _owns_browser := false
 var _native_locked := false
 var uncertain := false
 
-func begin(text: String, save_namespace: String, service: PlayableCharacterPersistence = null, isolated_storage: CharacterSaveStorage = null, browser_adapter: CharacterBrowserStorage = null) -> Dictionary:
+func begin(text: String, save_namespace: String, service: PlayableCharacterPersistence = null, isolated_storage: CharacterSaveStorage = null, browser_adapter: CharacterBrowserStorage = null, preview_reader: CharacterBackupReader = null) -> Dictionary:
 	if status.state != "idle": return _failure("restoration_already_started")
-	backup = Backup.decode(text,save_namespace)
+	backup = Backup.decode(text,save_namespace) if preview_reader == null else preview_reader.validated_preview(text,save_namespace)
 	if not backup.success: return _failure(backup.get("reason","invalid_backup"))
 	_text = text; _namespace = save_namespace
+	_validated_text = text; _validated_snapshot = Backup.snapshot_digest(backup)
 	if service != null:
 		if service.profile_id != backup.manifest.profile_id or service.mode != save_namespace or not CharacterBackupReader.export_eligibility(service).success: return _failure("destination_admission_pending_or_mismatched")
 	storage = isolated_storage if isolated_storage != null else (service.storage if service != null else PlayableCharacterPersistence.test_storage)
@@ -54,8 +57,7 @@ func _evaluate(history: Dictionary) -> Dictionary:
 
 func confirm() -> Dictionary:
 	if status.state != "confirmation_required" or uncertain: return _failure("explicit_restoration_confirmation_required")
-	var checked := Backup.decode(_text,_namespace)
-	if not checked.success or checked.backup_digest != backup.backup_digest: return _failure("backup_changed")
+	if not _snapshot_unchanged(): return _failure("backup_changed")
 	if browser != null: return _dispatch("revalidate",{"profile":backup.manifest.profile_id},"inspect")
 	var before := storage.inspect_owned(backup.manifest.profile_id,_owner)
 	if not before.get("success",false) or before.writer_locked or before.pending_write or CharacterSaveStorage.history_records(before) != _expected: return _failure("destination_changed_after_preview")
@@ -97,11 +99,22 @@ func reconcile() -> Dictionary:
 
 func _verified(history: Dictionary) -> Dictionary:
 	if not history.get("success",false) or history.get("writer_locked",false) or history.get("pending_write",false) or CharacterSaveStorage.history_records(history) != backup.history: return _failure("restoration_readback_mismatch")
-	var checked := Backup.validate_history(history,_namespace)
-	if not checked.success: return _failure(checked.get("reason","restored_history_invalid"))
+	# Exact readback above plus the bound, fully source-validated input is
+	# equivalent to replaying the identical historical bytes a second time.
+	if not _snapshot_unchanged(): return _failure("backup_changed")
 	uncertain = false
-	status = {"success":true,"state":"verified_committed","payload":checked.payload,"generation":backup.manifest.head_generation,"digest":backup.backup_digest}
+	status = {"success":true,"state":"verified_committed","payload":backup.payload.duplicate(true),"generation":backup.manifest.head_generation,"digest":backup.backup_digest}
+	_release_buffers()
 	return status.duplicate(true)
+
+func _snapshot_unchanged() -> bool:
+	return _text == _validated_text and not _validated_snapshot.is_empty() and Backup.snapshot_digest(backup) == _validated_snapshot
+
+func _release_buffers() -> void:
+	# Only the tiny identity is still required to release/handoff the writer.
+	var profile: String = backup.get("manifest",{}).get("profile_id","")
+	backup = {"manifest":{"profile_id":profile}}
+	_text = ""; _validated_text = ""; _validated_snapshot = ""; _expected = []
 
 func _dispatch(phase: String, args: Dictionary, operation: String = "") -> Dictionary:
 	_phase = phase
@@ -120,6 +133,7 @@ func cancel() -> Dictionary:
 		browser.dispose()
 		_owns_browser = false
 	status = {"success":true,"state":"cancelled"}
+	_release_buffers()
 	return status.duplicate(true)
 
 func handoff() -> Dictionary:
@@ -135,6 +149,7 @@ func handoff() -> Dictionary:
 
 func _failure(reason: String) -> Dictionary:
 	status = {"success":false,"state":"recovery_required" if uncertain else "failed","reason":reason}
+	if not uncertain: _release_buffers()
 	return status.duplicate(true)
 
 func dispose() -> void:
@@ -143,3 +158,4 @@ func dispose() -> void:
 		_native_locked = false
 	if _owns_browser and browser != null: browser.dispose()
 	_owns_browser = false
+	_release_buffers()

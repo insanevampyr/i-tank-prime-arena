@@ -311,6 +311,7 @@ func _attributes() -> void:
 		var body := _card(resources)
 		body.add_child(_label(resource.name.to_upper(),11,MUTED))
 		body.add_child(_label("%s / %s" % [SheetData.show_value(resource.current),SheetData.show_value(resource.maximum)],23,ACCENT))
+	_experience()
 	_section("PRIMARY ATTRIBUTES","STATS")
 	content.add_child(_label("ORIGINAL  /  PERMANENT  /  EFFECTIVE     |     -- = no verified value",11,MUTED))
 	var primaries := _grid(5 if _last_display.x >= 760 else 3)
@@ -335,6 +336,24 @@ func _attributes() -> void:
 		_values(body,stat,17)
 	_section("CONDITIONS & ACTIVE EFFECTS","RESOURCES")
 	_entries(model.effects,"No current conditions or active effects are recorded.")
+
+func _experience() -> void:
+	_section("EXPERIENCE","EXPERIENCE")
+	var data: Dictionary = model.get("experience",{})
+	var body := _card(content)
+	body.name = "ExperienceSection"
+	body.add_child(_label("Level %s | Total EXPM %s | Available EXPC %s | Recorded EXPC spent %s" % [SheetData.show_value(data.get("level")),SheetData.show_value(data.get("expm")),SheetData.show_value(data.get("available_expc")),SheetData.show_value(data.get("spent_expc"))],12,TEXT))
+	if data.get("ratio") != null:
+		body.add_child(_label("%s / %s EXPM within this level | %s EXPM to Level %s" % [data.within_level,data.level_span,data.needed,int(data.level)+1],12,ACCENT))
+		var progress := ProgressBar.new()
+		progress.name = "ExperienceProgress"
+		progress.show_percentage = false
+		progress.value = float(data.ratio)*100.0
+		progress.custom_minimum_size = Vector2(0,8/_scale)
+		progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		body.add_child(progress)
+	else:
+		body.add_child(_label(String(data.get("status","Experience unavailable.")),12,MUTED))
 
 func _stat_heading(body: VBoxContainer, stat: Dictionary) -> void:
 	var row := HBoxContainer.new()

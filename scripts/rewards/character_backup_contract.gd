@@ -27,15 +27,25 @@ const Coordinator = preload("res://scripts/rewards/character_persistence_coordin
 static func create(history: Dictionary, save_namespace: String, created_utc: String) -> Dictionary:
 	var checked := validate_history(history,save_namespace)
 	if not checked.success: return checked
+	return _encode_checked(checked,save_namespace,created_utc)
+
+# Operation-private, fully validated immutable strings/records only. Imported
+# bytes NEVER enter here without validate_history. Native JSON encoding creates
+# the exact canonical container: no parsing/second source replay is necessary.
+static func _encode_checked(checked: Dictionary, save_namespace: String, created_utc: String) -> Dictionary:
+	if not checked.get("success",false) or not valid_date(created_utc): return fail("invalid_backup_date")
+	if checked.payload.get("profile_namespace") != save_namespace: return fail("namespace_mismatch")
 	var head: Dictionary = checked.records.back()
 	var payload: Dictionary = checked.payload
 	var body := {"profile_id":payload.character_id,"namespace":save_namespace,"definition_id":payload.definition_id,"rules_revision":payload.rules_revision,"created_utc":created_utc,"head_generation":head.generation,"head_transaction_id":head.transaction_id,"generations":checked.records}
 	var body_json := JSON.stringify(body,"",true,true)
-	var text := JSON.stringify({"format":FORMAT,"backup_version":VERSION,"body_json":body_json,"sha256":body_json.sha256_text()},"",true,true)
-	var decoded := decode(text,save_namespace)
-	if not decoded.success: return decoded
-	decoded["text"] = text
-	return decoded
+	if not check_size(body_json.to_utf8_buffer().size(),MAX_BODY_BYTES).success: return fail("backup_size_limit")
+	var digest := body_json.sha256_text()
+	var text := JSON.stringify({"format":FORMAT,"backup_version":VERSION,"body_json":body_json,"sha256":digest},"",true,true)
+	if not check_size(text.to_utf8_buffer().size(),MAX_FILE_BYTES).success: return fail("backup_size_limit")
+	var output := _finish_manifest(body,checked,digest)
+	if output.success: output["text"] = text
+	return output
 
 static func decode(text: String, expected_namespace: String) -> Dictionary:
 	if expected_namespace not in ["normal","dev_normal"]: return fail("unsupported_namespace")
@@ -86,7 +96,7 @@ static func begin_history_validation(history: Dictionary, save_namespace: String
 		var copy := {"document":row.get("document"),"transaction_id":row.get("transaction_id")}
 		if row.has("generation"): copy["generation"] = row.generation
 		frozen.append(copy)
-	return {"success":true,"state":"pending","rows":frozen,"namespace":save_namespace,"starter":starter,"transactions":{},"records":[],"previous":{},"total":0,"cursor":0}
+	return {"success":true,"state":"pending","rows":frozen,"namespace":save_namespace,"starter":starter,"transactions":{},"records":[],"previous":{},"total":0,"cursor":0,"source_resources":CombatDefinitionCatalog.load_default_fixture_catalog()}
 
 static func _validate_history_row(job: Dictionary, row: Variant, index: int) -> Dictionary:
 	var save_namespace: String = job.namespace
@@ -124,8 +134,12 @@ static func _validate_history_row(job: Dictionary, row: Variant, index: int) -> 
 	# to the independently verified authored lineage. This is not a signature.
 	var binding := Profiles.fingerprint(payload)
 	var lineage: Dictionary = starter.prepared.payload.lineage.duplicate(true)
+	var end_proof := {}
+	if EnduranceGrowthHistory.has_purchases(payload):
+		end_proof = EnduranceGrowthHistory.extend(starter.source,payload,previous,job.get("endurance_history",{}))
+		if not end_proof.success: return fail(end_proof.reason)
 	var verifier := func(operation: String, requested: String) -> Dictionary:
-		return {"authorized":operation == "hydrate" and requested == binding,"binding":requested,"lineage":lineage}
+		return {"authorized":operation == "hydrate" and requested == binding,"binding":requested,"lineage":lineage,"endurance_history":end_proof}
 	var hydrated := Profiles.hydrate(payload,starter.source,starter.profile_id,Admission.RULES,verifier)
 	if not hydrated.success: return fail(hydrated.get("reason","invalid_character"))
 	if not previous.is_empty():
@@ -138,6 +152,7 @@ static func _validate_history_row(job: Dictionary, row: Variant, index: int) -> 
 	var position: Array = payload.recovery.player_position
 	if not battlefield.is_position_legal(&"player",Vector2i(position[0],position[1]),{}).legal: return fail("checkpoint_position_illegal")
 	records.append({"generation":int(payload.generation),"transaction_id":row.transaction_id,"document":row.document})
+	job.endurance_history = end_proof
 	job.previous = payload
 	job.starter = starter
 	job.total = total
@@ -158,6 +173,20 @@ static func validate_history(history: Dictionary, save_namespace: String) -> Dic
 		var result := step_history_validation(job)
 		if result.get("state") != "pending": return result
 	return fail("invalid_generation_history")
+
+# A host-owned validated snapshot is reusable only while EVERY original record
+# byte and all publication/preview metadata remain identical. This is a change
+# detector, never authentication or a substitute for initial full validation.
+static func snapshot_digest(backup: Dictionary) -> String:
+	if not backup.get("success",false) or not backup.get("manifest") is Dictionary or not backup.get("history") is Array or not backup.get("payload") is Dictionary or not backup.get("preview") is Dictionary: return ""
+	if backup.manifest.get("generations") != backup.history: return ""
+	var records: Array = []
+	for row: Variant in backup.history:
+		if not row is Dictionary or not keys(row,["generation","transaction_id","document"]) or typeof(row.generation) != TYPE_INT or not row.transaction_id is String or not row.document is String: return ""
+		records.append([row.generation,row.transaction_id,row.document.sha256_text()])
+	var header: Dictionary = backup.manifest.duplicate()
+	header.erase("generations")
+	return Profiles.fingerprint({"header":header,"records":records,"payload":backup.payload,"preview":backup.preview,"body_digest":backup.get("backup_digest")})
 
 static func compare(backup: Dictionary, destination: Dictionary, save_namespace: String) -> String:
 	if not backup.get("success",false) or backup.manifest.namespace != save_namespace: return "unsupported_namespace_or_version"
@@ -219,6 +248,10 @@ static func check_size(byte_count: int, limit: int) -> Dictionary:
 	return {"success":true} if byte_count >= 0 and byte_count <= limit else fail("backup_size_limit")
 
 class JsonScan extends RefCounted:
+	# Native bounded runs replace per-character GDScript work inside JSON strings
+	# and legal whitespace. Key decoding, duplicate/depth/token checks stay below.
+	static var string_run: RegEx
+	static var space_run: RegEx
 	var text: String
 	var cursor := 0
 	var stack: Array = []
@@ -230,16 +263,45 @@ class JsonScan extends RefCounted:
 	var result := {"success":false,"state":"pending"}
 	func _init(value: String, limit: int) -> void:
 		text = value
+		if string_run == null:
+			string_run = RegEx.new()
+			string_run.compile(r'\G(?:[^"\\]|\\[\s\S]){1,8192}+')
+			space_run = RegEx.new()
+			space_run.compile(r'\G[ \t\r\n]{1,16384}+')
+		# Required initialization must execute in release builds, where assert()
+		# expressions are removed. Never search an uncompiled regex.
+		if not string_run.is_valid() or not space_run.is_valid():
+			result = CharacterBackupContract.fail("backup_scanner_unavailable")
+			return
 		if not CharacterBackupContract.check_size(text.to_utf8_buffer().size(),limit).success: result = CharacterBackupContract.fail("backup_size_limit")
+	var next_backslash := -2
 	func step(budget: int = 32768) -> Dictionary:
 		if result.get("state") != "pending": return result
 		var stop := mini(text.length(),cursor+maxi(1,budget))
 		while cursor < stop:
-			var ch := text[cursor]
+			var code := text.unicode_at(cursor)
+			if in_string and not escaped:
+				if next_backslash == -2 or (next_backslash >= 0 and next_backslash < cursor): next_backslash = text.find("\\",cursor)
+				var quote := text.find('"',cursor)
+				if next_backslash == -1 or (quote >= 0 and quote < next_backslash):
+					cursor = mini(stop,text.length() if quote < 0 else quote)
+				else:
+					# A bounded native run handles escaped pairs. Its small subject
+					# avoids per-token work/copies against the complete large file.
+					var segment := text.substr(cursor,mini(16384,stop-cursor))
+					var matched := string_run.search(segment)
+					if matched != null: cursor += matched.get_end()
+				if cursor >= stop: break
+				code = text.unicode_at(cursor)
+			elif not in_string and (code == 32 or code == 9 or code == 10 or code == 13):
+				var matched := space_run.search(text.substr(cursor,mini(16384,stop-cursor)))
+				if matched != null: cursor += matched.get_end()
+				if cursor >= stop: break
+				code = text.unicode_at(cursor)
 			if in_string:
 				if escaped: escaped = false
-				elif ch == "\\": escaped = true
-				elif ch == '"':
+				elif code == 92: escaped = true
+				elif code == 34:
 					in_string = false
 					if key_string:
 						var key: Variant = JSON.parse_string(text.substr(string_start,cursor-string_start+1))
@@ -247,19 +309,19 @@ class JsonScan extends RefCounted:
 						if stack.back().seen.has(key): return finish("duplicate_json_key")
 						stack.back().seen[key] = true
 						stack.back().key = false
-			elif ch == '"':
+			elif code == 34:
 				in_string = true
 				string_start = cursor
 				key_string = not stack.is_empty() and stack.back().object and stack.back().key
 			else:
-				if ch in ["{","["]:
-					stack.append({"object":ch == "{","key":true,"seen":{}})
+				if code == 123 or code == 91:
+					stack.append({"object":code == 123,"key":true,"seen":{}})
 					if stack.size() > CharacterBackupContract.MAX_DEPTH: return finish("backup_depth_limit")
-				elif ch in ["}","]"]:
+				elif code == 125 or code == 93:
 					if stack.is_empty(): return finish("invalid_json_nesting")
 					stack.pop_back()
-				elif ch == "," and not stack.is_empty(): stack.back().key = true
-				if ch in ["{","[","}","]",",",":"]:
+				elif code == 44 and not stack.is_empty(): stack.back().key = true
+				if code == 123 or code == 91 or code == 125 or code == 93 or code == 44 or code == 58:
 					tokens += 1
 					if tokens > CharacterBackupContract.MAX_TOKENS: return finish("backup_structure_limit")
 			cursor += 1

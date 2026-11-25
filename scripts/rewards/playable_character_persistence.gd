@@ -1,9 +1,15 @@
 class_name PlayableCharacterPersistence
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+# Dormant minimal route only; no playable caller assigns this.
+var _minimal_transactions: WeakRef
+
 const Admission = preload("res://scripts/rewards/playable_character_admission.gd")
 const Profiles = preload("res://scripts/rewards/character_profile_projection.gd")
 const Coordinator = preload("res://scripts/rewards/character_persistence_coordinator.gd")
+const EndHistory = preload("res://scripts/rewards/endurance_growth_history.gd")
 const Boundary = preload("res://scripts/rewards/character_wave_checkpoint.gd")
 # Explicit runner injection: ordinary gameplay never uses test directories.
 static var test_nonpersistent := false
@@ -22,6 +28,7 @@ var generation := 0
 var items: Array = []
 var receipts: Array = []
 var _prior: Dictionary = {}
+var _endurance_history: Dictionary = {}
 var _awards: Dictionary = {}
 var _purchases: Dictionary = {}
 var _growth: Dictionary = {}
@@ -41,11 +48,19 @@ var _lineage: Dictionary = {}
 var _prepared: Dictionary = {}
 var _prepared_fingerprint := ""
 var _last_ack := false
+var _compact_active := false
+var _compact_ack_binding := ""
+var _compact_ack_end_proof := {}
 var _failure := ""
 var _reset := false
 var _status := {"persistent":false,"reason":"not_initialized","text":"Progress not saved"}
 
 func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	mode = p_mode
 	if not defeated_checkpoint.is_empty() and not new_run: return _fail("defeat_restart_requires_new_run")
 	if mode not in ["normal","dev_normal"]: return _fail("test_mode_nonpersistent")
@@ -62,6 +77,11 @@ func open(p_mode: String, new_run: bool = false, defeated_checkpoint: Dictionary
 # Shared source/lineage/hydration path. Browser callers supply fully decoded,
 # verified history only after asynchronous lock acquisition and inspection.
 func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bool, defeated_checkpoint: Dictionary, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var requested := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
 	if not requested.success: return requested
 	if history.get("success",false) and not history.get("generations",[]).is_empty():
@@ -76,6 +96,14 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 		var before: Dictionary = history.generations[index-1].payload
 		var after: Dictionary = history.generations[index].payload
 		if not CharacterSaveContract.validate_replacement(before,after).success or not Coordinator._validate_continuity(before,after).success or not Coordinator._validate_new_items(before,after).success: return _fail("profile_generation_continuity_invalid")
+	_endurance_history = {}
+	var end_previous := {}
+	for row: Dictionary in history.generations:
+		if EndHistory.has_purchases(row.payload):
+			var checked_end := EndHistory.extend(source,row.payload,end_previous,_endurance_history)
+			if not checked_end.success: return _fail(checked_end.reason)
+			_endurance_history = checked_end
+		end_previous = row.payload
 	if history.generations.is_empty():
 		if new_run or not defeated_checkpoint.is_empty(): return _fail("new_run_profile_checkpoint_missing")
 		if history.get("profile_directory_exists",false): return _fail("empty_profile_history_requires_review")
@@ -92,45 +120,63 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 		if xp_multiplier != null:
 			_run_policy_history = {"legacy_run_count": 0, "runs": [{"run_id": run_id, "xp_multiplier": requested.xp_multiplier}]}
 	else:
-		_prior = history.generations.back().payload.duplicate(true)
-		if _prior.get("profile_namespace") != mode or _prior.character_id != profile_id or _prior.rules_revision != Admission.RULES or _prior.get("lineage",{}).get("baseline_digest") != Profiles.fingerprint(source.to_dictionary()): return _fail("profile_source_namespace_mismatch")
-		if not _prior.has("recovery") or not _prior.has("equipment_state") or not _prior.has("run_history"): return _fail("legacy_profile_requires_explicit_boundary_migration")
-		_runs = _prior.run_history.duplicate()
-		_run_policy_history = _prior.get("run_reward_policy", {}).duplicate(true)
-		_lineage = _prior.lineage.duplicate(true)
-		if _lineage != starter.prepared.payload.lineage: return _fail("profile_lineage_mismatch")
-		_allowed_payloads[Profiles.fingerprint(_prior)] = _lineage.duplicate(true)
-		candidate = Profiles.hydrate(_prior,source,profile_id,Admission.RULES,_verify)
-		if not candidate.success: return candidate
-		var checked := Coordinator.prepare(_prior,_prior.settlements,history.generations.back().transaction_id,int(_prior.generation)-1,[])
-		if not checked.success: return checked
-		# Validate complete receipt ownership, not only structural JSON/checksum.
-		var receipt_check := Coordinator._validate_new_items({},_prior)
-		if not receipt_check.success: return receipt_check
-		generation = int(_prior.generation)
-		items = _prior.items.duplicate(true)
-		receipts = _prior.settlements.duplicate(true)
-		recovery = _prior.recovery.duplicate(true)
-		run_id = recovery.run_id
-		if new_run:
-			if not defeated_checkpoint.is_empty():
-				var expected := {"profile_id":profile_id,"mode":mode,"run_id":run_id,"wave_id":recovery.wave_id,"generation":generation}
-				if defeated_checkpoint.get("intent") == "abandon_unfinished_run":
-					expected["intent"] = "abandon_unfinished_run"
-					expected["head_digest"] = Profiles.fingerprint(_prior)
-					if recovery.phase not in ["entry","downtime"] or defeated_checkpoint != expected: return _fail("abandoned_checkpoint_changed_or_unverified")
-					if mode == ArenaRewardLedger.MODE_NORMAL and requested.xp_multiplier != get_run_reward_policy().xp_multiplier: return _fail("normal_run_policy_changed")
-				elif recovery.phase != "entry" or defeated_checkpoint != expected: return _fail("defeated_checkpoint_changed_or_unverified")
-			elif recovery.phase != "complete": return _fail("new_run_requires_completed_circuit")
-			var condition_policy := validate_new_run_conditions(recovery.player)
-			if not condition_policy.success: return _fail(condition_policy.reason)
-			run_id = _new_run_id()
-			if _runs.has(run_id): return _fail("run_identity_reused")
-			if _run_policy_history.is_empty():
-				_run_policy_history = {"legacy_run_count": _runs.size(), "runs": []}
-			_run_policy_history.runs.append({"run_id": run_id, "xp_multiplier": requested.xp_multiplier})
-			_runs.append(run_id)
-			recovery = {}
+		var opened := _open_existing_verified(starter,history.generations.back().payload,history.generations.back().transaction_id,new_run,defeated_checkpoint,requested)
+		if not opened.success: return opened
+	return _finish_verified_open(starter)
+
+func _open_existing_verified(starter: Dictionary, payload: Dictionary, transaction_id: String, new_run: bool, defeated_checkpoint: Dictionary, requested: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	_prior = payload.duplicate(true)
+	if _prior.get("profile_namespace") != mode or _prior.character_id != profile_id or _prior.rules_revision != Admission.RULES or _prior.get("lineage",{}).get("baseline_digest") != Profiles.fingerprint(source.to_dictionary()): return _fail("profile_source_namespace_mismatch")
+	if not _prior.has("recovery") or not _prior.has("equipment_state") or not _prior.has("run_history"): return _fail("legacy_profile_requires_explicit_boundary_migration")
+	_runs = _prior.run_history.duplicate()
+	_run_policy_history = _prior.get("run_reward_policy", {}).duplicate(true)
+	_lineage = _prior.lineage.duplicate(true)
+	if _lineage != starter.prepared.payload.lineage: return _fail("profile_lineage_mismatch")
+	_allowed_payloads[Profiles.fingerprint(_prior)] = _lineage.duplicate(true)
+	candidate = Profiles.hydrate(_prior,source,profile_id,Admission.RULES,_verify)
+	if not candidate.success: return candidate
+	var checked := Coordinator.prepare(_prior,_prior.settlements,transaction_id,int(_prior.generation)-1,[])
+	if not checked.success: return checked
+	# Validate complete receipt ownership, not only structural JSON/checksum.
+	var receipt_check := Coordinator._validate_new_items({},_prior)
+	if not receipt_check.success: return receipt_check
+	generation = int(_prior.generation)
+	items = _prior.items.duplicate(true)
+	receipts = _prior.settlements.duplicate(true)
+	recovery = _prior.recovery.duplicate(true)
+	run_id = recovery.run_id
+	if new_run:
+		if not defeated_checkpoint.is_empty():
+			var expected := {"profile_id":profile_id,"mode":mode,"run_id":run_id,"wave_id":recovery.wave_id,"generation":generation}
+			if defeated_checkpoint.get("intent") == "abandon_unfinished_run":
+				expected["intent"] = "abandon_unfinished_run"
+				expected["head_digest"] = Profiles.fingerprint(_prior)
+				if recovery.phase not in ["entry","downtime"] or defeated_checkpoint != expected: return _fail("abandoned_checkpoint_changed_or_unverified")
+				if mode == ArenaRewardLedger.MODE_NORMAL and requested.xp_multiplier != get_run_reward_policy().xp_multiplier: return _fail("normal_run_policy_changed")
+			elif recovery.phase != "entry" or defeated_checkpoint != expected: return _fail("defeated_checkpoint_changed_or_unverified")
+		elif recovery.phase != "complete": return _fail("new_run_requires_completed_circuit")
+		var condition_policy := validate_new_run_conditions(recovery.player)
+		if not condition_policy.success: return _fail(condition_policy.reason)
+		run_id = _new_run_id()
+		if _runs.has(run_id): return _fail("run_identity_reused")
+		if _run_policy_history.is_empty():
+			_run_policy_history = {"legacy_run_count": _runs.size(), "runs": []}
+		_run_policy_history.runs.append({"run_id": run_id, "xp_multiplier": requested.xp_multiplier})
+		_runs.append(run_id)
+		recovery = {}
+	return {"success":true}
+
+func _finish_verified_open(starter: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	# Hydration validates against the exact saved source. The admitted actor uses
 	# separately verified runtime skill provenance without rewriting that source.
 	candidate.actor_definition.source_character_definition = starter.runtime_source
@@ -140,6 +186,84 @@ func open_verified_history(starter: Dictionary, history: Dictionary, new_run: bo
 	for purchase: Dictionary in _prior.purchases: _purchases[purchase.purchase_id] = purchase.purchase_id
 	for record: Dictionary in _prior.permanent.growth: _growth[record.growth_id+":"+str(record.level)] = record.growth_id
 	return {"success":true,"recovery":recovery.duplicate(true)}
+
+# Explicit S4 disposable entry point only. open()/browser admission never call
+# this route. It reuses the same verified-character/run admission tail above.
+func open_compact_disposable(route: RefCounted, new_run: bool = false, authorization: Dictionary = {}, xp_multiplier: Variant = null) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	if route == null or not is_instance_of(route,load("res://scripts/rewards/compact_v6_windows_storage.gd")) or not route.valid_context(): return _fail("disposable_compact_route_required")
+	if not authorization.is_empty() and not new_run: return _fail("defeat_restart_requires_new_run")
+	var lease: Dictionary = route.acquire()
+	if not lease.success: return lease
+	var loaded: Dictionary = route.load_current()
+	var released: Dictionary = route.release(lease.owner)
+	if not released.success or not loaded.get("success",false) or loaded.get("empty",false) or loaded.get("exact_recovery_needed",true) or loaded.get("activation_pending",true): return _fail("compact_admission_readback_required")
+	return _open_compact_verified(route,loaded,new_run,authorization,xp_multiplier)
+
+# S5 explicit disposable admission; the asynchronous host must finish a fresh
+# snapshot/full validation/match under its existing Web Lock first.
+func open_compact_browser_disposable(route: RefCounted, new_run: bool = false, authorization: Dictionary = {}, xp_multiplier: Variant = null) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	if route == null or not is_instance_of(route,load("res://scripts/rewards/compact_v6_browser_storage.gd")) or not route.valid_context() or not route.readback_verified(): return _fail("disposable_browser_readback_required")
+	if not authorization.is_empty() and not new_run: return _fail("defeat_restart_requires_new_run")
+	var loaded: Dictionary = route.load_current()
+	if not loaded.get("success",false) or loaded.get("empty",false) or loaded.get("exact_recovery_needed",true): return _fail("compact_admission_readback_required")
+	return _open_compact_verified(route,loaded,new_run,authorization,xp_multiplier)
+
+func _open_compact_verified(route: RefCounted, loaded: Dictionary, new_run: bool, authorization: Dictionary, xp_multiplier: Variant) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	mode = route.scope; profile_id = route.profile; source = route.source; storage = route.guard
+	_compact_active = true
+	var requested := ArenaRewardLedger.resolve_run_policy(mode,xp_multiplier)
+	if not requested.success: return requested
+	var v6: GDScript = load("res://scripts/rewards/compact_character_v6_prototype.gd")
+	var verified: Dictionary = v6.validate(loaded.record,source)
+	if not verified.success: return verified
+	var payload: Dictionary = v6._projection(loaded.record)
+	var starter := Admission.prepare_starter(&"vaelis_thorn",mode,payload.lineage.baseline_digest)
+	if not starter.success or v6.digest(starter.source.to_dictionary()) != loaded.record.source_digest: return _fail("compact_admission_source_mismatch")
+	_endurance_history = {"success":true,"source_digest":loaded.record.source_digest,"head_digest":Profiles.fingerprint(payload),"generation":payload.generation,"end":verified.actor.attributes.end,"growth":verified.end_growth}
+	var opened := _open_existing_verified(starter,payload,loaded.record.operations.back().id,new_run,authorization,requested)
+	return _finish_verified_open(starter) if opened.success else opened
+
+func ack_compact_disposable(result: Dictionary, route: RefCounted) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	if route == null or not route.valid_context() or route.guard != storage or _prepared.is_empty(): return _fail("compact_ack_context_required",false)
+	var windows: bool = is_instance_of(route,load("res://scripts/rewards/compact_v6_windows_storage.gd"))
+	var browser: bool = is_instance_of(route,load("res://scripts/rewards/compact_v6_browser_storage.gd"))
+	if not windows and not (browser and route.readback_verified()): return _fail("compact_ack_context_required",false)
+	var loaded: Dictionary = route.load_current()
+	if not loaded.get("success",false) or loaded.get("exact_recovery_needed",true) or result.get("format") != 6 or result.get("candidate_digest") != loaded.text.sha256_text() or result.get("route_digest") != loaded.route_digest or result.get("request_digest") != Profiles.fingerprint(_prepared) or result.get("transaction_id") != _prepared.get("transaction_id"): return _fail("compact_ack_readback_mismatch",false)
+	var v6: GDScript = load("res://scripts/rewards/compact_character_v6_prototype.gd")
+	var canonical: Dictionary = v6._projection(loaded.record)
+	if canonical != CharacterSaveContract.decode(_prepared.document).payload or result.get("generation") != canonical.generation or result.get("latest_generation") != canonical.generation: return _fail("compact_ack_projection_mismatch",false)
+	var acknowledged := _ack(result)
+	if not acknowledged.success: return acknowledged
+	# V6 stores normalized canonical numbers. Keep the acknowledged service view
+	# byte-consistent with that state, so run-confirmation hashes survive reload.
+	_compact_active = true
+	_compact_ack_binding = Profiles.fingerprint(_prepared.payload)
+	_compact_ack_end_proof = _endurance_history.duplicate(true)
+	_prior = canonical; recovery = canonical.recovery.duplicate(true)
+	_allowed_payloads[Profiles.fingerprint(_prior)] = _lineage.duplicate(true)
+	if not _endurance_history.is_empty(): _endurance_history.head_digest = Profiles.fingerprint(_prior)
+	return acknowledged
 
 func get_run_reward_policy() -> Dictionary:
 	var multiplier: Variant = null
@@ -179,6 +303,11 @@ func _new_run_id() -> String:
 	return test_run_id if not test_run_id.is_empty() else "run_"+Crypto.new().generate_random_bytes(16).hex_encode()
 
 func apply_player(session: ArenaCombatSession) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var state := session.simulation.get_actor_state(&"player")
 	if state == null: return _fail("restoration_player_unavailable")
 	state.inventory_quantities = candidate.permanent.inventory_quantities.duplicate(true)
@@ -190,6 +319,7 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 	state.progression = {"exp_type":source.progression_policy.exp_type,"level":p.level,"expm":candidate.xp.earned,"expc":candidate.xp.unspent,"run_earned_xp":p.xp_baseline.earned,"run_spent_xp":p.xp_baseline.spent,"award_ids":[],"history":[],"base_hpm":source.combat_stats.hpm,"base_resource_maxima":source.resource_maxima.duplicate(true)}
 	if _prior.has("expc_credits"): state.progression["expc_credit_total"] = CharacterSaveContract.Credit.inspect(_prior).total
 	if p.has("development"): state.progression["development"] = p.development.duplicate(true)
+	if _prior.get("recovery",{}).get("player",{}).has("mana_recovery_units"): state.progression["mana_recovery_units"] = _prior.recovery.player.mana_recovery_units
 	state.progression["development_run_id"] = run_id
 	for award: Dictionary in p.award_receipts: state.progression.award_ids.append(award.award_id)
 	for record: Dictionary in p.growth:
@@ -210,6 +340,11 @@ func apply_player(session: ArenaCombatSession) -> Dictionary:
 	return {"success":true}
 
 func restore_ledger(ledger: ArenaRewardLedger) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	ledger.initial_expc = int(source.progression_policy.initial_expc)
 	ledger.expc_credit_total = CharacterSaveContract.Credit.inspect(_prior).get("total",0)
 	ledger.earned_xp = int(candidate.permanent.xp_baseline.earned)
@@ -227,6 +362,11 @@ func restore_ledger(ledger: ArenaRewardLedger) -> void:
 		ledger._next_world_item_sequence = int(recovery.ledger.get("next_world_item_sequence",0))
 
 func bind_runtime(session: ArenaCombatSession) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not recovery.is_empty():
 		if not session.simulation.random.restore_wave_entry(recovery.rng): return _fail("invalid_entry_rng")
 		session.simulation.clock.advance(int(recovery.clock_us))
@@ -300,7 +440,11 @@ func select_instances(actor_id: StringName, definition: String, quantity: int, e
 		if remaining == 0: return {"success":true,"selection":selection}
 	return _fail("owned_quantity_insufficient")
 
-func mutation_guard() -> Dictionary:
+func mutation_guard(command_kind: String = "") -> Dictionary:
+	if _minimal_transactions != null and _minimal_transactions.get_ref() != null and _minimal_transactions.get_ref().has_pending(): return {"success":false,"reason":"minimal_operation_pending"}
+	if _minimal_transactions != null and _minimal_transactions.get_ref() != null:
+		var owned: Dictionary = _minimal_transactions.get_ref().command_guard(command_kind)
+		if not owned.success: return owned
 	if not _failure.is_empty(): return {"success":false,"reason":_failure}
 	if not _prepared.is_empty() and not _last_ack: return {"success":false,"reason":"persistent_checkpoint_pending"}
 	return {"success":true}
@@ -332,6 +476,11 @@ func owned_provenance(ref: String) -> Dictionary:
 	return {"owned_instances":origins}
 
 func ingest(session: ArenaCombatSession) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var batch := session.simulation.get_resolved_events_from(_cursor)
 	if not batch.success: return _fail("ownership_cursor_invalid")
 	for event: CombatEvent in batch.events:
@@ -393,6 +542,11 @@ func _item(id: String) -> Dictionary:
 	return {}
 
 func _sync_items(session: ArenaCombatSession) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var state := session.get_actor_state(&"player")
 	var catalog := _catalog
 	var defense := session.simulation.get_defense_profile(&"player")
@@ -433,6 +587,12 @@ func _sync_items(session: ArenaCombatSession) -> Dictionary:
 	return {"success":true}
 
 func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
+	var minimal_started_us: int = Time.get_ticks_usec() if _minimal_transactions != null else 0
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _reset: return {"success":true,"persistent":false}
 	if phase == "entry" and not session._authorized_entry_write: return _fail("checkpoint_requires_wave_entry_boundary",false)
 	if phase == "downtime" and session.get_encounter_state() != ArenaCombatSession.ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _fail("checkpoint_requires_authoritative_downtime",false)
@@ -448,40 +608,10 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 	var multiplier: int = get_run_reward_policy().xp_multiplier
 	if session.get_run_reward_policy().xp_multiplier != multiplier or ledger.get("xp_multiplier", ArenaRewardLedger.legacy_xp_multiplier(mode)) != multiplier:
 		return _fail("persistent_run_reward_policy_changed")
-	for award: Dictionary in ledger.awards:
-		var key := String(award.get("award_event_id",""))
-		if _awards.has(key): continue
-		var proof: Dictionary = _proved_awards.get(key,{})
-		if proof.get("actor_id") != award.actor_id or proof.get("wave_id") != award.wave_id or proof.get("xp") != award.xp: return _fail("xp_award_authoritative_proof_missing")
-		if not _run_policy_history.is_empty():
-			var base_xp: Variant = award.get("arena_xp")
-			var defeat_event_id := String(award.get("defeat_event_id", ""))
-			if typeof(base_xp) != TYPE_INT or base_xp < 0 or award.xp != base_xp * multiplier or proof.get("arena_xp") != base_xp:
-				return _fail("xp_award_policy_proof_missing")
-			if proof.get("xp_multiplier") != multiplier or award.get("xp_multiplier") != multiplier or defeat_event_id.is_empty() or proof.get("defeat_event_id") != defeat_event_id or proof.get("parent_event_id") != defeat_event_id:
-				return _fail("xp_award_policy_proof_missing")
-		var id := "%s/starter_admission/%s/%s/defeat/%s" % [profile_id,run_id,award.wave_id,award.actor_id]
-		var receipt := {"award_id":id,"xp":int(award.xp)}
-		_awards[key] = receipt
-		_add_receipt("xp","xp_"+id.sha256_text().substr(0,48),{"award_id":id,"amount":award.xp},award.wave_id)
-	for purchase: Dictionary in ledger.purchase_records:
-		var key := String(purchase.request_id)
-		if _purchases.has(key): continue
-		var proof: Dictionary = _proved_purchases.get(String(purchase.get("event_id","")),{})
-		for field: String in Profiles.purchase_fields(purchase):
-			if proof.get(field) != purchase.get(field): return _fail("purchase_authoritative_proof_missing")
-		var id := "%s/starter_admission/%s/%s/purchase/%s/%s" % [profile_id,run_id,session._current_reward_wave_id(),purchase.target_id,purchase.value_after]
-		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") in ["str","dex","spd","wis"]: id += "/request_"+key.sha256_text()
-		_purchases[key] = id
-		_add_receipt("purchase","purchase_"+id.sha256_text().substr(0,48),{"purchase_id":id,"cost":purchase.cost},session._current_reward_wave_id())
-	for record: Dictionary in state.progression.get("history",[]):
-		var key := "%s:%s" % [record.get("award_id",""),record.level]
-		if _growth.has(key): continue
-		if not _awards.has(record.award_id): return _fail("growth_award_proof_missing")
-		var proof: Dictionary = _proved_growth.get(key,{})
-		for field: String in Profiles.HISTORY_FIELDS:
-			if proof.get(field) != record.get(field): return _fail("growth_authoritative_proof_missing")
-		_growth[key] = _awards[record.award_id].award_id+"/level_"+str(record.level)
+	var facts := _collect_progression_facts(session)
+	if not facts.success: return facts
+	if _minimal_transactions != null and _minimal_transactions.get_ref() != null:
+		return _minimal_transactions.get_ref().checkpoint(self,session,phase,minimal_started_us)
 	var equipment := {"hands":state.hand_occupancy.duplicate(true),"handling":state.weapon_handling.duplicate(true)}
 	var checkpoints: Array = _prior.secured_checkpoints.duplicate()
 	if phase != "entry":
@@ -506,7 +636,12 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 	# Repeated unchanged safe boundaries do not publish another generation.
 	var previous := _prior.duplicate(true)
 	previous.generation = payload.generation
-	if generation > 0 and Profiles.fingerprint(previous) == fingerprint: return {"success":true,"generation":generation}
+	var equivalent: bool = Profiles.fingerprint(previous) == fingerprint
+	if _compact_active:
+		var old_encoded := CharacterSaveContract.encode(previous)
+		var new_encoded := CharacterSaveContract.encode(payload)
+		equivalent = old_encoded.success and new_encoded.success and CharacterSaveContract.decode(old_encoded.text).get("payload") == CharacterSaveContract.decode(new_encoded.text).get("payload")
+	if generation > 0 and equivalent: return {"success":true,"generation":generation}
 	if not _prepared.is_empty() and not _last_ack:
 		if fingerprint != _prepared_fingerprint: return _fail("pending_checkpoint_source_changed",false)
 		return reconcile()
@@ -520,6 +655,7 @@ func checkpoint(session: ArenaCombatSession, phase: String) -> Dictionary:
 	return publish_prepared()
 
 func publish_prepared() -> Dictionary:
+	if _minimal_transactions != null: return {"success":false,"reason":"minimal_prototype_has_no_storage"}
 	return _ack(Coordinator.new(storage).commit(_prepared,source,profile_id,Admission.RULES,_verify))
 
 func reconcile() -> Dictionary:
@@ -527,13 +663,63 @@ func reconcile() -> Dictionary:
 	return _ack(Coordinator.new(storage).reconcile(_prepared,source,profile_id,Admission.RULES,_verify))
 
 func _ack(result: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not result.get("success",false) or result.get("recovery_required",false) or result.get("generation") != result.get("latest_generation"): return _fail(String(result.get("reason","checkpoint_acknowledgement_unverified")),false)
+	if EndHistory.has_purchases(_prepared.payload):
+		var checked_end := EndHistory.resolve(source,_prepared.payload,{"previous_payload":_prior,"endurance_history":_endurance_history})
+		if not checked_end.success: return _fail(checked_end.reason,false)
+		_endurance_history = checked_end
 	_prior = _prepared.payload.duplicate(true)
 	generation = int(result.generation)
 	recovery = _prior.recovery.duplicate(true)
 	_last_ack = true
 	_status = {"persistent":true,"reason":"checkpoint_verified","text":"Wave entry saved" if recovery.phase == "entry" else "Progress saved","generation":generation,"profile_namespace":mode}
 	return result
+
+# Shared original receipt/fact normalization. No encoding or history replay.
+func _collect_progression_facts(session: ArenaCombatSession) -> Dictionary:
+	var ledger := session.get_reward_state()
+	var state := session.get_actor_state(&"player")
+	var multiplier: int = get_run_reward_policy().xp_multiplier
+	for award: Dictionary in ledger.awards:
+		var key := String(award.get("award_event_id",""))
+		if _awards.has(key): continue
+		var proof: Dictionary = _proved_awards.get(key,{})
+		if proof.get("actor_id") != award.actor_id or proof.get("wave_id") != award.wave_id or proof.get("xp") != award.xp: return _fail("xp_award_authoritative_proof_missing")
+		if not _run_policy_history.is_empty():
+			var base_xp: Variant = award.get("arena_xp")
+			var defeat_event_id := String(award.get("defeat_event_id", ""))
+			if typeof(base_xp) != TYPE_INT or base_xp < 0 or award.xp != base_xp * multiplier or proof.get("arena_xp") != base_xp:
+				return _fail("xp_award_policy_proof_missing")
+			if proof.get("xp_multiplier") != multiplier or award.get("xp_multiplier") != multiplier or defeat_event_id.is_empty() or proof.get("defeat_event_id") != defeat_event_id or proof.get("parent_event_id") != defeat_event_id:
+				return _fail("xp_award_policy_proof_missing")
+		var id := "%s/starter_admission/%s/%s/defeat/%s" % [profile_id,run_id,award.wave_id,award.actor_id]
+		var receipt := {"award_id":id,"xp":int(award.xp)}
+		_awards[key] = receipt
+		_add_receipt("xp","xp_"+id.sha256_text().substr(0,48),{"award_id":id,"amount":award.xp},award.wave_id)
+	for purchase: Dictionary in ledger.purchase_records:
+		var key := String(purchase.request_id)
+		if _purchases.has(key): continue
+		var proof: Dictionary = _proved_purchases.get(String(purchase.get("event_id","")),{})
+		for field: String in Profiles.purchase_fields(purchase):
+			if proof.get(field) != purchase.get(field): return _fail("purchase_authoritative_proof_missing")
+		var id := "%s/starter_admission/%s/%s/purchase/%s/%s" % [profile_id,run_id,session._current_reward_wave_id(),purchase.target_id,purchase.value_after]
+		if purchase.get("purchase_kind") == "attribute" and purchase.get("target_id") in ["str","dex","spd","wis","end"]: id += "/request_"+key.sha256_text()
+		_purchases[key] = id
+		_add_receipt("purchase","purchase_"+id.sha256_text().substr(0,48),{"purchase_id":id,"cost":purchase.cost},session._current_reward_wave_id())
+	for record: Dictionary in state.progression.get("history",[]):
+		var key := "%s:%s" % [record.get("award_id",""),record.level]
+		if _growth.has(key): continue
+		if not _awards.has(record.award_id): return _fail("growth_award_proof_missing")
+		var proof: Dictionary = _proved_growth.get(key,{})
+		for field: String in Profiles.HISTORY_FIELDS:
+			if proof.get(field) != record.get(field): return _fail("growth_authoritative_proof_missing")
+		_growth[key] = _awards[record.award_id].award_id+"/level_"+str(record.level)
+	return {"success":true}
 
 func _capture(session: ArenaCombatSession, phase: String) -> Dictionary:
 	if not session.player_movement_boundary_provider.is_valid(): return _fail("movement_checkpoint_provider_unavailable")
@@ -544,6 +730,7 @@ func _capture(session: ArenaCombatSession, phase: String) -> Dictionary:
 		player[field] = Array(value) if value is PackedStringArray else (value.duplicate(true) if value is Dictionary or value is Array else value)
 	player["awareness"] = String(state.awareness)
 	if state.progression.has("development"): player["development"] = state.progression.development.duplicate(true)
+	if state.progression.has("mana_recovery_units"): player["mana_recovery_units"] = state.progression.mana_recovery_units
 	var retain: bool = phase != "entry" and not recovery.is_empty() and recovery.wave_id == session._current_reward_wave_id()
 	var opening: Dictionary = recovery.opening.duplicate(true) if retain else {}
 	var positions: Dictionary = recovery.enemy_positions.duplicate(true) if retain else {}
@@ -578,10 +765,19 @@ func _verify(operation: String, binding: String) -> Dictionary:
 		# Only the synchronous source-verified projection may introduce a hash;
 		# disk loads are pinned after full storage/source inspection in open().
 		if _projection_window: _allowed_payloads[binding] = _lineage.duplicate(true)
-		return {"authorized":_allowed_payloads.has(binding),"binding":binding,"lineage":_allowed_payloads.get(binding,{})}
+		# A native ack binds both the unchanged original authorized proposal and
+		# its independently read-back canonical representation. Preserve the exact
+		# already-verified END witness for rechecking that original request only.
+		var end_proof: Dictionary = _compact_ack_end_proof if _compact_active and _last_ack and binding == _compact_ack_binding and not _prepared.is_empty() and Profiles.fingerprint(_prepared.payload) == binding else _endurance_history
+		return {"authorized":_allowed_payloads.has(binding),"binding":binding,"lineage":_allowed_payloads.get(binding,{}),"previous_payload":_prior,"endurance_history":end_proof}
 	return {"authorized":operation == "commit" and _allowed_proposals.has(binding),"binding":binding}
 
 func fixture_reset() -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_reset = true
 	_status = {"persistent":false,"reason":"fixture_reset_is_nonpersistent","text":"Progress not saved"}
 

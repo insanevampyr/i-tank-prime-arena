@@ -1,6 +1,9 @@
 class_name ArenaCombatSession
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const Fixture = preload("res://scripts/combat/prime_v3_vertical_slice_fixture.gd")
 const ArenaBattlefield = preload("res://scripts/combat/arena_battlefield.gd")
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
@@ -132,6 +135,8 @@ var _entry_bootstrap: Dictionary = {}
 var _entry_dice: Array = []
 var player_movement_boundary_provider: Callable
 var player_speed_profile_refresher: Callable
+var mana_recovery_paused := false
+var player_endurance_profile_refresher: Callable
 var _authorized_entry_write := false
 
 
@@ -154,6 +159,11 @@ func initialize(
 	opponent_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	_initial_player_position_microfeet = player_position_microfeet
 	_initial_opponent_position_microfeet = opponent_position_microfeet
@@ -212,6 +222,11 @@ func initialize_wave_one_goblins(
 	first_goblin_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
@@ -330,6 +345,11 @@ func initialize_wave_two_spadoodles(
 	first_spadoodle_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
@@ -427,6 +447,11 @@ func initialize_wave_three_skelly_hades(
 	first_enemy_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
@@ -563,6 +588,11 @@ func initialize_wave_four_gargoyles(
 	first_gargoyle_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
@@ -654,6 +684,11 @@ func initialize_wave_five_rare_human_warrior(
 	boss_position_microfeet: Vector2i,
 	start_active: bool = true
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _profile_binding_requested and start_active: return _failure("profile_requires_precombat_admission")
 	if _initialized:
 		return _failure("encounter_already_initialized")
@@ -811,6 +846,11 @@ func _register_selected_player() -> Dictionary:
 
 
 func prepare_playable_persistence(mode: String, new_run: bool = false, defeated_checkpoint: Dictionary = {}, browser_service: PlayableCharacterPersistence = null, xp_multiplier: Variant = null, existing_only: bool = false) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _initialized: return _failure("persistence_requires_fresh_session")
 	if not _run_reward_policy.is_empty(): return _failure("run_reward_policy_locked")
 	var policy := ArenaRewardLedger.resolve_run_policy(mode, xp_multiplier)
@@ -869,6 +909,11 @@ func get_abandon_run_authorization() -> Dictionary:
 
 
 func finalize_playable_persistence() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _run_reward_policy.is_empty() and not _run_rewards_configured: return _failure("run_reward_policy_not_configured")
 	if _playable_persistence == null: return {"success":true,"persistent":false}
 	_authorized_entry_write = true
@@ -882,6 +927,11 @@ func finalize_playable_persistence() -> Dictionary:
 
 
 func bind_character_profile_before_initialization(source: CombatCharacterDefinitionResource, profile_id: String, rules_revision: String, authority: Callable, isolated_storage: CharacterSaveStorage = null) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _initialized or _profile_binding_requested or not _run_reward_policy.is_empty(): return _failure("profile_binding_requires_new_session")
 	_profile_binding_requested = true
 	# Host-only seam. The current fixtures have no instance/admission authority;
@@ -905,6 +955,7 @@ func get_character_persistence_status() -> Dictionary:
 
 
 func _checkpoint_character(boundary: String) -> Dictionary:
+	if _character_capture_gate != null: _character_capture_gate.checkpoint_boundary(self,boundary)
 	if _playable_persistence != null:
 		return _playable_persistence.checkpoint(self,"entry" if boundary == "next_wave_entry" else ("complete" if boundary == "run_completed" else "downtime"))
 	if not _character_persistence.requires_checkpoint(): return {"success":true,"persistent":false}
@@ -913,6 +964,11 @@ func _checkpoint_character(boundary: String) -> Dictionary:
 
 
 func set_opponent_behavior_enabled(enabled: bool) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_opponent_behavior_enabled = enabled
 	_opponent_behavior_status = "idle" if enabled else "disabled"
 	if enabled and _encounter_active:
@@ -920,6 +976,11 @@ func set_opponent_behavior_enabled(enabled: bool) -> void:
 
 
 func start_encounter() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _run_reward_policy.is_empty() and not _run_rewards_configured: return _failure("run_reward_policy_not_configured")
 	if _playable_persistence is PlayableBrowserPersistence and _playable_persistence.pending_or_unsecured(): return _failure("character_storage_pending")
 	if not _character_persistence.can_start_run():
@@ -942,6 +1003,11 @@ func start_encounter() -> Dictionary:
 
 
 func reset_encounter(start_active: bool = false) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _uses_external_simulation:
 		return _failure("external_simulation_reset_unsupported")
 	_character_persistence.fixture_reset()
@@ -1025,6 +1091,11 @@ func _initialize_reset_fixture(start_active: bool) -> Dictionary:
 
 
 func configure_reward_mode(mode: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _encounter_active:
 		return _failure("reward_mode_locked_during_active_encounter")
 	if _playable_persistence != null and mode != _playable_persistence.mode: return _failure("persistent_profile_mode_locked")
@@ -1073,6 +1144,11 @@ func get_run_reward_policy() -> Dictionary:
 
 
 func request_developer_character_refresh(request_id: String = "") -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _reward_mode != ArenaRewardLedger.MODE_DEV_NORMAL: return _failure("developer_normal_required")
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("safe_downtime_required")
 	return simulation.refresh_developer_character(Fixture.PLAYER_ID,request_id if not request_id.is_empty() else _next_request_id("developer_refresh"))
@@ -1118,12 +1194,19 @@ func request_character_advancement(
 	request_id: String = "",
 	selection: Dictionary = {}
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var eligible := get_character_advancement_eligibility()
 	if not eligible.success: return _failure(eligible.reason)
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id == &"end" and not player_endurance_profile_refresher.is_valid():
+		return _failure("endurance_running_profile_refresh_unavailable")
 	var stable_request_id := request_id
 	if stable_request_id.is_empty():
 		stable_request_id = _next_request_id("character_advancement")
-	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis"]:
+	if _playable_persistence != null and purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis",&"end"]:
 		var prefix := "%s/starter_admission/%s/" % [_playable_persistence.profile_id,_playable_persistence.run_id]
 		var suffix := "/request_"+stable_request_id.sha256_text()
 		for prior: Dictionary in _playable_persistence._prior.get("purchases",[]):
@@ -1132,6 +1215,8 @@ func request_character_advancement(
 		simulation, stable_request_id, purchase_kind, target_id, selection
 	)
 	if result.get("success", false):
+		if purchase_kind == &"attribute" and target_id == &"end" and player_endurance_profile_refresher.is_valid():
+			player_endurance_profile_refresher.call(simulation.get_actor_definition(Fixture.PLAYER_ID))
 		if purchase_kind == &"attribute" and target_id == &"spd" and player_speed_profile_refresher.is_valid():
 			player_speed_profile_refresher.call(simulation.get_actor_definition(Fixture.PLAYER_ID))
 		if _encounter_state == ENCOUNTER_READY and _playable_persistence != null:
@@ -1183,6 +1268,11 @@ func get_player_inventory_entries() -> Array[Dictionary]:
 	return entries
 
 func request_character_development(kind: String, command: Dictionary, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty(): return _failure("missing_request_id")
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("development_requires_safe_downtime")
 	if _playable_persistence != null:
@@ -1196,8 +1286,16 @@ func request_character_development(kind: String, command: Dictionary, request_id
 
 
 func request_player_weapon_handling(definition_id: StringName, operation: String, request_id: String = "") -> Dictionary:
+	if _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _playable_persistence != null:
-		var safe := _playable_persistence.mutation_guard()
+		var safe := _playable_persistence.mutation_guard("equipment")
 		if not safe.success: return safe
 		if operation == "draw" and _encounter_state == ENCOUNTER_BETWEEN_WAVE_DOWNTIME: return _failure("persistent_downtime_draw_requires_inventory_reequip")
 	if _encounter_state not in [ENCOUNTER_RUNNING, ENCOUNTER_BETWEEN_WAVE_DOWNTIME]:
@@ -1209,6 +1307,14 @@ func request_player_weapon_handling(definition_id: StringName, operation: String
 
 
 func request_player_inventory_equip(definition_id: StringName, request_id: String = "") -> Dictionary:
+	if _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var boundary := _validate_inventory_management_boundary()
 	if not boundary.get("success", false):
 		return boundary
@@ -1263,6 +1369,14 @@ func request_player_inventory_equip(definition_id: StringName, request_id: Strin
 
 
 func request_player_inventory_unequip(definition_id: StringName, request_id: String = "") -> Dictionary:
+	if _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var boundary := _validate_inventory_management_boundary()
 	if not boundary.get("success", false):
 		return boundary
@@ -1284,8 +1398,16 @@ func request_player_inventory_unequip(definition_id: StringName, request_id: Str
 
 
 func request_player_inventory_consumable_use(definition_id: StringName, request_id: String = "") -> Dictionary:
+	if _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _playable_persistence != null:
-		var safe := _playable_persistence.mutation_guard()
+		var safe := _playable_persistence.mutation_guard("consumption")
 		if not safe.success: return safe
 	var consumable := InventoryCatalog.get_verified_consumable(String(definition_id))
 	if consumable.is_empty():
@@ -1305,7 +1427,7 @@ func request_player_inventory_consumable_use(definition_id: StringName, request_
 
 func _validate_inventory_management_boundary() -> Dictionary:
 	if _playable_persistence != null:
-		var safe := _playable_persistence.mutation_guard()
+		var safe := _playable_persistence.mutation_guard("equipment")
 		if not safe.success: return safe
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("inventory_management_requires_between_wave_downtime")
@@ -1448,6 +1570,11 @@ func get_ground_loot() -> Array[Dictionary]:
 
 
 func collect_ground_loot(world_item_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _playable_persistence != null:
 		var safe := _playable_persistence.mutation_guard()
 		if not safe.success: return safe
@@ -1463,6 +1590,11 @@ func collect_ground_loot(world_item_id: String) -> Dictionary:
 
 
 func collect_all_ground_loot(request_id: String = "") -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _playable_persistence != null:
 		var safe := _playable_persistence.mutation_guard()
 		if not safe.success: return safe
@@ -1476,6 +1608,11 @@ func collect_all_ground_loot(request_id: String = "") -> Dictionary:
 
 
 func collect_nearest_ground_loot() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _encounter_state != ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
 		return _failure("loot_collection_requires_between_wave_downtime")
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
@@ -1507,12 +1644,22 @@ func collect_nearest_ground_loot() -> Dictionary:
 
 
 func set_arena_bounds_microfeet(bounds: Rect2i) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if bounds.size.x > 0 and bounds.size.y > 0:
 		_arena_bounds_microfeet = bounds
 		_battlefield = ArenaBattlefield.create_open(bounds)
 
 
 func configure_battlefield(battlefield: ArenaBattlefield) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	assert(battlefield != null, "Combat session requires an authoritative battlefield.")
 	_battlefield = battlefield
 	_arena_bounds_microfeet = battlefield.bounds_microfeet
@@ -1536,6 +1683,11 @@ func get_battlefield() -> ArenaBattlefield:
 
 
 func select_target(target_id: StringName) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not get_targetable_enemy_ids().has(String(target_id)):
 		_selected_target_id = &""
 		_last_error = "invalid_target"
@@ -1551,6 +1703,11 @@ func select_target(target_id: StringName) -> Dictionary:
 
 
 func cycle_target(direction: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var candidates := get_targetable_enemy_ids()
 	if candidates.is_empty():
 		clear_target()
@@ -1594,6 +1751,11 @@ static func choose_cycled_target(current_target_id: StringName, candidates: Pack
 
 
 func select_target_location(location_id: StringName) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var location := HitLocations.get_by_id(location_id)
 	if location.is_empty():
 		return _failure("invalid_target_location")
@@ -1609,6 +1771,11 @@ func select_target_location(location_id: StringName) -> Dictionary:
 
 
 func select_target_location_by_number(number: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if number == 8:
 		return select_target_location(
 			HitLocations.LOCATION_8_KNEE
@@ -1622,11 +1789,21 @@ func select_target_location_by_number(number: int) -> Dictionary:
 
 
 func clear_target() -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_selected_target_id = &""
 	_last_error = "no_target_selected"
 
 
 func update_player_position(position_microfeet: Vector2i) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _encounter_active:
 		return _failure("encounter_not_running")
 	if _battlefield.navigation_authoritative:
@@ -1646,6 +1823,11 @@ func update_player_position(position_microfeet: Vector2i) -> Dictionary:
 
 
 func request_player_movement(position_microfeet: Vector2i, effective_mr: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _encounter_active:
 		var inactive_player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
 		return _movement_rejected(
@@ -1719,6 +1901,11 @@ func request_player_movement(position_microfeet: Vector2i, effective_mr: int) ->
 
 
 func request_player_attack(input_source: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var legality := get_attack_legality()
 	if not legality.get("success", false):
 		_last_error = String(legality.get("reason", "attack_illegal"))
@@ -1747,6 +1934,11 @@ func get_opponent_attack_legality() -> Dictionary:
 
 
 func request_player_stand(input_source: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _encounter_active:
 		return _failure("encounter_not_running")
 	var player_state := simulation.get_actor_state(Fixture.PLAYER_ID)
@@ -1835,12 +2027,18 @@ func _get_actor_attack_geometry(attacker_id: StringName, target_id: StringName) 
 
 
 func advance_by(delta_us: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if _playable_persistence is PlayableBrowserPersistence and _playable_persistence.pending_or_unsecured(): return
 	if delta_us < 0:
 		_last_error = "negative_time_delta"
 		return
 	if not _encounter_active:
 		return
+	simulation.mana_recovery_enabled = _is_playable_wave_encounter() and not mana_recovery_paused
 	var target_timestamp_us := simulation.clock.get_elapsed_us() + delta_us
 	_run_opponent_behavior()
 	var iterations := 0
@@ -1876,6 +2074,7 @@ func advance_by(delta_us: int) -> void:
 		if _playable_persistence != null: _playable_persistence.ingest(self)
 		_update_encounter_outcome()
 		if not _encounter_active:
+			simulation.mana_recovery_enabled = false
 			break
 		_run_opponent_behavior()
 		if step_timestamp_us == target_timestamp_us:
@@ -1965,6 +2164,11 @@ func request_player_special(
 	automatic_activation: bool = false,
 	perceived_danger: bool = false
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _playable_persistence != null and special_id == VaelisForce.FORCE_SHIELD_ID and _encounter_state in [ENCOUNTER_BETWEEN_WAVE_DOWNTIME,ENCOUNTER_PLAYER_VICTORY]: return _failure("persistent_frozen_cast_preparation_not_supported")
 	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		return {"success": false, "reason": "player_special_not_available", "resource_spent": 0}
@@ -1995,6 +2199,11 @@ func request_player_special(
 
 
 func cancel_player_force_shield() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		return _failure("player_special_not_available")
 	if _playable_persistence != null:
@@ -2006,6 +2215,11 @@ func cancel_player_force_shield() -> Dictionary:
 
 
 func configure_player_nac_automation(settings: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _player_character_id != Fixture.PLAYER_CHARACTER_VAELIS:
 		return _failure("player_special_not_available")
 	return simulation.configure_nac_automation(Fixture.PLAYER_ID, settings)
@@ -2058,6 +2272,11 @@ func get_last_error() -> String:
 
 
 func initialize_five_wave_arena() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _initialized:
 		return _failure("encounter_not_initialized")
 	if _encounter_active:
@@ -2071,6 +2290,11 @@ func initialize_five_wave_arena() -> Dictionary:
 
 
 func reset_five_wave_arena() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var reset_result := reset_encounter(false)
 	if not reset_result.get("success", false):
 		return reset_result
@@ -2078,6 +2302,11 @@ func reset_five_wave_arena() -> Dictionary:
 
 
 func set_wave_creature_integration_available(creature_id: StringName, available: bool) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _arena_wave_state_machine == null:
 		return _failure("wave_circuit_not_initialized")
 	_arena_wave_state_machine.set_creature_integration_available(creature_id, available)
@@ -2090,6 +2319,11 @@ func set_wave_creature_integration_available(creature_id: StringName, available:
 
 
 func activate_current_wave(active_enemy_ids: PackedStringArray) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _arena_wave_state_machine == null:
 		return _failure("wave_circuit_not_initialized")
 	for actor_id: String in active_enemy_ids:
@@ -2101,6 +2335,11 @@ func activate_current_wave(active_enemy_ids: PackedStringArray) -> Dictionary:
 
 
 func evaluate_current_wave_victory() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _arena_wave_state_machine == null:
 		return _failure("wave_circuit_not_initialized")
 	var states := {}
@@ -2117,6 +2356,11 @@ func evaluate_current_wave_victory() -> Dictionary:
 
 
 func set_session_mode(mode: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not [SESSION_MODE_SOLO, SESSION_MODE_MULTIPLAYER].has(mode):
 		return _failure("unsupported_session_mode")
 	if _encounter_state == ENCOUNTER_BETWEEN_WAVE_DOWNTIME:
@@ -2148,12 +2392,22 @@ func get_between_wave_downtime_state() -> Dictionary:
 
 
 func request_next_wave() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _session_mode != SESSION_MODE_SOLO:
 		return _failure("solo_next_wave_unavailable")
 	return _advance_from_between_wave_downtime("solo_next_wave")
 
 
 func advance_multiplayer_downtime_real_time(delta_ms: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if delta_ms < 0:
 		return _failure("negative_downtime_delta")
 	if _session_mode != SESSION_MODE_MULTIPLAYER:
@@ -2179,6 +2433,11 @@ func advance_multiplayer_downtime_real_time(delta_ms: int) -> Dictionary:
 
 
 func recover_and_advance_wave() -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	# Compatibility boundary: this operation no longer restores resources or
 	# combines downtime entry with advancement.
 	return request_next_wave()

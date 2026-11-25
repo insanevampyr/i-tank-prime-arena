@@ -2,6 +2,11 @@ class_name CharacterLevelProgression
 extends RefCounted
 
 static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: String, xp: int, earned: int, spent: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = sim._character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor := sim.get_actor_definition(actor_id)
 	var state := sim.get_actor_state(actor_id)
 	if actor == null or state == null: return _failure("unknown_actor")
@@ -9,6 +14,7 @@ static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: S
 	var reason := PrimeV3LevelCatalog.validate(policy, actor)
 	if not reason.is_empty(): return _failure(reason)
 	var previous := state.progression
+	if previous.has("mana_recovery_units") and (typeof(previous.mana_recovery_units) != TYPE_INT or previous.mana_recovery_units < 0 or previous.mana_recovery_units >= ArenaManaRecovery.UNITS_PER_MANA): return _failure("invalid_mana_recovery_state")
 	if award_id.is_empty() or xp < 0 or earned < 0 or spent < 0 or spent > earned+int(policy.initial_expc)+int(previous.get("expc_credit_total",0)): return _failure("invalid_progression_award")
 	if (previous.get("award_ids",[]) as Array).has(award_id): return _failure("duplicate_progression_award")
 	if earned != int(previous.get("run_earned_xp",0)) + xp: return _failure("progression_ledger_discontinuity")
@@ -20,8 +26,9 @@ static func apply_award(sim: CombatSimulation, actor_id: StringName, award_id: S
 	var target_level := PrimeV3LevelCatalog.level_for(exp_type,expm)
 	if level > target_level: return _failure("progression_level_discontinuity")
 	var next := previous.duplicate(true)
-	if next.is_empty():
-		next = {"exp_type":exp_type,"level":level,"award_ids":[],"history":[],"base_hpm":actor.get_combat_stat("hpm"),"base_resource_maxima":actor.resource_maxima.duplicate(true)}
+	if next.is_empty() or (next.size() == 1 and next.has("mana_recovery_units")):
+		# Nonpersistent fixtures may accrue a fraction before their first XP award.
+		next.merge({"exp_type":exp_type,"level":level,"award_ids":[],"history":[],"base_hpm":actor.get_combat_stat("hpm"),"base_resource_maxima":actor.resource_maxima.duplicate(true)},false)
 	next["expm"] = expm
 	next["expc"] = int(policy.initial_expc) + earned + int(previous.get("expc_credit_total",0)) - spent
 	next["run_earned_xp"] = earned

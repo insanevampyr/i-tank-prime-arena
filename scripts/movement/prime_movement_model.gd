@@ -1,6 +1,9 @@
 class_name PrimeMovementModel
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const RunningSkillCheckRule = preload("res://scripts/movement/running_skill_check.gd")
 
 enum RunningCheckResult {
@@ -18,6 +21,7 @@ enum RunningRequestResult {
 	COOLDOWN,
 	RECOVERY_REQUIRED,
 	PRONE,
+	CAPTURE_BLOCKED, # Dormant capture rejection; existing enum values unchanged.
 }
 
 enum RunningEndReason {
@@ -68,6 +72,11 @@ func wave_entry_state() -> Dictionary:
 
 
 func restore_wave_entry(value: Dictionary) -> bool:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return false
 	var expected := {"mr":base_mr,"spd":effective_spd,"end":effective_end,"investment":running_skill_investment,"scm":skill_check_modifier,"rb":roll_bonus}
 	if value.get("version") != 1 or value.get("profile") != expected or not value.get("state") is Dictionary or value.state.size() != ENTRY_FIELDS.size() or not value.state.has_all(ENTRY_FIELDS) or not value.get("direction") is Array or value.direction.size() != 2: return false
 	for field: String in ENTRY_FIELDS:
@@ -114,10 +123,30 @@ func _init(
 
 
 func set_movement_modifier_mr(value: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_movement_modifier_mr = value
 
 
+func set_effective_end(value: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
+	assert(value > 0, "Effective END must be positive for Running.")
+	effective_end = value
+
+
 func set_effective_spd(value: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	assert(value >= 0, "Effective SPD cannot be negative.")
 	effective_spd = value
 
@@ -149,6 +178,11 @@ func get_effective_movement_allowance_microfeet() -> int:
 
 
 func set_prone(value: bool) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if _is_prone == value:
 		return
 	_is_prone = value
@@ -219,6 +253,11 @@ func get_last_run_duration_us() -> int:
 
 
 func request_running() -> RunningRequestResult:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return RunningRequestResult.CAPTURE_BLOCKED
 	if _is_prone:
 		return RunningRequestResult.PRONE
 	if _is_running:
@@ -249,6 +288,11 @@ func request_running() -> RunningRequestResult:
 
 
 func stop_running(reason: RunningEndReason = RunningEndReason.INTENTIONAL_STOP) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	assert(reason == RunningEndReason.SHIFT_RELEASED or reason == RunningEndReason.INTENTIONAL_STOP, "External stops must be intentional or a Shift release.")
 	if not _is_running:
 		return
@@ -256,6 +300,11 @@ func stop_running(reason: RunningEndReason = RunningEndReason.INTENTIONAL_STOP) 
 
 
 func advance(delta_us: int, requested_direction: Vector2) -> Vector2:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return Vector2.ZERO
 	assert(delta_us >= 0, "Movement advancement cannot be negative.")
 	if delta_us == 0:
 		return Vector2.ZERO

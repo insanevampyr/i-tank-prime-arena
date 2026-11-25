@@ -1,6 +1,9 @@
 class_name CombatClock
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const ROUND_DURATION_US: int = 5_000_000
 
 var _elapsed_us: int = 0
@@ -26,9 +29,19 @@ func get_round_offset_us_at(timestamp_us: int) -> int:
 
 
 func advance(delta_us: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	assert(delta_us >= 0, "Combat clock advancement cannot be negative.")
 	_elapsed_us += delta_us
 
 
 func reset() -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_elapsed_us = 0

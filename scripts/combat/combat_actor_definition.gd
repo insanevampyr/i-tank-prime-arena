@@ -1,6 +1,9 @@
 class_name CombatActorDefinition
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const AttributeRules = preload("res://scripts/combat/prime_v3_attribute_engine.gd")
 
 const REQUIRED_CORE_ATTRIBUTES := [
@@ -105,6 +108,11 @@ func get_base_combat_stat(field_name: String) -> Variant:
 
 
 func apply_equipment_stat_modifiers(modifiers: Dictionary) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	for field_name: String in ["mr", "dt", "dp"]:
 		var modifier_value: Variant = modifiers.get(field_name, 0)
 		assert(typeof(modifier_value) == TYPE_INT, "Equipment stat modifiers must be integers.")
@@ -121,6 +129,11 @@ func apply_verified_resistance_advancement(
 	expected_current_value: int,
 	target_value: int
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not ["sr", "tb"].has(field_name):
 		return {"success": false, "reason": "unsupported_advancement_field"}
 	if not base_combat_stats.has(field_name) or typeof(base_combat_stats[field_name]) != TYPE_INT:
@@ -141,6 +154,11 @@ func apply_verified_resistance_advancement(
 
 
 func apply_verified_strength_advancement(expected_current_value: int, target_value: int, validate_equipment: bool = true) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if typeof(attributes.get("str")) != TYPE_INT: return {"success":false,"reason":"source_strength_unresolved"}
 	if attributes.str != expected_current_value: return {"success":false,"reason":"stale_advancement_value"}
 	if target_value != expected_current_value+1: return {"success":false,"reason":"advancement_must_increase_one_point"}
@@ -162,6 +180,11 @@ func apply_verified_strength_advancement(expected_current_value: int, target_val
 
 
 func apply_verified_dexterity_advancement(expected: int, target: int, allocation: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if typeof(attributes.get("dex")) != TYPE_INT or attributes.dex != expected: return {"success":false,"reason":"stale_advancement_value"}
 	if expected < 1 or target != expected+1 or target > 20 or allocation not in ["dt","dp"]: return {"success":false,"reason":"invalid_dex_advancement"}
 	var mode := "mana" if progression_policy.get("resource_mode") == "mana" else "regular"
@@ -196,11 +219,46 @@ func preview_verified_speed_advancement(expected: int, target: int) -> Dictionar
 
 
 func apply_verified_speed_advancement(expected: int, target: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var checked := preview_verified_speed_advancement(expected, target)
 	if not checked.success: return checked
 	# All source checks precede mutation. Equipment remains a separate layer.
 	attributes.spd = target
 	for field: String in ["mr", "at"]: base_combat_stats[field] = checked.derived_after[field]
+	apply_equipment_stat_modifiers(equipment_stat_modifiers)
+	return checked
+
+
+func preview_verified_endurance_advancement(expected: int, target: int) -> Dictionary:
+	if typeof(attributes.get("end")) != TYPE_INT or attributes.end != expected: return {"success":false,"reason":"stale_advancement_value"}
+	if expected < 1 or target != expected+1 or target > 20: return {"success":false,"reason":"endurance_mortal_purchase_limit"}
+	var mode: Variant = progression_policy.get("resource_mode")
+	if mode not in ["mana","ability"]: return {"success":false,"reason":"endurance_chart_mode_unavailable"}
+	var source: Variant = field_sources.get("attributes.end",field_sources.get("attributes"))
+	if not source is String or source.is_empty() or unresolved_fields.has("attributes.end") or unresolved_fields.has("attributes"): return {"success":false,"reason":"endurance_source_unavailable"}
+	var before := AttributeRules.lookup("END",expected,"mana" if mode == "mana" else "regular")
+	var after := AttributeRules.lookup("END",target,"mana" if mode == "mana" else "regular")
+	var old_values := {"nal":before.values.NAL.value,"physical_soak":before.values.PS.value,"hpb":before.values.HPB.value}
+	var new_values := {"nal":after.values.NAL.value,"physical_soak":after.values.PS.value,"hpb":after.values.HPB.value}
+	for field: String in old_values:
+		if typeof(base_combat_stats.get(field)) != TYPE_INT or base_combat_stats[field] != old_values[field] or unresolved_fields.has("combat_stats."+field): return {"success":false,"reason":"endurance_derived_source_mismatch"}
+	return {"success":true,"derived_before":old_values,"derived_after":new_values}
+
+
+func apply_verified_endurance_advancement(expected: int, target: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
+	var checked := preview_verified_endurance_advancement(expected,target)
+	if not checked.success: return checked
+	attributes.end = target
+	for field: String in checked.derived_after: base_combat_stats[field] = checked.derived_after[field]
 	apply_equipment_stat_modifiers(equipment_stat_modifiers)
 	return checked
 
@@ -231,6 +289,11 @@ func preview_verified_wisdom_advancement(expected: int, target: int) -> Dictiona
 
 
 func apply_verified_wisdom_advancement(expected: int, target: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var checked := preview_verified_wisdom_advancement(expected,target)
 	if not checked.success: return checked
 	attributes.wis = target

@@ -1,6 +1,9 @@
 class_name ArenaRewardLedger
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const Catalog = preload("res://scripts/rewards/prime_v3_reward_catalog.gd")
 const DropResolver = preload("res://scripts/rewards/prime_v3_random_drop_resolver.gd")
 const Advancement = preload("res://scripts/rewards/prime_v3_advancement_catalog.gd")
@@ -49,6 +52,11 @@ static func resolve_run_policy(p_mode: String, requested: Variant = null) -> Dic
 
 
 func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: int, p_initial_expc: int = 0, xp_multiplier: Variant = null) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var policy := resolve_run_policy(p_mode, xp_multiplier)
 	if not policy.success: return policy
 	if p_initial_expc < 0: return {"success":false,"reason":"invalid_initial_expc"}
@@ -61,6 +69,11 @@ func configure(p_mode: String, p_player_actor_id: StringName, p_player_level: in
 
 
 func begin_wave(wave_id: String) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if current_wave_id == wave_id:
 		return
 	current_wave_id = wave_id
@@ -72,6 +85,11 @@ func process_defeat(
 	defeated_actor_id: StringName,
 	defeat_event_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(defeated_actor_id)
 	if actor_key.is_empty() or defeat_event_id.is_empty():
 		return {"success": false, "reason": "defeat_identity_unresolved"}
@@ -198,6 +216,11 @@ func process_defeat(
 
 
 func note_collection(simulation: CombatSimulation, world_item_id: String) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	collected_world_item_ids[world_item_id] = true
 	_sync(simulation)
 
@@ -223,6 +246,11 @@ func purchase_advancement(
 	target_id: StringName,
 	selection: Dictionary = {}
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return {"success": false, "reason": "advancement_request_id_required"}
 	if processed_purchase_request_ids.has(request_id):
@@ -231,9 +259,9 @@ func purchase_advancement(
 		return {"success": false, "reason": "test_mode_advancement_prohibited"}
 	if target_id == &"dex":
 		if selection.size() != 3 or not selection.get("allocation") is String or selection.allocation not in ["dt","dp"] or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT: return {"success":false,"reason":"explicit_dex_allocation_required"}
-	if target_id in [&"spd",&"wis"]:
+	if target_id in [&"spd",&"wis",&"end"]:
 		if selection.size() != 2 or typeof(selection.get("expected_current_value")) != TYPE_INT or typeof(selection.get("expected_cost")) != TYPE_INT:
-			return {"success":false,"reason":"wisdom_purchase_preview_required" if target_id == &"wis" else "speed_purchase_preview_required"}
+			return {"success":false,"reason":"endurance_purchase_preview_required" if target_id == &"end" else "wisdom_purchase_preview_required" if target_id == &"wis" else "speed_purchase_preview_required"}
 	var matching_option := {}
 	for option: Dictionary in get_purchase_options(simulation):
 		if String(option.get("purchase_kind", "")) == String(purchase_kind) \
@@ -253,7 +281,7 @@ func purchase_advancement(
 		return {"success": false, "reason": "insufficient_xp"}
 	var current_value := int(matching_option.get("current_value", -1))
 	var target_value := int(matching_option.get("target_value", -1))
-	if target_id in [&"dex", &"spd", &"wis"] and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
+	if target_id in [&"dex", &"spd", &"wis", &"end"] and (selection.get("expected_current_value") != current_value or selection.get("expected_cost") != cost): return {"success":false,"reason":"stale_advancement_preview"}
 	var application := simulation.apply_verified_character_advancement(
 		player_actor_id, purchase_kind, target_id, current_value, target_value, String(selection.get("allocation",""))
 	)

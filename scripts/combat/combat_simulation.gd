@@ -1,6 +1,13 @@
 class_name CombatSimulation
 extends RefCounted
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
+const ManaRecovery = preload("res://scripts/combat/arena_mana_recovery.gd")
+# Host-controlled active-wave/menu eligibility; never wall-clock time.
+var mana_recovery_enabled := false
+
 const CriticalConsequenceCatalog = preload("res://scripts/combat/combat_critical_consequence_catalog.gd")
 const HitLocations = preload("res://scripts/combat/combat_hit_location_catalog.gd")
 const MAX_SIGNED_INT_64 := 9_223_372_036_854_775_807
@@ -58,6 +65,11 @@ func has_unresolved_combat_work() -> bool:
 	return false
 
 func request_character_development(actor_id: StringName, request_id: String, kind: String, command: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	# Paid allocation records can only be produced by the purchase transaction.
 	if kind not in ["allocation","preferences"]: return _failure("unsupported_development_command")
 	var state := get_actor_state(actor_id)
@@ -69,7 +81,7 @@ func request_character_development(actor_id: StringName, request_id: String, kin
 		if resolution.defender_id == actor_id and resolution.status in [CombatDefenseResolution.STATUS_RESOLVING,CombatDefenseResolution.STATUS_PENDING_DODGE_DISPLACEMENT]: return _failure("active_defense_resolution")
 	var record: Dictionary = state.progression.get("development",{})
 	if record.is_empty():
-		var initial := CharacterDevelopment.create(int(actor.attributes.get("dex",-1)),int(actor.base_combat_stats.get("dt",-1)),int(actor.base_combat_stats.get("dp",-1)))
+		var initial := CharacterDevelopment.create_for_actor(actor)
 		if not initial.success: return initial
 		record = initial.record
 	if kind == "allocation":
@@ -96,7 +108,7 @@ func _apply_development_base(actor_id: StringName) -> void:
 	if actor == null or state == null or not state.progression.has("development"): return
 	var checked := CharacterDevelopment.inspect(state.progression.development)
 	if not checked.success: return
-	var totals: Dictionary = DexAllocation.validate(checked.allocation).totals
+	var totals: Dictionary = DexAllocation.validate(CharacterDevelopment.runtime_allocation(checked.allocation,actor.source_character_definition)).totals
 	actor.base_combat_stats.dt = totals.dt
 	actor.base_combat_stats.dp = totals.dp
 	actor.base_combat_stats.acc = PrimeV3DexChart.accuracy(totals.dex,"mana" if actor.progression_policy.get("resource_mode") == "mana" else "regular")
@@ -134,6 +146,11 @@ func schedule_event(
 	dependency_event_ids: PackedStringArray = PackedStringArray(),
 	resource_commitments: Dictionary = {}
 ) -> CombatEvent:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return null
 	assert(timestamp_us >= 0, "Combat event timestamps cannot be negative.")
 	var event := _create_event(
 		timestamp_us,
@@ -153,10 +170,20 @@ func schedule_event(
 
 
 func roll_int(min_inclusive: int, max_inclusive: int) -> int:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return 0
 	return random.next_int(min_inclusive, max_inclusive)
 
 
 func set_inventory_instance_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_inventory_instance_resolver = resolver
 
 
@@ -165,30 +192,65 @@ func _select_inventory_instances(actor_id: StringName, definition: String, quant
 
 
 func set_attack_final_line_of_sight_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_attack_final_line_of_sight_resolver = resolver
 
 
 func set_rage_knockback_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_rage_knockback_resolver = resolver
 
 
 func set_special_touch_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_special_touch_resolver = resolver
 
 
 func set_gatherable_material_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_gatherable_material_resolver = resolver
 
 
 func set_world_item_landing_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_world_item_landing_resolver = resolver
 
 
 func set_world_item_pickup_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_world_item_pickup_resolver = resolver
 
 
 func set_thrown_weapon_trajectory_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_thrown_weapon_trajectory_resolver = resolver
 
 
@@ -200,12 +262,22 @@ func get_ability_payment_preview(actor_id: StringName, definition: CombatActionD
 
 
 func apply_character_experience_award(actor_id: StringName, award_id: String, xp: int, earned: int, spent: int) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var result := CharacterLevelProgression.apply_award(self, actor_id, award_id, xp, earned, spent)
 	if result.get("success",false): _state_revision += 1
 	return result
 
 
 func apply_authoritative_midnight_refresh(midnight_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if midnight_id.is_empty():
 		return _failure("midnight_id_required")
 	if _processed_midnight_ids.has(midnight_id):
@@ -242,6 +314,11 @@ func apply_authoritative_midnight_refresh(midnight_id: String) -> Dictionary:
 
 
 func configure_actor_hand_occupancy(actor_id: StringName, assignments: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if _combat_started:
 		return _failure("combat_already_started")
 	var actor_state := get_actor_state(actor_id)
@@ -290,6 +367,14 @@ func get_weapon_handling_preview(actor_id: StringName, weapon_ref: StringName, o
 
 
 func request_weapon_handling(actor_id: StringName, weapon_ref: StringName, operation: String, request_id: String) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty(): return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
 	var plan := get_weapon_handling_preview(actor_id, weapon_ref, operation)
@@ -312,6 +397,7 @@ func request_weapon_handling(actor_id: StringName, weapon_ref: StringName, opera
 
 
 func _commit_weapon_handling(actor_id: StringName, weapon_ref: String, operation: String, plan: Dictionary, request_id: String, parent_event_id: String = "") -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null and not _character_capture_gate.item_completion(self,request_id,parent_event_id): return _failure("temporary_completion_not_owned")
 	var state := get_actor_state(actor_id)
 	var before_hands := state.hand_occupancy.duplicate(true)
 	var before_mode := String(state.weapon_handling.get(weapon_ref, ""))
@@ -357,6 +443,11 @@ func start_gather_material_action(
 	surface_id: String,
 	request_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -389,6 +480,14 @@ func start_equip_hand_item_action(
 	hand: StringName,
 	request_id: String
 ) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -429,6 +528,11 @@ func start_thrown_weapon_attack(
 	strength_requirement: int,
 	source_ref: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if definition == null or definition.delivery_class != &"thrown" or definition.strikes_per_act != 1:
 		return _failure("thrown_weapon_definition_invalid")
 	if required_hands.is_empty() or required_hands.size() > 2 or strength_requirement < 0 or source_ref.is_empty():
@@ -482,6 +586,11 @@ func resolve_thrown_weapon_landing(
 	authoritative_source_ref: String,
 	request_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id):
@@ -567,6 +676,11 @@ func start_world_item_retrieval_action(
 	world_item_id: String,
 	request_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	var actor_definition := get_actor_definition(actor_id)
 	if actor_state == null or actor_definition == null:
@@ -624,6 +738,11 @@ func create_ground_loot_item(
 	origin_event_id: String,
 	provenance: Dictionary = {}
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if world_item_id.is_empty() or origin_event_id.is_empty():
 		return _failure("ground_loot_identity_unresolved")
 	if _world_items.has(world_item_id):
@@ -675,6 +794,11 @@ func transfer_defeated_actor_possession_to_ground(
 	item_definition: Dictionary,
 	origin_event_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -734,6 +858,11 @@ func transfer_defeated_actor_inventory_to_ground(
 	item_definition: Dictionary,
 	origin_event_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -764,6 +893,11 @@ func collect_ground_loot_item(
 	request_id: String,
 	approved_downtime_batch: bool = false
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if approved_downtime_batch and _arena_wave_state.get("state") != "between_wave_downtime":
 		return _failure("downtime_batch_not_available")
 	if request_id.is_empty():
@@ -816,6 +950,11 @@ func collect_ground_loot_item(
 
 
 func collect_all_downtime_loot(collector_actor_id: StringName, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty(): return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
 	if _arena_wave_state.get("state") != "between_wave_downtime": return _failure("downtime_batch_not_available")
@@ -840,6 +979,11 @@ func collect_all_downtime_loot(collector_actor_id: StringName, request_id: Strin
 
 
 func record_tactical_decision(actor_id: StringName, target_id: StringName, payload: Dictionary) -> CombatEvent:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return null
 	return _record_resolved_event(
 		clock.get_elapsed_us(), &"tactical_action_selected", _get_actor_initiative(String(actor_id)),
 		actor_id, target_id, payload.duplicate(true)
@@ -851,6 +995,11 @@ func register_verified_special_damage_definition(
 	special_field: StringName,
 	source_ref: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var key := String(special_id)
 	if key.is_empty() or String(special_field).is_empty() or source_ref.is_empty():
 		return _failure("special_damage_definition_unresolved")
@@ -863,6 +1012,11 @@ func register_verified_special_damage_definition(
 
 
 func begin_combat(entry_opening: Dictionary = {}) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if entry_opening.is_empty(): entry_opening = wave_entry_opening
 	if _combat_started:
 		return _failure("combat_already_started")
@@ -946,6 +1100,11 @@ func begin_combat(entry_opening: Dictionary = {}) -> Dictionary:
 
 
 func register_arriving_wave_combatants(registrations: Array[Dictionary]) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _combat_started:
 		return _failure("combat_not_started")
 	if registrations.is_empty():
@@ -1044,6 +1203,11 @@ func register_arriving_wave_combatants(registrations: Array[Dictionary]) -> Dict
 
 
 func retire_wave_combatants(actor_ids: PackedStringArray) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _combat_started:
 		return _failure("combat_not_started")
 	var ordered := actor_ids.duplicate()
@@ -1099,6 +1263,11 @@ func _validate_arriving_hand_occupancy(actor: CombatActorDefinition, assignments
 
 
 func register_actor(definition: CombatActorDefinition) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if definition == null:
 		return _failure("invalid_actor_definition")
 	if _combat_started:
@@ -1121,6 +1290,11 @@ func register_actor(definition: CombatActorDefinition) -> Dictionary:
 
 
 func register_defense_profile(actor_id: StringName, profile: CombatDefenseProfile) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -1147,6 +1321,11 @@ func register_defense_profile(actor_id: StringName, profile: CombatDefenseProfil
 
 
 func register_damage_protection_profile(actor_id: StringName, profile: CombatDamageProtectionProfile) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -1191,6 +1370,14 @@ func apply_downtime_equipment_transaction(
 	inventory_deltas: Dictionary,
 	request_id: String
 ) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id):
@@ -1283,6 +1470,14 @@ func use_verified_consumable_during_downtime(
 	consumable: Dictionary,
 	request_id: String
 ) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id):
@@ -1343,6 +1538,11 @@ func use_verified_consumable_during_downtime(
 
 
 func register_critical_reaction_attack(actor_id: StringName, definition: CombatAttackDefinition, authoritative_line_of_sight: bool) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -1369,6 +1569,11 @@ func register_critical_reaction_attack(actor_id: StringName, definition: CombatA
 
 
 func set_actor_defense_state(actor_id: StringName, awareness: StringName, conditions: PackedStringArray) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -1398,6 +1603,14 @@ func start_action(
 	request_id: String,
 	dependency_action_ids: PackedStringArray = PackedStringArray()
 ) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null and definition != null and (definition.extension_metadata.has("draw_stowed_weapon") or definition.extension_metadata.has("verified_consumable") or definition.extension_metadata.has("equip_hand_item")):
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if request_id.is_empty():
 		return _failure("missing_request_id")
@@ -1532,6 +1745,11 @@ func start_action(
 
 
 func start_stand_action(actor_id: StringName, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -1554,6 +1772,11 @@ func start_verified_timed_stat_effect_action(
 	definition: CombatActionDefinition,
 	request_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if definition == null:
 		return _failure("invalid_action_definition")
 	var effect: Variant = definition.extension_metadata.get("timed_stat_effect")
@@ -1620,6 +1843,11 @@ func start_verified_special_action(
 	target_location: StringName = &"",
 	authoritative_touch: bool = false
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if definition == null:
 		return _failure("invalid_action_definition")
 	var special: Variant = definition.extension_metadata.get("verified_special")
@@ -1714,6 +1942,14 @@ func start_verified_consumable_healing_action(
 	definition: CombatActionDefinition,
 	request_id: String
 ) -> Dictionary:
+	if actor_id == &"player" and _character_capture_gate != null:
+		var issued: Dictionary = _character_capture_gate.item_entry(self,request_id)
+		if not issued.success: return issued
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if definition == null:
 		return _failure("invalid_action_definition")
 	var consumable: Variant = definition.extension_metadata.get("verified_consumable")
@@ -1765,6 +2001,11 @@ func start_nac_projectile_special(
 	automatic_activation: bool = false,
 	perceived_danger: bool = false
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _combat_started:
 		return _failure("opening_initiative_unresolved")
 	if request_id.is_empty():
@@ -1909,6 +2150,11 @@ func start_physical_attack(
 	is_back_attack: bool = false,
 	nac_attack_context: Dictionary = {}
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _combat_started:
 		return _failure("opening_initiative_unresolved")
 	if request_id.is_empty():
@@ -2115,6 +2361,11 @@ func resolve_pending_defense(
 	request_id: String,
 	dodge_context: CombatDodgeContext = null
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_defense_request_ids.has(request_id):
@@ -2407,6 +2658,11 @@ func resolve_pending_defense_automatically(
 	request_id: String,
 	dodge_environment: CombatDodgeEnvironment = null
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_defense_request_ids.has(request_id):
@@ -2521,6 +2777,11 @@ func complete_pending_dodge_displacement(
 	request_id: String,
 	dodge_context: CombatDodgeContext
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_defense_request_ids.has(request_id):
@@ -2582,6 +2843,11 @@ func complete_pending_dodge_displacement(
 
 
 func resolve_physical_damage(attack_instance_id: String, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_damage_request_ids.has(request_id):
@@ -2742,6 +3008,11 @@ func _apply_force_shield_attacker_knockback(attack: CombatAttackInstance, knockb
 
 
 func resolve_nac_projectile_damage(attack_instance_id: String, request_id: String, interrupt_executing_action: bool = true) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_special_damage_request_ids.has(request_id):
@@ -2845,6 +3116,11 @@ func apply_verified_special_damage(
 	otherwise_applicable_damage: int,
 	request_id: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_special_damage_request_ids.has(request_id):
@@ -3050,6 +3326,11 @@ func schedule_interruption(
 	reason: String,
 	parent_event_id: String = ""
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if not _actions.has(action_instance_id):
 		return _failure("unknown_action")
 	if timestamp_us < clock.get_elapsed_us():
@@ -3072,20 +3353,30 @@ func schedule_interruption(
 
 
 func advance_to(timestamp_us: int) -> Array:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return []
 	assert(timestamp_us >= clock.get_elapsed_us(), "Authoritative combat time cannot move backward.")
 	while not event_queue.is_empty():
 		var next_event := event_queue.peek_next()
 		if next_event.timestamp_us > timestamp_us:
 			break
-		_advance_clock_to(next_event.timestamp_us)
+		_advance_with_mana_to(next_event.timestamp_us)
 		var event := event_queue.pop_next()
 		_resolve_due_event(event)
 		_release_waiting_dependents()
-	_advance_clock_to(timestamp_us)
+	_advance_with_mana_to(timestamp_us)
 	return get_resolved_events()
 
 
 func resolve_all_pending_events() -> Array:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return []
 	while not event_queue.is_empty():
 		advance_to((event_queue.peek_next() as CombatEvent).timestamp_us)
 	return get_resolved_events()
@@ -3097,6 +3388,11 @@ func apply_authoritative_position(
 	facing_millidegrees: int,
 	movement_cost_microfeet: int = 0
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -3143,6 +3439,11 @@ func apply_authoritative_spatial_position(
 	facing_millidegrees: int,
 	movement_cost_microfeet: int = 0
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key):
 		return _failure("unknown_actor")
@@ -3188,6 +3489,11 @@ func apply_authoritative_forced_position(
 	parent_event_id: String,
 	reason: String
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")
@@ -3230,7 +3536,7 @@ func get_effective_actor_combat_stat(actor_id: StringName, field_name: String) -
 	if field_name in ["dt","dp","acc"] and state.progression.has("development"):
 		var development := CharacterDevelopment.inspect(state.progression.development)
 		if not development.success: return null
-		var allocated := DexAllocation.derived(development.allocation,"mana" if get_actor_definition(actor_id).progression_policy.get("resource_mode") == "mana" else "regular")
+		var allocated := DexAllocation.derived(CharacterDevelopment.runtime_allocation(development.allocation,get_actor_definition(actor_id).source_character_definition),"mana" if get_actor_definition(actor_id).progression_policy.get("resource_mode") == "mana" else "regular")
 		if not allocated.success: return null
 		if field_name in ["dt","dp"]: total = int(allocated[field_name])+int(get_actor_definition(actor_id).equipment_stat_modifiers.get(field_name,0))
 		else: total = int(allocated.acc)
@@ -3276,7 +3582,7 @@ func _sync_temporary_dex(actor_id: StringName) -> Dictionary:
 	if active.is_empty() and not state.progression.has("development"): return _success()
 	var record: Dictionary = state.progression.get("development",{})
 	if record.is_empty():
-		var initial := CharacterDevelopment.create(int(actor.attributes.get("dex",-1)),int(actor.base_combat_stats.get("dt",-1)),int(actor.base_combat_stats.get("dp",-1)))
+		var initial := CharacterDevelopment.create_for_actor(actor)
 		if not initial.success: return initial
 		record = initial.record
 	var inspected := CharacterDevelopment.inspect(record)
@@ -3372,6 +3678,11 @@ func get_resolved_events_from(cursor: int) -> Dictionary:
 
 
 func record_arena_wave_event(event_type: StringName, payload: Dictionary = {}) -> CombatEvent:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return null
 	assert(String(event_type).begins_with("arena_wave_"), "Arena wave events must use the reserved arena_wave_ prefix.")
 	return _record_resolved_event(
 		clock.get_elapsed_us(),
@@ -3390,6 +3701,11 @@ func record_reward_event(
 	payload: Dictionary,
 	parent_event_id: String = ""
 ) -> CombatEvent:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return null
 	assert(String(event_type).begins_with("reward_"), "Reward events must use the reserved reward_ prefix.")
 	return _record_resolved_event(
 		clock.get_elapsed_us(), event_type, 0, source_actor_id, target_actor_id,
@@ -3398,6 +3714,11 @@ func record_reward_event(
 
 
 func set_arena_wave_state_snapshot(wave_state: Dictionary) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	var next_snapshot := wave_state.duplicate(true)
 	if _arena_wave_state == next_snapshot:
 		return
@@ -3406,6 +3727,11 @@ func set_arena_wave_state_snapshot(wave_state: Dictionary) -> void:
 
 
 func set_reward_state_snapshot(reward_state: Dictionary) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	var next_snapshot := reward_state.duplicate(true)
 	if _reward_state == next_snapshot:
 		return
@@ -3421,6 +3747,11 @@ func apply_verified_character_advancement(
 	target_value: int,
 	allocation: String = ""
 ) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	var definition := get_actor_definition(actor_id)
 	var state := get_actor_state(actor_id)
@@ -3429,7 +3760,7 @@ func apply_verified_character_advancement(
 	if state.current_hpc == null or int(state.current_hpc) <= 0:
 		return _failure("actor_incapacitated")
 	var expected_target := &"sr" if purchase_kind == &"special_resistance" else (
-		&"tb" if purchase_kind == &"talent_bonus" else (target_id if purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis"] else &"" )
+		&"tb" if purchase_kind == &"talent_bonus" else (target_id if purchase_kind == &"attribute" and target_id in [&"str",&"dex",&"spd",&"wis",&"end"] else &"" )
 	)
 	if expected_target == &"" or target_id != expected_target:
 		return _failure("unsupported_advancement_purchase")
@@ -3440,7 +3771,7 @@ func apply_verified_character_advancement(
 			if state.weapon_handling[ref] != CombatWeaponHandling.ONE_HAND_HOLD: continue
 			var weapon := CombatDefinitionCatalog.load_default_fixture_catalog().get_weapon(StringName(ref))
 			if weapon != null and weapon.effective_hands_required(target_value) != 2: return _failure("stow_or_regrip_before_strength_purchase")
-	if target_id in [&"spd",&"wis"] and not state.current_action_instance_id.is_empty():
+	if target_id in [&"spd",&"wis",&"end"] and not state.current_action_instance_id.is_empty():
 		return _failure("advancement_requires_idle_actor")
 	var preserved_state := {
 		"current_hpc": state.current_hpc,
@@ -3454,12 +3785,12 @@ func apply_verified_character_advancement(
 		if not state.current_action_instance_id.is_empty(): return _failure("advancement_requires_idle_actor")
 		var record: Dictionary = state.progression.get("development",{})
 		if record.is_empty():
-			var initial := CharacterDevelopment.create(expected_current_value,int(definition.base_combat_stats.get("dt",-1)),int(definition.base_combat_stats.get("dp",-1)))
+			var initial := CharacterDevelopment.create_for_actor(definition)
 			if not initial.success: return initial
 			record = initial.record
 		proposed = CharacterDevelopment.append(record,"dex_purchase_%s" % target_value,"dex_purchase",{"before":expected_current_value,"after":target_value,"allocation":allocation})
 		if not proposed.success: return proposed
-	var applied := definition.apply_verified_wisdom_advancement(expected_current_value,target_value) if target_id == &"wis" else definition.apply_verified_speed_advancement(expected_current_value,target_value) if target_id == &"spd" else definition.apply_verified_dexterity_advancement(expected_current_value,target_value,allocation) if target_id == &"dex" else definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
+	var applied := definition.apply_verified_endurance_advancement(expected_current_value,target_value) if target_id == &"end" else definition.apply_verified_wisdom_advancement(expected_current_value,target_value) if target_id == &"wis" else definition.apply_verified_speed_advancement(expected_current_value,target_value) if target_id == &"spd" else definition.apply_verified_dexterity_advancement(expected_current_value,target_value,allocation) if target_id == &"dex" else definition.apply_verified_strength_advancement(expected_current_value,target_value) if target_id == &"str" else definition.apply_verified_resistance_advancement(String(target_id), expected_current_value, target_value)
 	if not applied.get("success", false):
 		return applied
 	if target_id == &"spd" and applied.derived_before.at != applied.derived_after.at:
@@ -3490,6 +3821,11 @@ func apply_verified_character_advancement(
 
 
 func refresh_developer_character(actor_id: StringName, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	# Explicit owner-approved testing exception, not ordinary Prime recovery.
 	if request_id.is_empty(): return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id): return _failure("duplicate_request")
@@ -3520,6 +3856,11 @@ func refresh_developer_character(actor_id: StringName, request_id: String) -> Di
 
 
 func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_key := String(actor_id)
 	if not _actor_states.has(actor_key) or not _actor_definitions.has(actor_key):
 		return _failure("unknown_actor")
@@ -3530,6 +3871,11 @@ func restore_actor_between_wave_resources(actor_id: StringName) -> Dictionary:
 
 
 func take_resolved_events() -> Array:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return []
 	var events := _resolved_events.duplicate()
 	_resolved_events.clear()
 	return events
@@ -3969,6 +4315,11 @@ func _apply_persistent_damage_shield(action: CombatActionInstance, special: Dict
 
 
 func cancel_persistent_damage_shield(actor_id: StringName, shield_id: StringName, request_id: String) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if request_id.is_empty():
 		return _failure("missing_request_id")
 	if _accepted_request_ids.has(request_id):
@@ -4023,6 +4374,7 @@ func _apply_gathered_material(actor_state: CombatActorState, action: CombatActio
 
 
 func _apply_equipped_hand_item(actor_state: CombatActorState, action: CombatActionInstance, parent_event_id: String) -> bool:
+	if action.actor_id == &"player" and _character_capture_gate != null and not _character_capture_gate.item_completion(self,action.request_id,parent_event_id,action,"equip_hand"): return false
 	var equipment_ref := String(action.execution_context.get("equipment_ref", ""))
 	var hand := String(action.execution_context.get("hand", ""))
 	if equipment_ref.is_empty() or not ["left", "right"].has(hand) \
@@ -4314,6 +4666,7 @@ func _apply_verified_consumable_healing(
 	consumable: Dictionary,
 	parent_event_id: String
 ) -> bool:
+	if action.actor_id == &"player" and _character_capture_gate != null and not _character_capture_gate.item_completion(self,action.request_id,parent_event_id,action,"use"): return false
 	var inventory_id := String(consumable.get("inventory_id", ""))
 	var ownership := _select_inventory_instances(action.actor_id,inventory_id,1)
 	var failure_reason := ""
@@ -5390,7 +5743,8 @@ func _apply_successful_dodge(
 	attempt: CombatDefenseAttempt
 ) -> void:
 	var movement_cost := int(dodge_context.movement_cost_microfeet)
-	assert(defender_state.spend_movement(movement_cost), "Validated Dodge movement must remain spendable in the same transaction.")
+	var movement_spent: bool = defender_state.spend_movement(movement_cost)
+	assert(movement_spent, "Validated Dodge movement must remain spendable in the same transaction.")
 	if not dodge_context.in_place_duck:
 		defender_state.set_position(dodge_context.destination_microfeet, defender_state.facing_millidegrees)
 	attempt.resources_spent = {"mr_microfeet": movement_cost}
@@ -6051,8 +6405,66 @@ func _get_actor_initiative(actor_key: String) -> int:
 	return 0 if value == null else int(value)
 
 
+func get_effective_wisdom(actor_id: StringName, timestamp_us: int = -1) -> Variant:
+	var actor := get_actor_definition(actor_id)
+	var state := get_actor_state(actor_id)
+	if actor == null or state == null or typeof(actor.attributes.get("wis")) != TYPE_INT: return null
+	var total: int = actor.attributes.wis
+	var at := clock.get_elapsed_us() if timestamp_us < 0 else timestamp_us
+	var ids: Array = state.timed_stat_effects.keys()
+	ids.sort()
+	for id: String in ids:
+		var effect: Dictionary = state.timed_stat_effects[id]
+		if effect.has("expires_at_us") and effect.expires_at_us != null and int(effect.expires_at_us) <= at: continue
+		var mods: Dictionary = effect.get("stat_modifiers",{})
+		if not mods.has("wis"): continue
+		if typeof(mods.wis) != TYPE_INT: return null
+		total += mods.wis
+	return total
+
+func _advance_with_mana_to(timestamp_us: int) -> void:
+	while clock.get_elapsed_us() < timestamp_us:
+		var boundary := timestamp_us
+		if mana_recovery_enabled:
+			var now := clock.get_elapsed_us()
+			for id: String in _actor_states:
+				var state := get_actor_state(StringName(id))
+				var actor := get_actor_definition(StringName(id))
+				if typeof(state.resources.get("mana")) != TYPE_INT or typeof(actor.resource_maxima.get("mana")) != TYPE_INT or state.resources.mana >= actor.resource_maxima.mana: continue
+				var wisdom: Variant = get_effective_wisdom(StringName(id))
+				var units: int = state.progression.get("mana_recovery_units",0)
+				if units < 0 or units >= ManaRecovery.UNITS_PER_MANA: continue
+				if typeof(wisdom) == TYPE_INT and wisdom > 0:
+					boundary = mini(boundary,now+ManaRecovery.delay(wisdom,units))
+				for effect: Dictionary in state.timed_stat_effects.values():
+					if effect.get("stat_modifiers",{}).has("wis") and typeof(effect.get("expires_at_us")) == TYPE_INT and effect.expires_at_us > now: boundary = mini(boundary,effect.expires_at_us)
+		_advance_clock_to(boundary)
+	# Preserve existing zero-delta movement/condition refresh behavior.
+	if clock.get_elapsed_us() == timestamp_us: _advance_clock_to(timestamp_us)
+
 func _advance_clock_to(timestamp_us: int) -> void:
-	clock.advance(timestamp_us - clock.get_elapsed_us())
+	var before := clock.get_elapsed_us()
+	clock.advance(timestamp_us-before)
+	if mana_recovery_enabled and timestamp_us > before:
+		var ids: Array = _actor_states.keys()
+		ids.sort()
+		for id: String in ids:
+			var state := get_actor_state(StringName(id))
+			var actor := get_actor_definition(StringName(id))
+			if typeof(state.resources.get("mana")) != TYPE_INT or typeof(actor.resource_maxima.get("mana")) != TYPE_INT: continue
+			var wisdom: Variant = get_effective_wisdom(StringName(id),before)
+			if typeof(wisdom) != TYPE_INT: continue
+			var units: int = state.progression.get("mana_recovery_units",0)
+			var old: int = state.resources.mana
+			var recovered := ManaRecovery.step(old,actor.resource_maxima.mana,wisdom,units,timestamp_us-before)
+			if not recovered.success: continue
+			if recovered.units == units and recovered.current == old: continue
+			state.progression["mana_recovery_units"] = recovered.units
+			state.resources.mana = recovered.current
+			state.revision += 1
+			_state_revision += 1
+			if recovered.recovered > 0:
+				_record_resolved_event(timestamp_us,&"mana_recovered",_get_actor_initiative(id),StringName(id),StringName(id),{"resource":"mana","before":old,"after":recovered.current,"maximum":actor.resource_maxima.mana,"recovered":recovered.recovered,"effective_wisdom":wisdom,"fraction_units":recovered.units,"source_ref":"Arena #45D: effective WIS / 2 Mana per active combat minute"})
 	_refresh_actor_movement_budgets()
 	for actor_state: CombatActorState in _actor_states.values():
 		_refresh_actor_timed_conditions(actor_state)
@@ -6080,6 +6492,11 @@ func _is_special_touch_legal(actor_id: StringName, target_id: StringName, fallba
 
 
 func configure_nac_automation(actor_id: StringName, settings: Dictionary) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	var actor_state := get_actor_state(actor_id)
 	if actor_state == null:
 		return _failure("unknown_actor")

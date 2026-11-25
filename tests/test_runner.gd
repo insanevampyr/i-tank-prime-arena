@@ -1,5 +1,38 @@
 extends SceneTree
+const MinimalSnapshotTests = preload("res://tests/test_minimal_character_snapshot.gd")
+const CharacterCaptureGateTests = preload("res://tests/test_character_capture_gate.gd")
+const MinimalTransactionTests = preload("res://tests/test_minimal_character_transactions.gd")
+const SnapshotCommandTests = preload("res://tests/test_snapshot_command_evidence.gd")
+const TemporaryRequestTests = preload("res://tests/test_temporary_character_requests.gd")
+const MinimalSnapshotV3Tests = preload("res://tests/test_minimal_character_snapshot_v3.gd")
+const MinimalV3TransactionTests = preload("res://tests/test_minimal_v3_transactions.gd")
+const MinimalV3WindowsTests = preload("res://tests/test_minimal_v3_windows.gd")
+const CompactV6ReuseTests = preload("res://tests/test_compact_v6_validation_reuse.gd")
+const CompactV6IncrementalTests = preload("res://tests/test_compact_v6_incremental_snapshot.gd")
+const CompactV6SnapshotTests = preload("res://tests/test_compact_v6_snapshot_package.gd")
+const CompactV6BrowserTests = preload("res://tests/test_compact_v6_browser_storage.gd")
+const CompactV6WindowsTests = preload("res://tests/test_compact_v6_windows_storage.gd")
+const CompactV6WindowsCrashTests = preload("res://tests/test_compact_v6_windows_crash.gd")
+const CompactV6WindowsGuardTests = preload("res://tests/test_compact_v6_windows_guards.gd")
 
+const CompactV6Tests = preload("res://tests/test_compact_character_v6.gd")
+const LegacyCompactV6Tests = preload("res://tests/test_legacy_to_compact_v6.gd")
+const CompactV6PerformanceTests = preload("res://tests/test_compact_v6_performance.gd")
+const CompactV6GameplayTests = preload("res://tests/test_compact_v6_gameplay_candidate.gd")
+const CompactV6CreditTests = preload("res://tests/test_compact_v6_credit.gd")
+const CompactV6BackupTests = preload("res://tests/test_compact_v6_backup.gd")
+const CompactV6StorageTests = preload("res://tests/test_compact_v6_storage.gd")
+
+const Task45eBackupTests = preload("res://tests/test_task_45e_backup_integrity.gd")
+
+const Task45dExperienceTests = preload("res://tests/test_task_45d_experience.gd")
+
+const Task45dManaTests = preload("res://tests/test_task_45d_mana_recovery.gd")
+
+const Task45dDexTests = preload("res://tests/test_task_45d_dex_correction.gd")
+
+const PermanentEndTests = preload("res://tests/test_permanent_end_advancement.gd")
+const EndHpmReplayTests = preload("res://tests/test_end_hpm_replay.gd")
 const PermanentWisTests = preload("res://tests/test_permanent_wis_advancement.gd")
 const WisdomManaReplayTests = preload("res://tests/test_wisdom_mana_replay.gd")
 
@@ -225,6 +258,34 @@ func _run_tests() -> void:
 	]
 	suites.append({"name":"44B permanent WIS","instance":PermanentWisTests.new()})
 	suites.append({"name":"44B historical Mana replay","instance":WisdomManaReplayTests.new()})
+	suites.append({"name":"45B HPB generation replay","instance":EndHpmReplayTests.new()})
+	suites.append({"name":"45B permanent END","instance":PermanentEndTests.new()})
+	suites.append({"name":"45D DEX correction","instance":Task45dDexTests.new()})
+	suites.append({"name":"45D Mana recovery","instance":Task45dManaTests.new()})
+	suites.append({"name":"45D Experience","instance":Task45dExperienceTests.new()})
+	suites.append({"name":"45E backup integrity","instance":Task45eBackupTests.new()})
+	suites.append({"name":"45K compact V6 prototype","instance":CompactV6Tests.new()})
+	suites.append({"name":"45L legacy to compact V6","instance":LegacyCompactV6Tests.new()})
+	suites.append({"name":"45P exact lifetime lookup","instance":CompactV6PerformanceTests.new()})
+	suites.append({"name":"45Q gameplay candidate","instance":CompactV6GameplayTests.new()})
+	suites.append({"name":"45R native compact credit","instance":CompactV6CreditTests.new()})
+	suites.append({"name":"45W snapshot package","instance":CompactV6SnapshotTests.new()})
+	suites.append({"name":"45X incremental snapshot","instance":CompactV6IncrementalTests.new()})
+	suites.append({"name":"45Y checked operation","instance":CompactV6ReuseTests.new()})
+	suites.append({"name":"46B minimal snapshot","instance":MinimalSnapshotTests.new()})
+	suites.append({"name":"46C1 shared capture gate","instance":CharacterCaptureGateTests.new()})
+	suites.append({"name":"46C2 routine transactions","instance":MinimalTransactionTests.new()})
+	suites.append({"name":"46D command evidence","instance":SnapshotCommandTests.new()})
+	suites.append({"name":"46F temporary requests","instance":TemporaryRequestTests.new()})
+	suites.append({"name":"46G compact snapshot v3","instance":MinimalSnapshotV3Tests.new()})
+	suites.append({"name":"46H v3 coordinator","instance":MinimalV3TransactionTests.new()})
+	suites.append({"name":"46I Windows v3 publication","instance":MinimalV3WindowsTests.new()})
+	suites.append({"name":"45T browser compact route","instance":CompactV6BrowserTests.new()})
+	suites.append({"name":"45S Windows compact route","instance":CompactV6WindowsTests.new()})
+	suites.append({"name":"45S hard crash","instance":CompactV6WindowsCrashTests.new()})
+	suites.append({"name":"45S Windows guards","instance":CompactV6WindowsGuardTests.new()})
+	suites.append({"name":"45N portable compact backup","instance":CompactV6BackupTests.new()})
+	suites.append({"name":"45M disposable compact storage","instance":CompactV6StorageTests.new()})
 	var requested_suite := ""
 	for argument: String in OS.get_cmdline_user_args():
 		if argument.begins_with("--suite="):

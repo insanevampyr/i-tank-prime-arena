@@ -91,7 +91,7 @@ func legacy() -> void:
 		var old := Admission.prepare_starter(&"vaelis_thorn",mode,digest)
 		check(old.success,"Exact historical authored baseline must remain available in both namespaces.")
 		if old.success:
-			check(old.actor.combat_stats.dt == 3 and old.actor.combat_stats.dp == 6 and old.prepared.payload.lineage.baseline_digest == digest,"Historical profile remains 3/6 with unchanged lineage.")
+			check(old.actor.combat_stats.dt == 6 and old.actor.combat_stats.dp == 3 and old.prepared.payload.lineage.baseline_digest == digest and old.source.combat_stats.dt == 3 and old.source.combat_stats.dp == 6,"45D corrects live Dodge to 6/3 while retaining exact historical 3/6 lineage.")
 			legacy_playable(old,mode)
 	check(current.combat_stats.dt == 6 and not Admission.prepare_starter(&"vaelis_thorn","normal","arbitrary_digest").success,"Legacy compatibility must not mutate new definitions or accept arbitrary histories.")
 
@@ -126,7 +126,7 @@ func legacy_playable(starter: Dictionary, mode: String) -> void:
 		var loaded := reloaded.open(mode)
 		PlayableCharacterPersistence.test_storage = prior_storage
 		check(loaded.success,"Existing 3/6 history must load under new 6/3 authored definition.")
-		if loaded.success: check(reloaded.candidate.actor_definition.combat_stats.dt == 3 and reloaded.candidate.actor_definition.combat_stats.dp == 6,"Reload must not redistribute historical allocation.")
+		if loaded.success: check(reloaded.candidate.actor_definition.combat_stats.dt == 6 and reloaded.candidate.actor_definition.combat_stats.dp == 3,"Reload reapplies the approved runtime baseline correction without rewriting history.")
 		var backup := CharacterBackupContract.create(storage.inspect_profile(starter.profile_id),mode,"2026-11-02T00:00:00Z")
 		check(backup.success,"Legacy complete history must still export and validate without migration: %s" % backup.get("reason",""))
 		if backup.success: check(CharacterBackupContract.decode(backup.text,mode).success,"Legacy backup preview remains compatible.")

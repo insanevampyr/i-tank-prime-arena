@@ -780,6 +780,7 @@ func _request_attack(input_source: String) -> Dictionary:
 
 
 func _advance_session_with_attack_hold(delta_us: int) -> void:
+	_session.mana_recovery_paused = is_character_sheet_visible() or _combat_inventory_open or is_transcript_visible() or not _application_has_focus
 	if delta_us < 0:
 		_session.advance_by(delta_us)
 		return
@@ -1207,6 +1208,7 @@ func _prepare_encounter_candidate(reward_policy: Dictionary, new_run: bool = fal
 		return running_validation
 	_session.player_movement_boundary_provider = _player.capture_wave_entry_motion
 	_session.player_speed_profile_refresher = _player.refresh_permanent_speed_profile
+	_session.player_endurance_profile_refresher = _player.refresh_permanent_endurance_profile
 	if browser_service != null and not browser_service.recovery.is_empty() and not _player.restore_wave_entry_motion(browser_service.recovery.movement):
 		_session = previous_session
 		return {"success":false,"reason":"running_entry_application_failed"}
@@ -1545,6 +1547,7 @@ func _adopt_browser_candidate() -> void:
 		candidate._encounter_active = candidate._encounter_state == ArenaCombatSession.ENCOUNTER_RUNNING
 	candidate.player_movement_boundary_provider = _player.capture_wave_entry_motion
 	candidate.player_speed_profile_refresher = _player.refresh_permanent_speed_profile
+	candidate.player_endurance_profile_refresher = _player.refresh_permanent_endurance_profile
 	var presented := _present_loaded_session(_web_operation.kind != "next")
 	if not presented.success:
 		# Pre-adoption validation below ensures this is never a speculative apply.
@@ -2291,7 +2294,7 @@ func _on_purchase_advancement_pressed() -> void:
 		return
 	var option: Dictionary = _advancement_options[_advancement_option.selected]
 	var selection := {"allocation":option.get("allocation",""),"expected_current_value":option.get("current_value"),"expected_cost":option.get("cost")}
-	if option.get("target_id") in ["spd","wis"]: selection.erase("allocation")
+	if option.get("target_id") in ["spd","wis","end"]: selection.erase("allocation")
 	var result := _session.request_character_advancement(
 		StringName(String(option.get("purchase_kind", ""))),
 		StringName(String(option.get("target_id", ""))), "",
@@ -2443,6 +2446,11 @@ func _update_rewards_panel_text(
 	var item := _selected_inventory_entry()
 	var inventory_text := "No collected or equipped items"
 	var player_actor := _session.simulation.get_actor_definition(Fixture.PLAYER_ID)
+	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "end":
+		var endurance := player_actor.preview_verified_endurance_advancement(int(option.current_value),int(option.target_value))
+		if endurance.success:
+			availability += "\nEND %s -> %s | NAL %s -> %s | PS %s -> %s | HPB %s -> %s | %s EXPC | Available EXPC %s." % [option.current_value,option.target_value,endurance.derived_before.nal,endurance.derived_after.nal,endurance.derived_before.physical_soak,endurance.derived_after.physical_soak,endurance.derived_before.hpb,endurance.derived_after.hpb,option.cost,rewards.get("unspent_xp",0)]
+			availability += "\nHPM/HPC unchanged. Future level-ups use the new HPB. Running limit %s -> %s seconds." % [int(option.current_value)*5,int(option.target_value)*5]
 	if option.get("purchase_kind") == "attribute" and option.get("target_id") == "wis":
 		var wisdom := player_actor.preview_verified_wisdom_advancement(int(option.current_value),int(option.target_value))
 		if wisdom.success:

@@ -3,6 +3,7 @@ extends RefCounted
 
 const Rules = preload("res://scripts/combat/prime_v3_attribute_engine.gd")
 const QUICK := {
+	"EXPERIENCE":"EXPM determines level using verified class/EXP Type thresholds. The bar measures only progress within the current level. EXPC spending and EXPC-only credits do not increase EXPM. Recorded spending covers validated purchases; unavailable history is not guessed.",
 	"STR":"Strength affects source-defined strength, force and carrying statistics.",
 	"END":"Endurance governs its verified protection, soak and level-growth references.",
 	"SPD":"Speed governs Movement Rate and Action Total in its applicable chart.",
@@ -19,6 +20,7 @@ const QUICK := {
 	"HPB":"Hit Point Bonus contributes to source-legal level growth; it does not refill current health.",
 	"SS":"Special Success governs eligible casting and learning checks.",
 	"MSL":"Max Special Level limits eligible learning; it does not grant a Special.",
+	"MR/Min":"Arena Mana Recovery per Minute equals effective WIS / 2. Whole Mana recovers only during active combat time, below maximum. READY, downtime, menus and paused time do not recover Mana. Fractional progress is retained in verified checkpoints.",
 	"MR/H":"Mana Recovery per Hour is a printed Mana-user statistic. Arena does not grant automatic downtime recovery.",
 	"S#":"Skill Number describes the source-defined skill limit.",
 	"SCM":"Skill Check Modifier applies to eligible skill checks.",
@@ -58,7 +60,7 @@ const DETAILS := {
 	"DEX":"Prime V3 p. 20: DEX is the allocation pool shared by DT and DP; ACC follows its chart. DEX 9 and 10 both have ACC 9; DEX 11 has ACC 10. A DEX purchase can improve Dodge without changing ACC. Permanent purchases explicitly assign the new point to DT or DP. Previously confirmed allocations remain locked under the approved Arena development rules. Temporary effects and equipment remain separate.",
 	"DT":"Prime V3 p. 20 distinguishes Dodge Touch from Dodge Projectile. Dodge requires legal circumstances and geometry. A successful Dodge may move up to half the applicable MR, rounded down, and must evade the attack. This window does not perform or queue a Dodge. Approved Arena rules preserve signed effective Dodge values and natural critical behavior.",
 	"DP":"Prime V3 p. 20 assigns thrown weapons and magical projectiles to Dodge Projectile. Eligibility, movement geometry and remaining movement are checked by combat. The permanent allocation is separate from armor penalties and temporary modifiers. No Dodge roll is performed by inspection.",
-	"STATS":"Original values come from the character's immutable authored definition. Permanent values come from the admitted actor and validated progression. Effective derived values come from existing combat getters. Equipment and temporary effects do not rewrite the permanent allocation. '--' means no verified value is available; it does not mean zero. Chart-only references are never substituted for missing live statistics.",
+	"STATS":"Original values come from the character's immutable authored definition. Permanent values come from the admitted actor and validated progression. Effective derived values come from existing combat getters. Equipment and temporary effects do not rewrite the permanent allocation. '--' means no verified value is available; it does not mean zero. MSL is shown as its verified WIS chart reference without granting learning access; MR/Min follows the explicit Arena WIS/2 rule. Other missing live statistics remain unavailable.",
 	"RESOURCES":"HPC/HPM, Mana and Ability Points retain their existing current/max distinctions. Purchased attributes and level growth follow their approved event-time rules. This read-only sheet does not refill, clamp, spend or recalculate resources. Active combat continues while this window is open.",
 	"SKILLS":"Balance uses the existing verified evaluator, effective DEX, sourced training, SI, SCM and RB. Its displayed target is a pure reference query; no die is rolled. Other authored skills may have no integrated check yet. Explicitly untrained, unknown and source-recorded automatic proficiency are different states. No new skill progression or automatic checks are created here.",
 	"SPECIALS":"Mana costs, ordinary Acts versus NAC timing, range, known daily allowances and active protection are displayed only where verified. Target, line of sight, timing, defenses and resources are still checked by the normal combat pipeline when a Special is actually used. No cast, assignment, learning or purchase controls exist in this window.",

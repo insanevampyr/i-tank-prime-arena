@@ -1,6 +1,9 @@
 class_name PlaceholderPlayer
 extends CharacterBody2D
 
+# Opt-in dormant capture coordination; null preserves the original path.
+var _character_capture_gate: RefCounted
+
 const PrimeMovementModel = preload("res://scripts/movement/prime_movement_model.gd")
 const DeterministicCombatRng = preload("res://scripts/combat/deterministic_rng.gd")
 const ArenaPlayerInputIntent = preload("res://scripts/input/arena_player_input_intent.gd")
@@ -53,12 +56,22 @@ func _draw() -> void:
 
 
 func reset_for_encounter(position_feet: Vector2) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_reset_movement_model(position_feet)
 	position = position_feet * pixels_per_foot
 	_update_debug_label()
 
 
 func _reset_movement_model(position_feet: Vector2) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_movement_rng = DeterministicCombatRng.new(test_rng_seed)
 	_movement = PrimeMovementModel.new(
 		test_base_mr,
@@ -77,6 +90,11 @@ func _reset_movement_model(position_feet: Vector2) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_delta_us_remainder += delta * 1_000_000.0
 	var delta_us := floori(_delta_us_remainder)
 	_delta_us_remainder -= float(delta_us)
@@ -139,6 +157,11 @@ static func resolve_keyboard_run(shift_pressed: bool, keyboard_blocked: bool) ->
 
 
 func apply_authoritative_combat_position(position_feet: Vector2) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if _movement == null:
 		return
 	_movement.position_feet = position_feet
@@ -146,17 +169,32 @@ func apply_authoritative_combat_position(position_feet: Vector2) -> void:
 
 
 func set_combat_movement_locked(locked: bool) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_combat_movement_locked = locked
 	if locked and _movement != null:
 		_movement.stop_running(PrimeMovementModel.RunningEndReason.INTENTIONAL_STOP)
 
 
 func set_prone(prone: bool) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if _movement != null:
 		_movement.set_prone(prone)
 
 
 func set_authoritative_movement_resolver(resolver: Callable) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	_authoritative_movement_resolver = resolver
 
 
@@ -180,6 +218,11 @@ func capture_wave_entry_motion() -> Dictionary:
 
 
 func restore_wave_entry_motion(value: Dictionary) -> bool:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return false
 	var candidate := PrimeMovementModel.new(test_base_mr,test_effective_spd,test_effective_end,test_running_skill_investment,test_skill_check_modifier,test_roll_bonus,DeterministicCombatRng.new(test_rng_seed))
 	if not candidate.restore_wave_entry(value): return false
 	candidate.position_feet = position / pixels_per_foot
@@ -190,12 +233,33 @@ func restore_wave_entry_motion(value: Dictionary) -> bool:
 
 
 func refresh_equipped_movement_rate(effective_mr: int) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	if _movement != null:
 		_movement.base_mr = effective_mr
 		test_base_mr = effective_mr
 
 
+func refresh_permanent_endurance_profile(actor_definition: CombatActorDefinition) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
+	# Preserve the Running object, timers, recovery debt, direction and RNG.
+	test_effective_end = int(actor_definition.attributes.end)
+	if _movement != null: _movement.set_effective_end(test_effective_end)
+
+
 func refresh_permanent_speed_profile(actor_definition: CombatActorDefinition) -> void:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return
 	# Refresh only profile values, preserving dynamic Running state and its RNG.
 	test_effective_spd = int(actor_definition.attributes.spd)
 	refresh_equipped_movement_rate(int(actor_definition.get_combat_stat("mr")))
@@ -203,6 +267,11 @@ func refresh_permanent_speed_profile(actor_definition: CombatActorDefinition) ->
 
 
 func configure_authoritative_actor_profile(actor_definition: CombatActorDefinition) -> Dictionary:
+	var _capture_scope: RefCounted
+	var _capture_owner: RefCounted = _character_capture_gate
+	if _capture_owner != null:
+		_capture_scope = _capture_owner.enter_mutation()
+		if _capture_scope == null: return {"success":false,"reason":"character_capture_in_progress"}
 	if actor_definition == null:
 		return {"success": false, "reason": "missing_actor_definition"}
 	for field_name: String in ["mr", "rb"]:
